@@ -130,7 +130,7 @@ provision_infra() {
     gcloud spanner instances create "${SPANNER_INST}" \
       --project="${PROJECT_ID}" \
       --config="regional-${REGION}" \
-      --description="OKF Graph-RAG Knowledge Base (${SPANNER_INST})" \
+      --description="${SPANNER_INST:0:30}" \
       --processing-units="${SPANNER_PU}" \
       --edition=ENTERPRISE
   else
