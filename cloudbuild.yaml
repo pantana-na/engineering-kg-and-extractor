@@ -1,0 +1,38 @@
+# Google Cloud Build Pipeline for Extracter Agent & Spanner Query Agent
+# Complies with Rule 5: Automated Build & Quality Gate
+
+steps:
+  # 1. Install dependencies
+  - name: 'python:3.13-slim'
+    id: 'install-deps'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --no-cache-dir .[dev]
+
+  # 2. Run Quality Gate: Unit & Property-Based Tests
+  - name: 'python:3.13-slim'
+    id: 'run-tests'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --no-cache-dir .[dev]
+        pytest tests/ evals/ -v
+
+  # 3. Validate OKF Bundle Synthesis
+  - name: 'python:3.13-slim'
+    id: 'verify-okf-bundle'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --no-cache-dir .[dev]
+        python -m extracter_agent.cli --publish-gcs
+
+substitutions:
+  _ENVIRONMENT: 'nonprod'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

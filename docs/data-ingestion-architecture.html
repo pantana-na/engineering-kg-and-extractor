@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OKF Extracter Agent — Dual-Mode Data Ingestion &amp; Extraction Architecture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=Roboto+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --m3-canvas: #F8F9FA;
+      --m3-surface: #FFFFFF;
+      --m3-surface-subtle: #F1F3F4;
+      --m3-surface-variant: #E8EAED;
+      --m3-border: #DADCE0;
+      --m3-border-subtle: #ECEFF1;
+      --m3-border-strong: #BDC1C6;
+      --m3-primary: #1A73E8;
+      --m3-primary-hover: #1557B0;
+      --m3-primary-container: #E8F0FE;
+      --m3-on-primary-container: #174EA6;
+      --m3-critical: #D93025;
+      --m3-critical-container: #FCE8E6;
+      --m3-on-critical: #C5221F;
+      --m3-success: #1E8E3E;
+      --m3-success-container: #E6F4EA;
+      --m3-text-primary: #202124;
+      --m3-text-secondary: #5F6368;
+      --m3-text-tertiary: #80868B;
+      --font-serif: 'Playfair Display', Georgia, serif;
+      --font-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'Roboto Mono', monospace;
+      --shadow-xs: 0 1px 2px rgba(60,64,67,0.05);
+      --shadow-sm: 0 1px 3px rgba(60,64,67,0.08), 0 1px 2px rgba(60,64,67,0.04);
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-full: 9999px;
+      --sp-1: 8px;
+      --sp-2: 16px;
+      --sp-3: 24px;
+      --sp-4: 32px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--m3-canvas);
+      color: var(--m3-text-primary);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    header.app-header {
+      background-color: var(--m3-surface);
+      border-bottom: 1px solid var(--m3-border);
+      height: 56px;
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 200;
+    }
+
+    .brand-cluster { display: flex; align-items: center; gap: 14px; }
+    .brand-logo-icon { width: 22px; height: 22px; color: var(--m3-primary); }
+    .brand-title { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; }
+    .header-sep { color: var(--m3-border-strong); font-size: 14px; }
+    .header-sys-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--m3-success-container); color: #137333; border: 1px solid #CEEAD6;
+      border-radius: var(--radius-full); padding: 3px 10px;
+      font-size: 11px; font-family: var(--font-mono); font-weight: 700; letter-spacing: 0.3px;
+    }
+    .sys-dot-live { width: 6px; height: 6px; border-radius: 50%; background: var(--m3-success); }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 8px 16px; border-radius: var(--radius-sm);
+      font-family: var(--font-sans); font-size: 13px; font-weight: 600;
+      cursor: pointer; border: 1px solid var(--m3-border);
+      background: var(--m3-surface); color: var(--m3-text-primary);
+      transition: all 0.15s; text-decoration: none;
+    }
+    .btn:hover { background-color: var(--m3-surface-subtle); }
+    .btn-primary { background: var(--m3-primary); color: #fff; border-color: var(--m3-primary); }
+    .btn-primary:hover { background: var(--m3-primary-hover); }
+
+    .container {
+      margin: 0 auto;
+      max-width: 1280px;
+      padding: var(--sp-4) var(--sp-3) 64px var(--sp-3);
+    }
+
+    .eyebrow {
+      font-size: 11px; font-weight: 700; color: var(--m3-primary);
+      letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 4px;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1.25;
+      margin-bottom: 8px;
+      color: var(--m3-text-primary);
+    }
+
+    .subtitle {
+      color: var(--m3-text-secondary);
+      font-size: 13.5px;
+      margin-bottom: var(--sp-3);
+      font-family: var(--font-mono);
+    }
+
+    .diagram-container {
+      background: var(--m3-surface);
+      border: 1px solid var(--m3-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-xs);
+      overflow-x: auto;
+      padding: var(--sp-3);
+    }
+
+    svg {
+      display: block;
+      min-width: 1080px;
+      width: 100%;
+      font-family: var(--font-mono);
+    }
+
+    .cards {
+      display: grid;
+      gap: var(--sp-3);
+      grid-template-columns: repeat(3, 1fr);
+      margin-top: var(--sp-3);
+    }
+
+    .card {
+      background: var(--m3-surface);
+      border: 1px solid var(--m3-border);
+      border-radius: var(--radius-md);
+      padding: var(--sp-3);
+      box-shadow: var(--shadow-xs);
+    }
+
+    .card-header {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .card-dot {
+      border-radius: 50%;
+      height: 8px;
+      width: 8px;
+    }
+
+    .card-dot.blue { background: var(--m3-primary); }
+    .card-dot.green { background: var(--m3-success); }
+    .card-dot.red { background: var(--m3-critical); }
+
+    .card h3 {
+      font-family: var(--font-serif);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--m3-text-primary);
+    }
+
+    .card ul {
+      color: var(--m3-text-secondary);
+      font-size: 12.5px;
+      line-height: 1.55;
+      list-style: none;
+    }
+
+    .card li { margin-bottom: 8px; }
+    .card code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      background: var(--m3-surface-subtle);
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: var(--m3-text-primary);
+    }
+
+    .footer {
+      color: var(--m3-text-tertiary);
+      font-size: 12px;
+      font-family: var(--font-mono);
+      margin-top: var(--sp-3);
+      text-align: center;
+    }
+
+    @media (max-width: 960px) {
+      .cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-cluster">
+      <svg class="brand-logo-icon" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+      <span class="brand-title">P&amp;ID-to-OKF v0.2 Autonomous Compiler</span>
+      <span class="header-sep">|</span>
+      <div class="header-sys-badge"><span class="sys-dot-live"></span><span>SYS: ONLINE &bull; GEMINI 3.8 FLASH GLOBAL</span></div>
+    </div>
+    <div style="display:flex; gap:12px;">
+      <a class="btn" href="/">Back to Executive Cockpit</a>
+      <a class="btn btn-primary" href="/dev-ui/?app=extracter_agent">Open ADK Dev UI &rsaquo;</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="eyebrow">System &amp; Data Ingestion Architecture</div>
+    <h1>Dual-Mode Data Ingestion &amp; Autonomous OKF v0.2 Extraction Blueprint</h1>
+    <p class="subtitle">Mode A (Entity-Centric / Equipment ID) &amp; Mode B (Raw PDF File-by-File Incremental) &bull; Google ADK &bull; Gemini 3.8 Flash (Global) &bull; Revision-Aware Read-Merge-Upsert</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1160 980" role="img" aria-label="Dual-mode data ingestion and OKF v0.2 extraction architecture">
+        <defs>
+          <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#1A73E8" />
+          </marker>
+          <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#1E8E3E" />
+          </marker>
+          <marker id="arrow-navy" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#174EA6" />
+          </marker>
+          <marker id="arrow-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#D93025" />
+          </marker>
+          <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+            <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#ECEFF1" stroke-width="1"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="#F8F9FA" />
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- 1. BOUNDARY BOXES -->
+        <rect x="20" y="20" width="1120" height="125" rx="8" fill="#FFFFFF" fill-opacity="0.7" stroke="#1A73E8" stroke-width="1.5" stroke-dasharray="6,4"/>
+        <text x="36" y="38" fill="#1A73E8" font-size="10" font-weight="700">INGRESS &amp; DUAL EXTRACTION MODES (Executive Cockpit / &bull; ADK /dev-ui/ &bull; Live Eval CLI)</text>
+
+        <rect x="20" y="165" width="1120" height="700" rx="8" fill="#FFFFFF" fill-opacity="0.55" stroke="#BDC1C6" stroke-width="1.5" stroke-dasharray="8,4"/>
+        <text x="36" y="184" fill="#202124" font-size="10" font-weight="700">Google Cloud Platform &bull; Project: ut-interaction-demo &bull; Region: asia-southeast1 + Global Endpoint (GEMINI_LOCATION=global)</text>
+
+        <rect x="40" y="200" width="490" height="105" rx="6" fill="#FCE8E6" fill-opacity="0.35" stroke="#D93025" stroke-width="1.2" stroke-dasharray="4,4"/>
+        <text x="52" y="215" fill="#C5221F" font-size="8.5" font-weight="700">PRE-FLIGHT SECURITY &amp; COGNITIVE ROUTING ZONE</text>
+
+        <rect x="40" y="325" width="720" height="520" rx="6" fill="#E6F4EA" fill-opacity="0.35" stroke="#1E8E3E" stroke-width="1.2" stroke-dasharray="4,4"/>
+        <text x="52" y="342" fill="#1E8E3E" font-size="9" font-weight="700">AUTONOMOUS 6-STEP EXTRACTION &amp; READ-MERGE-UPSERT ENGINE (extracter_orchestrator)</text>
+
+        <rect x="780" y="325" width="340" height="520" rx="6" fill="#E8F0FE" fill-opacity="0.4" stroke="#174EA6" stroke-width="1.2" stroke-dasharray="4,4"/>
+        <text x="792" y="342" fill="#174EA6" font-size="9" font-weight="700">TWO-TIER STORAGE &amp; CONTENT-HASH CACHES</text>
+
+        <!-- 2. CONNECTION ARROWS -->
+        <line x1="360" y1="90" x2="435" y2="90" stroke="#1A73E8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+        <line x1="800" y1="90" x2="725" y2="90" stroke="#1A73E8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+        <path d="M 580 130 L 580 155 L 165 155 L 165 222" fill="none" stroke="#D93025" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrow-red)"/>
+        <text x="370" y="150" fill="#C5221F" font-size="8.5" font-weight="600" text-anchor="middle">1. Prompt Inspection (before_agent_callback)</text>
+
+        <line x1="275" y1="258" x2="315" y2="258" stroke="#D93025" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrow-red)"/>
+        <line x1="515" y1="258" x2="555" y2="258" stroke="#1A73E8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+        <path d="M 415 292 L 415 360" fill="none" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <path d="M 415 310 L 195 310 L 195 360" fill="none" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+        <path d="M 330 395 L 795 395" fill="none" stroke="#174EA6" stroke-width="1.5" marker-end="url(#arrow-navy)"/>
+        <text x="650" y="388" fill="#174EA6" font-size="8.5" font-weight="600" text-anchor="middle">List Blobs &amp; MD5 Digest</text>
+
+        <line x1="195" y1="435" x2="195" y2="475" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+        <path d="M 600 435 L 600 455 L 950 455 L 950 665" fill="none" stroke="#174EA6" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrow-navy)"/>
+
+        <line x1="330" y1="520" x2="795" y2="555" stroke="#174EA6" stroke-width="1.5" marker-end="url(#arrow-navy)"/>
+        <text x="665" y="532" fill="#174EA6" font-size="8.5" font-weight="600" text-anchor="middle">SHA-256 Vision &amp; MD5 PDF Cache</text>
+
+        <path d="M 330 500 L 705 500 L 705 298" fill="none" stroke="#1A73E8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+        <text x="635" y="492" fill="#1A73E8" font-size="8.5" font-weight="600" text-anchor="middle">300 DPI Vector P&amp;ID / Datasheet Vision</text>
+
+        <line x1="195" y1="565" x2="260" y2="595" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <line x1="565" y1="435" x2="500" y2="595" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+        <line x1="280" y1="680" x2="205" y2="710" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <line x1="500" y1="680" x2="575" y2="710" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+        <line x1="205" y1="780" x2="310" y2="795" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <line x1="575" y1="780" x2="490" y2="795" stroke="#1E8E3E" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+        <line x1="740" y1="750" x2="795" y2="750" stroke="#174EA6" stroke-width="1.5" marker-end="url(#arrow-navy)"/>
+        <line x1="610" y1="815" x2="795" y2="790" stroke="#174EA6" stroke-width="1.5" marker-end="url(#arrow-navy)"/>
+
+        <!-- 3. COMPONENT BOXES -->
+        <!-- Mode A Box -->
+        <rect x="40" y="50" width="320" height="80" rx="6" fill="#FFFFFF" stroke="#1A73E8" stroke-width="1.5"/>
+        <text x="200" y="72" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Mode A: Entity-Centric Ingestion</text>
+        <text x="200" y="89" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Query by Equipment Tag (D-2304, V-2301) or Concept ID</text>
+        <text x="200" y="103" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Agent discovers all matching Datasheet + P&amp;ID + PFD</text>
+        <text x="200" y="117" fill="#1A73E8" font-size="8.5" font-weight="700" text-anchor="middle">--dataset wiki (130 Wiki Cases + 9 Security = 139)</text>
+
+        <!-- Ingress Router -->
+        <rect x="440" y="50" width="280" height="80" rx="6" fill="#E8F0FE" stroke="#1A73E8" stroke-width="2"/>
+        <text x="580" y="72" fill="#174EA6" font-size="11" font-weight="700" text-anchor="middle">Cloud Run M3 Light Cockpit &amp; ADK</text>
+        <text x="580" y="89" fill="#202124" font-size="8.5" text-anchor="middle">extracter-agent-web (/ &amp; /dev-ui/)</text>
+        <text x="580" y="103" fill="#5F6368" font-size="8.5" text-anchor="middle">evals/run_live_vertex_eval.py</text>
+        <text x="580" y="117" fill="#1A73E8" font-size="8.5" font-weight="700" text-anchor="middle">project: ut-interaction-demo</text>
+
+        <!-- Mode B Box -->
+        <rect x="800" y="50" width="320" height="80" rx="6" fill="#FFFFFF" stroke="#1A73E8" stroke-width="1.5"/>
+        <text x="960" y="72" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Mode B: File-by-File PDF Ingestion</text>
+        <text x="960" y="89" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Ingest 1 Raw PDF per turn (data_sheets/pid/pfd/manual)</text>
+        <text x="960" y="103" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Incremental Read-Merge-Upsert across shared concepts</text>
+        <text x="960" y="117" fill="#1A73E8" font-size="8.5" font-weight="700" text-anchor="middle">--dataset file-by-file (136 Raw PDFs + 9 Security = 145)</text>
+
+        <!-- Security Guardrail Box -->
+        <rect x="55" y="225" width="220" height="68" rx="6" fill="#FFFFFF" stroke="#D93025" stroke-width="1.5"/>
+        <text x="165" y="246" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Model Armor Guardrail</text>
+        <text x="165" y="262" fill="#5F6368" font-size="8.5" text-anchor="middle">before_agent_callback</text>
+        <text x="165" y="277" fill="#D93025" font-size="8.5" font-weight="700" text-anchor="middle">Blocks Prompt Injection &amp; Traversal</text>
+
+        <!-- Cognitive Classifier Box -->
+        <rect x="315" y="225" width="200" height="68" rx="6" fill="#FFFFFF" stroke="#1E8E3E" stroke-width="1.5"/>
+        <text x="415" y="246" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">CognitiveClassifier</text>
+        <text x="415" y="262" fill="#5F6368" font-size="8.5" text-anchor="middle">7 Canonical Intents (Zero Regex)</text>
+        <text x="415" y="277" fill="#1E8E3E" font-size="8.5" font-weight="700" text-anchor="middle">EXTRACT_DOCUMENT / GENERATE_OKF</text>
+
+        <!-- Gemini 3.8 Flash Global Box -->
+        <rect x="560" y="200" width="320" height="95" rx="6" fill="#FFFFFF" stroke="#1A73E8" stroke-width="2"/>
+        <text x="720" y="222" fill="#1A73E8" font-size="12" font-weight="700" text-anchor="middle">Gemini 3.8 Flash (Global)</text>
+        <text x="720" y="239" fill="#5F6368" font-size="8" text-anchor="middle">locations/global/publishers/google/models/gemini-3.8-flash</text>
+        <text x="720" y="254" fill="#202124" font-size="8.5" text-anchor="middle">&bull; Multi-Turn ADK Tool Reasoning &amp; Reconciliation</text>
+        <text x="720" y="269" fill="#202124" font-size="8.5" text-anchor="middle">&bull; 300 DPI Multimodal Vision for Vector CAD P&amp;IDs &amp; PFDs</text>
+        <text x="720" y="284" fill="#174EA6" font-size="8" font-weight="700" text-anchor="middle">GEMINI_LOCATION=global &bull; HttpRetryOptions (5x Backoff)</text>
+
+        <!-- Vertex AI Session Service Box -->
+        <rect x="900" y="200" width="220" height="95" rx="6" fill="#FFFFFF" stroke="#BDC1C6" stroke-width="1.5"/>
+        <text x="1010" y="224" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Vertex AI Agent Engine</text>
+        <text x="1010" y="241" fill="#5F6368" font-size="8.5" text-anchor="middle">Runtime: asia-southeast1</text>
+        <text x="1010" y="256" fill="#5F6368" font-size="8.5" text-anchor="middle">Session Persistence (ADK Runner)</text>
+        <text x="1010" y="271" fill="#D93025" font-size="8.5" font-weight="700" text-anchor="middle">Rule 14: reference/ Read-Only</text>
+
+        <!-- Step 1: find_raw_documents_tool -->
+        <rect x="60" y="360" width="270" height="75" rx="6" fill="#FFFFFF" stroke="#1E8E3E" stroke-width="1.5"/>
+        <text x="195" y="381" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Step 1: find_raw_documents_tool</text>
+        <text x="195" y="397" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Searches GCS blobs or local reference/raw/</text>
+        <text x="195" y="411" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Captures size_bytes, md5_hash &amp; updated</text>
+        <text x="195" y="425" fill="#1E8E3E" font-size="8" font-weight="700" text-anchor="middle">Subfolders: data_sheets, pid, pfd, manuals, stds</text>
+
+        <!-- Step 3: inspect_existing_okf_concept_tool -->
+        <rect x="390" y="360" width="350" height="75" rx="6" fill="#FFFFFF" stroke="#1E8E3E" stroke-width="1.5"/>
+        <text x="565" y="381" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Step 3: inspect_existing_okf_concept_tool</text>
+        <text x="565" y="397" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Inspects existing concept by concept_id or source_filter</text>
+        <text x="565" y="411" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Returns current ## headings, tables, tags &amp; sources</text>
+        <text x="565" y="425" fill="#1E8E3E" font-size="8" font-weight="700" text-anchor="middle">Enables stateful multi-PDF incremental enrichment</text>
+
+        <!-- Step 2: process_raw_pdf_tool -->
+        <rect x="60" y="475" width="270" height="90" rx="6" fill="#FFFFFF" stroke="#1E8E3E" stroke-width="1.5"/>
+        <text x="195" y="496" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Step 2: process_raw_pdf_tool</text>
+        <text x="195" y="512" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Digital PDF text &amp; tables via PyMuPDF (fitz)</text>
+        <text x="195" y="526" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Detects vector CAD drawings (chars &lt; 50)</text>
+        <text x="195" y="540" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Renders 300 DPI PNGs for Gemini Vision</text>
+        <text x="195" y="555" fill="#1E8E3E" font-size="8" font-weight="700" text-anchor="middle">Extracts nozzles, loops, ratings &amp; stream tables</text>
+
+        <!-- Step 4: Revision-Aware Reconciliation & Precedence Engine -->
+        <rect x="60" y="595" width="680" height="85" rx="6" fill="#FFFFFF" stroke="#1E8E3E" stroke-width="2"/>
+        <text x="400" y="616" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Step 4: Cross-Document Precedence &amp; Revision-Aware Reconciliation Engine</text>
+        <text x="400" y="633" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Same Base Doc / Newer Revision (PS-D2304 Rev Z0 &rarr; Rev Z1): Updates value in-place &amp; supersedes old source (NO CONFLICT)</text>
+        <text x="400" y="648" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Different Active Docs (Datasheet vs. P&amp;ID) or Multi-Sheet (Sheet 1 Cover vs. Sheet 4 Sketch): Preserves both values</text>
+        <text x="400" y="664" fill="#D93025" font-size="8.5" font-weight="700" text-anchor="middle">Emits explicit 'CONFLICT &mdash; &lt;PARAMETER&gt;: &lt;Doc A&gt; specifies &lt;Val A&gt;, whereas &lt;Doc B&gt; specifies &lt;Val B&gt;' in hazards</text>
+
+        <!-- Step 5A: generate_equipment_okf_tool -->
+        <rect x="60" y="710" width="320" height="70" rx="6" fill="#FFFFFF" stroke="#1E8E3E" stroke-width="1.5"/>
+        <text x="220" y="730" fill="#202124" font-size="10.5" font-weight="700" text-anchor="middle">Step 5A: generate_equipment_okf_tool</text>
+        <text x="220" y="745" fill="#5F6368" font-size="8.5" text-anchor="middle">merge_equipment_entity_with_existing()</text>
+        <text x="220" y="759" fill="#5F6368" font-size="8.5" text-anchor="middle">Merges design_data, streams, loops &amp; hazards</text>
+        <text x="220" y="772" fill="#1E8E3E" font-size="7.5" font-weight="700" text-anchor="middle">Corpus-driven instrument links (resolve_bundle_instrument_link)</text>
+
+        <!-- Step 5B: generate_okf_concept_tool -->
+        <rect x="410" y="710" width="330" height="70" rx="6" fill="#FFFFFF" stroke="#1E8E3E" stroke-width="1.5"/>
+        <text x="575" y="730" fill="#202124" font-size="10.5" font-weight="700" text-anchor="middle">Step 5B: generate_okf_concept_tool</text>
+        <text x="575" y="745" fill="#5F6368" font-size="8.5" text-anchor="middle">merge_markdown_bodies() across PDFs</text>
+        <text x="575" y="759" fill="#5F6368" font-size="8.5" text-anchor="middle">Merges ## sections, Markdown table rows (by Tag)</text>
+        <text x="575" y="772" fill="#1E8E3E" font-size="7.5" font-weight="700" text-anchor="middle">instruments/, units/, hazards/, procedures/, sources/, hazop/</text>
+
+        <!-- Step 6: build_okf_indexes_and_validate_tool -->
+        <rect x="180" y="795" width="430" height="42" rx="6" fill="#E6F4EA" stroke="#1E8E3E" stroke-width="1.5"/>
+        <text x="395" y="814" fill="#137333" font-size="10" font-weight="700" text-anchor="middle">Step 6: build_okf_indexes_and_validate_tool &amp; export_bundle_to_gcs_tool</text>
+        <text x="395" y="828" fill="#202124" font-size="8" text-anchor="middle">Compiles Master index.md + log.md &bull; Validates OKF v0.2 Schema &amp; 0 Broken Links</text>
+
+        <!-- Storage Box 1: Raw PDF Store -->
+        <rect x="795" y="360" width="310" height="120" rx="6" fill="#FFFFFF" stroke="#174EA6" stroke-width="1.5"/>
+        <text x="950" y="382" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Raw Engineering PDF Store (136 PDFs)</text>
+        <text x="950" y="399" fill="#1A73E8" font-size="8" font-weight="700" text-anchor="middle">gs://ut-interaction-demo-okf-knowledge/reference/raw/</text>
+        <text x="950" y="415" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; data_sheets/ (55 Equipment Datasheets)</text>
+        <text x="950" y="429" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; pid/ (46 Vector CAD P&amp;IDs) &bull; pfd/ (8 PFDs)</text>
+        <text x="950" y="443" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; standards/ (26 SDS &amp; Stds) &bull; manuals/ (1 OM)</text>
+        <text x="950" y="463" fill="#D93025" font-size="7.5" font-weight="700" text-anchor="middle">Strictly Read-Only (Rule 14) &bull; SOURCE_GCS_RAW_PREFIX</text>
+
+        <!-- Storage Box 2: Content-Hash & Multimodal Caches -->
+        <rect x="795" y="510" width="310" height="125" rx="6" fill="#FFFFFF" stroke="#174EA6" stroke-width="1.5"/>
+        <text x="950" y="532" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">Content-Hash &amp; Vision Caches</text>
+        <text x="950" y="550" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Raw PDF Cache (/tmp/extracter_gcs_raw_cache/)</text>
+        <text x="950" y="564" fill="#5F6368" font-size="8.5" text-anchor="middle">  Verifies size_bytes + base64 MD5 (blob.md5_hash)</text>
+        <text x="950" y="580" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; Multimodal Vision Cache (SHA-256 Keyed)</text>
+        <text x="950" y="594" fill="#5F6368" font-size="8.5" text-anchor="middle">  /tmp/extracter_multimodal_cache/ + GCS cache/</text>
+        <text x="950" y="614" fill="#174EA6" font-size="7.5" font-weight="700" text-anchor="middle">POSIX child st_mtime_ns catalog invalidation</text>
+
+        <!-- Storage Box 3: Output OKF v0.2 Knowledge Bundle -->
+        <rect x="795" y="665" width="310" height="165" rx="6" fill="#FFFFFF" stroke="#174EA6" stroke-width="1.5"/>
+        <text x="950" y="687" fill="#202124" font-size="11" font-weight="700" text-anchor="middle">OKF v0.2 Knowledge Bundle Store</text>
+        <text x="950" y="704" fill="#1A73E8" font-size="8" font-weight="700" text-anchor="middle">gs://.../okf-bundles/phenol-plant/ &amp; build/okf_bundle/</text>
+        <text x="950" y="721" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; equipment/ (54) &bull; sources/ (27) &bull; hazards/ (15)</text>
+        <text x="950" y="735" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; instruments/ (13) &bull; procedures/ (5) &bull; units/ (5)</text>
+        <text x="950" y="749" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; troubleshooting/ (3) &bull; hazop/ (3) &bull; parameters/ (1)</text>
+        <text x="950" y="763" fill="#5F6368" font-size="8.5" text-anchor="middle">&bull; overview.md, project.md, index.md &amp; log.md (4)</text>
+        <text x="950" y="783" fill="#1E8E3E" font-size="8.5" font-weight="700" text-anchor="middle">130/130 Golden Path Parity &bull; 0 Broken Links</text>
+        <text x="950" y="803" fill="#174EA6" font-size="7.5" font-weight="700" text-anchor="middle">16-Worker Parallel MD5-Verified GCS Sync (139 Files)</text>
+
+        <!-- 4. LEGEND -->
+        <text x="40" y="900" fill="#202124" font-size="10" font-weight="700">Architecture Legend</text>
+
+        <rect x="40" y="912" width="18" height="12" rx="2" fill="#E8F0FE" stroke="#1A73E8" stroke-width="1.2"/>
+        <text x="66" y="921" fill="#5F6368" font-size="8.5">Ingress Modes, Web Cockpit &amp; Vertex AI Gemini 3.8 Flash</text>
+
+        <rect x="370" y="912" width="18" height="12" rx="2" fill="#E6F4EA" stroke="#1E8E3E" stroke-width="1.2"/>
+        <text x="396" y="921" fill="#5F6368" font-size="8.5">ADK Agent &amp; 8 FunctionTools (Read-Merge-Upsert)</text>
+
+        <rect x="690" y="912" width="18" height="12" rx="2" fill="#FFFFFF" stroke="#174EA6" stroke-width="1.2"/>
+        <text x="716" y="921" fill="#5F6368" font-size="8.5">GCS &amp; Local Knowledge / PDF / Cache Stores</text>
+
+        <rect x="40" y="936" width="18" height="12" rx="2" fill="#FCE8E6" stroke="#D93025" stroke-width="1.2"/>
+        <text x="66" y="945" fill="#5F6368" font-size="8.5">Model Armor Pre-Flight Guardrail &amp; Conflict Alerts</text>
+
+        <line x1="370" y1="942" x2="390" y2="942" stroke="#D93025" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="398" y="945" fill="#5F6368" font-size="8.5">Security / Pre-Flight Guardrail Flow</text>
+
+        <line x1="690" y1="942" x2="710" y2="942" stroke="#174EA6" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="718" y="945" fill="#5F6368" font-size="8.5">Bundle State Inspection &amp; Incremental Sync</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot blue"></div>
+          <h3>1. Dual Ingestion Modes (Mode A &amp; Mode B)</h3>
+        </div>
+        <ul>
+          <li>&bull; <strong>Mode A &mdash; Entity-Centric (Equipment / Concept ID):</strong> Query by tag (e.g., <code>D-2304</code>, <code>V-2301</code>, <code>sis-cdn</code>). The agent autonomously discovers all relevant Datasheets, P&amp;IDs, PFDs, and Manuals to synthesize the complete OKF v0.2 concept in one pass (<code>--dataset wiki</code>, 130 cases).</li>
+          <li>&bull; <strong>Mode B &mdash; Raw PDF File-by-File Incremental:</strong> Feed raw PDFs one by one (e.g., <code>data_sheets/*.pdf</code> then <code>pid/*.pdf</code>). The agent creates <code>sources/&lt;doc&gt;.md</code> and incrementally enriches every concept in that file via non-destructive Read-Merge-Upsert (<code>--dataset file-by-file</code>, 136 PDFs).</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot green"></div>
+          <h3>2. Hybrid Extraction &amp; Revision-Aware Merge</h3>
+        </div>
+        <ul>
+          <li>&bull; <strong>Hybrid PDF + 300 DPI Vision:</strong> Extracts digital text/tables via <code>PyMuPDF</code> and renders vector CAD P&amp;IDs/PFDs at 300 DPI for <code>gemini-3.8-flash</code> visual inspection (cached by SHA-256).</li>
+          <li>&bull; <strong>Revision Supersession vs. Conflict Callouts:</strong> Newer revisions of the same document (<code>Rev Z0 &rarr; Rev Z1</code>) update values in-place with zero false conflicts; cross-document (Datasheet vs. P&amp;ID) or multi-sheet (Sheet 1 vs. Sheet 4) discrepancies emit <code>CONFLICT &mdash; &lt;PARAMETER&gt;</code>.</li>
+          <li>&bull; <strong>Structured &amp; Table Merge:</strong> Both <code>merge_equipment_entity_with_existing</code> and <code>merge_markdown_bodies</code> preserve prior sections, table rows (by <code>Tag</code>/<code>Parameter</code>), and safety callouts across PDFs.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot red"></div>
+          <h3>3. Two-Tier GCS Storage &amp; Content-Hash Cache</h3>
+        </div>
+        <ul>
+          <li>&bull; <strong>Cloud-Native GCS Store (<code>USE_GCS_STORAGE=true</code>):</strong> Reads 136 raw PDFs from <code>gs://ut-interaction-demo-okf-knowledge/reference/raw/</code> and writes OKF v0.2 concepts to <code>gs://.../okf-bundles/phenol-plant/</code> + local <code>build/okf_bundle/</code>.</li>
+          <li>&bull; <strong>MD5 &amp; mtime_ns Cache Hardening:</strong> Verifies base64 MD5 digests (<code>blob.md5_hash</code>) on raw PDF downloads and batch GCS uploads so in-place updated files (even equal byte size) are immediately re-ingested and synced.</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">
+      Chemical Engineering OKF Extracter Agent &bull; Google ADK + Gemini 3.8 Flash (Global) &bull; M3 Light Executive Architecture
+    </p>
+  </div>
+</body>
+</html>

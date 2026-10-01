@@ -1,0 +1,191 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+/Title (Unit 2300 Control Valve \046 Automated Shutdown Valve Process Data Sheet)
+/Author (Acme Process Engineering Group)
+/Creator (Acme Engineering Document System)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 3
+/Kids [ 5 0 R 7 0 R 9 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+4 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Courier
+>>
+endobj
+5 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/Length 1214
+>>
+stream
+q
+0.15 0.25 0.45 RG
+1.0 w
+28 28 556 736 re S
+28 724 m 584 724 l S
+Q
+BT
+/F1 8.5 Tf
+12 TL
+38 740 Td
+(ACME PETROCHEMICAL DEMO COMPLEX | DS-PS-0010 \(Rev Z1\) | Page 1 of 3) Tj
+0 -28 Td
+(==============================================================================) Tj
+T*
+(ACME PETROCHEMICAL DEMO COMPLEX - UNIT 2300) Tj
+T*
+(PROCESS DATA SHEET: CONTROL VALVES & SIS AUTOMATED SHUTDOWN VALVES) Tj
+T*
+(Document Code: DS-PS-0010 | Revision: Z1 | Status: Issued for Construction) Tj
+T*
+(Process Unit: Unit 2300 \(Decomposition & Recovery Section\)) Tj
+T*
+() Tj
+T*
+(1. MODULATING CONTROL VALVES SCHEDULE) Tj
+T*
+(| Tag | Service | Line / Stream | Body Size / Rating | Cv Rated | Fail Position | Controlled By |) Tj
+T*
+(| LV-1301 | D-2304 Cleavage Product Level Control | 4"-P-2306 \(Stream S384 to D-2310\) | 3 in / 300# RF 316L | 48.0 | Fail Closed \(FC\) | LT-1301 / LIC-1301 |) Tj
+T*
+(| TV-1302 | E-2307 Reactor Cooler CW Outlet Control | 8"-CW-2312 \(E-2307 Shell Outlet\) | 6 in / 150# RF CS | 310.0 | Fail Open \(FO\) | TIC-1302 \(D-2304 Temp\) |) Tj
+T*
+(| PV-0401 | V-2301 Overhead Vacuum Control Valve | 4"-P-2305 \(X-2301 Recycle\) | 3 in / 150# RF 316L | 62.0 | Fail Closed \(FC\) | PT-0401 / PIC-0401 |) Tj
+T*
+ET
+endstream
+endobj
+7 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 8 0 R
+>>
+endobj
+8 0 obj
+<<
+/Length 816
+>>
+stream
+q
+0.15 0.25 0.45 RG
+1.0 w
+28 28 556 736 re S
+28 724 m 584 724 l S
+Q
+BT
+/F1 8.5 Tf
+12 TL
+38 740 Td
+(ACME PETROCHEMICAL DEMO COMPLEX | DS-PS-0010 \(Rev Z1\) | Page 2 of 3) Tj
+0 -28 Td
+(==============================================================================) Tj
+T*
+(DS-PS-0010 PAGE 2 OF 3 - SAFETY INSTRUMENTED SYSTEM \(SIS\) FINAL ELEMENTS) Tj
+T*
+(| Tag | Service | Line / Stream | Valve Type | SIL Rating | Actuation Time | Fail Position | Interlock |) Tj
+T*
+(| XV-1305 | D-2304 Sulfuric Acid Catalyst Isolation Valve | 1"-P-2311 \(Stream S310\) | Ball Valve 316L Fire-Safe | SIL-2 | <= 2.0 sec | Fail Closed \(FC\) | I-2304 |) Tj
+T*
+(| XV-1309 | D-2304 Emergency Cumene Quench Injection Valve | 4"-P-2315 \(Stream S387\) | Full-Bore Ball Valve 316L | SIL-2 | <= 2.0 sec | Fail Open \(FO\) | I-2304 |) Tj
+T*
+ET
+endstream
+endobj
+9 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 10 0 R
+>>
+endobj
+10 0 obj
+<<
+/Length 646
+>>
+stream
+q
+0.15 0.25 0.45 RG
+1.0 w
+28 28 556 736 re S
+28 724 m 584 724 l S
+Q
+BT
+/F1 8.5 Tf
+12 TL
+38 740 Td
+(ACME PETROCHEMICAL DEMO COMPLEX | DS-PS-0010 \(Rev Z1\) | Page 3 of 3) Tj
+0 -28 Td
+(==============================================================================) Tj
+T*
+(DS-PS-0010 PAGE 3 OF 3 - FUGITIVE EMISSIONS & SEAT LEAKAGE REQUIREMENTS) Tj
+T*
+(- All valves in Cumene Hydroperoxide \(CHP\) and Phenol service require ISO 15848-1 Class BH low-emission bellows or live-loaded PTFE/Kalrez stem packing.) Tj
+T*
+(- SIS valves XV-1305 and XV-1309 require ANSI/FCI 70-2 Class VI tight shutoff and quarterly partial-stroke testing \(PST\).) Tj
+T*
+ET
+endstream
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000015 00000 n 
+0000000221 00000 n 
+0000000292 00000 n 
+0000000341 00000 n 
+0000000409 00000 n 
+0000000541 00000 n 
+0000001807 00000 n 
+0000001939 00000 n 
+0000002806 00000 n 
+0000002939 00000 n 
+trailer
+<<
+/Size 11
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+3637
+%%EOF

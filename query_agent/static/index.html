@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OKF Spanner Graph &amp; Retrieval Workbench | Cloud Run</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css?v=2.2" />
+</head>
+<body>
+  <!-- TOP WORKBENCH HEADER (DECLUTTERED) -->
+  <header class="wb-header">
+    <div class="wb-brand">
+      <div class="wb-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="6" cy="6" r="3"/>
+          <circle cx="18" cy="6" r="3"/>
+          <circle cx="12" cy="18" r="3"/>
+          <path d="M8.5 7.5L15.5 7.5"/>
+          <path d="M7.5 8.5L10.8 15.5"/>
+          <path d="M16.5 8.5L13.2 15.5"/>
+        </svg>
+      </div>
+      <div>
+        <div class="wb-title-row">
+          <h1 class="wb-title">OKF Spanner Graph &amp; Retrieval Workbench</h1>
+          <span class="wb-badge wb-badge-primary">OkfKnowledgeGraph</span>
+          <span class="wb-badge wb-badge-model" id="header-model-badge">gemini-3.8-flash</span>
+        </div>
+        <div class="wb-subtitle" id="spanner-banner">
+          Spanner: <code id="stat-spanner-db">okf-knowledge-spanner / okf_knowledge_graph</code> •
+          <span id="stat-equip-count">0</span> Equipment •
+          <span id="stat-param-count">0</span> Design Params •
+          <span id="stat-conflict-count">0</span> Conflicts •
+          <span id="stat-edge-count">0</span> Graph Edges
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT ACTIONS & THEME TOGGLE -->
+    <div class="wb-actions">
+      <button type="button" class="wb-btn wb-btn-outline" id="btn-refresh-spanner" title="Refresh Spanner Hierarchy &amp; Graph">
+        ↻ Refresh Spanner
+      </button>
+      <button type="button" class="wb-btn wb-btn-icon" id="theme-toggle" title="Toggle Clean Industrial Light / Dark Technical Blueprint Theme" aria-label="Toggle Theme">
+        <span id="theme-toggle-label">🌙 Dark</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 3-PANE RETRIEVAL WORKBENCH GRID (270px Left | minmax(340px, 1fr) Middle Graph+Catalog | 50vw Right Chat) -->
+  <main class="wb-grid" id="workbench-main">
+    <!-- ===================================================================== -->
+    <!-- LEFT PANE (270px): LIVE SPANNER EQUIPMENT & CONCEPT HIERARCHY TREE    -->
+    <!-- ===================================================================== -->
+    <aside class="wb-pane wb-pane-hierarchy" id="pane-hierarchy">
+      <div class="pane-header">
+        <span class="pane-title">Spanner Equipment Hierarchy</span>
+        <span class="pane-meta" id="hierarchy-latency-badge">-- ms</span>
+      </div>
+
+      <div class="explorer-controls">
+        <div class="search-box">
+          <input
+            type="search"
+            id="hierarchy-search-input"
+            placeholder="Filter tag (D-2304, C-2301) or service..."
+            autocomplete="off"
+          />
+        </div>
+        <div class="filter-tabs" role="tablist">
+          <button type="button" class="filter-tab active" data-filter="all">All Units</button>
+          <button type="button" class="filter-tab" data-filter="conflicts">⚠️ Conflicts</button>
+          <button type="button" class="filter-tab" data-filter="concepts">OKF Concepts</button>
+        </div>
+      </div>
+
+      <div class="explorer-tree" id="hierarchy-tree-container">
+        <div class="loading-state">Querying live equipment tree from Cloud Spanner...</div>
+      </div>
+    </aside>
+
+    <!-- ===================================================================== -->
+    <!-- MIDDLE PANE (1fr): (1) LIVE SPANNER GRAPH + (2) ACTIVE CATALOG        -->
+    <!-- Strictly driven by Left-Pane Equipment / Concept selection            -->
+    <!-- ===================================================================== -->
+    <section class="wb-pane wb-pane-middle" id="pane-middle">
+      <!-- UPPER HALF (54%): INTERACTIVE SPANNER PROPERTY GRAPH EXPLORER -->
+      <div class="middle-subpane graph-subpane" id="subpane-graph">
+        <div class="pane-header">
+          <div class="pane-header-left">
+            <span class="pane-title">1. Live Spanner Graph Explorer</span>
+            <code class="graph-center-badge" id="graph-center-badge">D-2304</code>
+            <span class="pane-meta" id="header-graph-latency">-- ms</span>
+          </div>
+          <div class="graph-controls-bar">
+            <div class="hop-selector" role="group" aria-label="Graph Hop Radius">
+              <button type="button" class="hop-btn" data-hops="1">1 Hop</button>
+              <button type="button" class="hop-btn active" data-hops="2">2 Hops</button>
+              <button type="button" class="hop-btn" data-hops="3">3 Hops</button>
+            </div>
+            <button type="button" class="wb-btn wb-btn-xs wb-btn-outline" id="btn-graph-zoom-in" title="Zoom In">+</button>
+            <button type="button" class="wb-btn wb-btn-xs wb-btn-outline" id="btn-graph-zoom-out" title="Zoom Out">−</button>
+            <button type="button" class="wb-btn wb-btn-xs wb-btn-outline" id="btn-graph-reset" title="Reset Pan/Zoom">Reset</button>
+          </div>
+        </div>
+
+        <!-- EDGE TYPE FILTER BAR & LEGEND -->
+        <div class="graph-legend-bar">
+          <label class="edge-filter-pill">
+            <input type="checkbox" class="edge-type-toggle" value="CONNECTS_TO" checked />
+            <span class="legend-dot dot-connects"></span>
+            <span>CONNECTS_TO (<span id="count-edge-connects">0</span>)</span>
+          </label>
+          <label class="edge-filter-pill">
+            <input type="checkbox" class="edge-type-toggle" value="MONITORS_OR_TRIPS" checked />
+            <span class="legend-dot dot-trips"></span>
+            <span>MONITORS_OR_TRIPS (<span id="count-edge-trips">0</span>)</span>
+          </label>
+          <label class="edge-filter-pill">
+            <input type="checkbox" class="edge-type-toggle" value="DERIVED_FROM" checked />
+            <span class="legend-dot dot-derived"></span>
+            <span>DERIVED_FROM (<span id="count-edge-derived">0</span>)</span>
+          </label>
+        </div>
+
+        <!-- UNOBSTRUCTED SVG INTERACTIVE GRAPH CANVAS -->
+        <div class="graph-canvas-wrapper" id="graph-canvas-wrapper">
+          <svg id="spanner-graph-svg" viewBox="0 0 760 440" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <marker id="arrow-connects" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563eb" />
+              </marker>
+              <marker id="arrow-trips" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#0d9488" />
+              </marker>
+              <marker id="arrow-derived" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#7c3aed" />
+              </marker>
+            </defs>
+            <g id="graph-viewport-group"></g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- LOWER HALF (46%): ACTIVE EQUIPMENT / CONCEPT KNOWLEDGE CATALOG -->
+      <div class="middle-subpane catalog-subpane" id="subpane-catalog">
+        <div class="pane-header">
+          <div class="pane-header-left">
+            <span class="pane-title">2. Active Knowledge Catalog</span>
+            <code class="graph-center-badge" id="catalog-active-badge">D-2304</code>
+          </div>
+          <div class="pane-header-right">
+            <button type="button" class="wb-btn wb-btn-xs wb-btn-accent" id="btn-inspector-pivot" style="display: none;" title="Center Graph on Selected Node">
+              ◎ Center Graph on Node
+            </button>
+          </div>
+        </div>
+
+        <div class="catalog-content" id="catalog-content-container">
+          <div class="loading-state">Loading active equipment parameters, conflicts, and PDF lineage from Spanner...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- RIGHT PANE (50vw): DYNAMIC STUDIES, SLIM TELEMETRY & MULTI-TURN CHAT  -->
+    <!-- ===================================================================== -->
+    <aside class="wb-pane wb-pane-chat" id="pane-chat">
+      <div class="pane-header">
+        <div class="pane-header-left">
+          <span class="pane-title">ADK Conversational Retrieval</span>
+          <span class="wb-badge wb-badge-subtle" id="chat-session-badge">Session • Turn 0</span>
+        </div>
+        <div class="pane-header-right">
+          <button type="button" class="wb-btn wb-btn-sm wb-btn-outline" id="btn-clear-chat" title="Clear Chat History &amp; Start New Multi-Turn Session">
+            + New Session
+          </button>
+        </div>
+      </div>
+
+      <!-- COMPACT 1-ROW DYNAMIC PRE-BUILT ENGINEERING STUDIES -->
+      <div class="prebuilt-prompts-bar">
+        <span class="prebuilt-inline-label" id="prebuilt-target-label">⚡ Studies (D-2304):</span>
+        <div class="prebuilt-chips-scroll" id="prebuilt-chips-container">
+          <!-- Dynamically populated based on selected Equipment or OKF Concept -->
+        </div>
+      </div>
+
+      <!-- SLIM 1-LINE LIVE MODEL & TOOL LATENCY TELEMETRY BAR (AUTO-COLLAPSING) -->
+      <div class="telemetry-console collapsed" id="telemetry-console">
+        <div class="telemetry-header" id="telemetry-header-bar" role="button" tabindex="0" title="Click to Expand/Collapse Step-by-Step &amp; Per-Tool Latency Breakdown">
+          <div class="telemetry-title-group">
+            <span class="telemetry-pulse" id="telemetry-pulse-dot"></span>
+            <span class="telemetry-title">⏱️ Tool Telemetry (<span id="telemetry-count-badge">0</span>)</span>
+          </div>
+          <div class="telemetry-metrics">
+            <span class="telemetry-stat" id="telemetry-status-pill">IDLE</span>
+            <span class="telemetry-stat telemetry-stat-ms" id="telemetry-total-ms">Total: 0.0 ms</span>
+            <span class="telemetry-chevron" id="telemetry-chevron">▾</span>
+          </div>
+        </div>
+
+        <div class="telemetry-body" id="telemetry-body">
+          <div class="telemetry-empty">
+            No query executed in this session yet.
+          </div>
+        </div>
+      </div>
+
+      <!-- MAXIMIZED CHAT MESSAGE STREAM -->
+      <div class="chat-stream" id="chat-stream">
+        <div class="chat-empty-hint" id="chat-empty-hint">
+          Select a quick study above or ask follow-up engineering questions below. Multi-turn context is retained within the active session.
+        </div>
+      </div>
+
+      <!-- CLEAN CHAT INPUT FORM -->
+      <form class="chat-input-bar" id="chat-form">
+        <div class="chat-input-row">
+          <textarea
+            id="chat-question-input"
+            rows="2"
+            placeholder="Ask a HAZOP, risk, Spanner graph, or follow-up question..."
+            required
+          ></textarea>
+          <button type="submit" class="wb-btn wb-btn-accent chat-submit-btn" id="btn-submit-query">
+            <span>Run Query</span>
+            <kbd>↵</kbd>
+          </button>
+        </div>
+      </form>
+    </aside>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/static/app.js?v=2.2"></script>
+</body>
+</html>

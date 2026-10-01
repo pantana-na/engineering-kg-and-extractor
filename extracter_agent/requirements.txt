@@ -1,0 +1,9 @@
+google-cloud-aiplatform[adk,agent_engines]
+google-adk[a2a]==2.9.0
+google-genai>=2.24.0
+google-cloud-storage>=3.14.0
+pypdf>=6.18.0
+fonttools>=4.50.0
+pydantic>=2.13.0
+pyyaml>=6.0.0
+python-dotenv>=1.2.0

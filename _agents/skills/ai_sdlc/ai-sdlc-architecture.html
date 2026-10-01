@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-SDLC 3-Phase Architecture Diagram (Brownfield vs. Greenfield Tracks)</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #020617;
+      color: #fff;
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    .container {
+      margin: 0 auto;
+      max-width: 1360px;
+    }
+
+    .header {
+      margin-bottom: 1.75rem;
+    }
+
+    .header-row {
+      align-items: center;
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .pulse-dot {
+      animation: pulse 2s infinite;
+      background: #22d3ee;
+      border-radius: 50%;
+      height: 12px;
+      width: 12px;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+
+    h1 {
+      font-size: 1.45rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      margin-left: 1.75rem;
+    }
+
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid #1e293b;
+      border-radius: 1rem;
+      overflow-x: auto;
+      padding: 1.5rem;
+    }
+
+    svg {
+      display: block;
+      min-width: 1180px;
+      width: 100%;
+    }
+
+    .cards {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      margin-top: 2rem;
+    }
+
+    .card {
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid #1e293b;
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+    }
+
+    .card-header {
+      align-items: center;
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-dot {
+      border-radius: 50%;
+      height: 8px;
+      width: 8px;
+    }
+
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    .card-dot.orange { background: #fb923c; }
+
+    .card h3 {
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+
+    .card ul {
+      color: #94a3b8;
+      font-size: 0.75rem;
+      line-height: 1.55;
+      list-style: none;
+    }
+
+    .card li {
+      margin-bottom: 0.4rem;
+    }
+
+    .card li strong {
+      color: #e2e8f0;
+    }
+
+    .footer {
+      color: #475569;
+      font-size: 0.75rem;
+      margin-top: 1.5rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>3-Phase AI-SDLC &amp; Spec-Driven Development (SDD) Architecture</h1>
+      </div>
+      <p class="subtitle">
+        Step-by-Step Lifecycle Topology • Separated Brownfield Track (Track A: Legacy .NET/3-Tier &amp; Track B: Undocumented Cloud-Native) vs. Greenfield Track • Skills, Tools &amp; Interactive Phase Gates
+      </p>
+    </div>
+
+    <!-- Main SVG Diagram -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 1850">
+        <!-- Definitions -->
+        <defs>
+          <marker id="arrow-slate" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrow-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <marker id="arrow-violet" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa" />
+          </marker>
+          <marker id="arrow-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#34d399" />
+          </marker>
+          <marker id="arrow-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+          </marker>
+          <marker id="arrow-rose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185" />
+          </marker>
+          <marker id="arrow-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb923c" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- =================================================================
+             PHASE BOUNDARY CONTAINERS & TRACK SWIMLANES
+             ================================================================= -->
+
+        <!-- Swimlane Background Highlights -->
+        <rect x="48" y="140" width="564" height="1210" rx="10" fill="rgba(76, 29, 149, 0.05)" stroke="#4c1d95" stroke-width="1" stroke-dasharray="4,4"/>
+        <rect x="668" y="140" width="564" height="1210" rx="10" fill="rgba(8, 51, 68, 0.06)" stroke="#164e63" stroke-width="1" stroke-dasharray="4,4"/>
+
+        <!-- Phase 0 Boundary -->
+        <rect x="40" y="20" width="1200" height="105" rx="12" fill="rgba(251, 191, 36, 0.04)" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="8,4"/>
+        <text x="58" y="39" fill="#fbbf24" font-size="10" font-weight="700">PHASE 0: SKILL ACTIVATION &amp; WORKSPACE SCAFFOLDING (SHARED ENTRY)</text>
+
+        <!-- Phase 1 Boundary -->
+        <rect x="40" y="190" width="1200" height="440" rx="12" fill="rgba(34, 211, 238, 0.03)" stroke="#22d3ee" stroke-width="1.2" stroke-dasharray="6,4"/>
+        <text x="58" y="210" fill="#22d3ee" font-size="10" font-weight="700">PHASE 1: INCEPTION (INTENT FRAMING, DISCOVERY &amp; DUAL-RUNTIME ARCHITECTURE)</text>
+
+        <!-- Phase 2 Boundary -->
+        <rect x="40" y="720" width="1200" height="555" rx="12" fill="rgba(52, 211, 153, 0.03)" stroke="#34d399" stroke-width="1.2" stroke-dasharray="6,4"/>
+        <text x="58" y="740" fill="#34d399" font-size="10" font-weight="700">PHASE 2: EXECUTION (THE SPEC-DRIVEN DEVELOPMENT [SDD] CYCLE &amp; 4-STEP RCA)</text>
+
+        <!-- Phase 3 Boundary -->
+        <rect x="40" y="1365" width="1200" height="370" rx="12" fill="rgba(251, 146, 60, 0.03)" stroke="#fb923c" stroke-width="1.2" stroke-dasharray="8,4"/>
+        <text x="58" y="1385" fill="#fb923c" font-size="10" font-weight="700">PHASE 3: OPERATION (PRE-BUILD SAST, GIT PROMOTION &amp; DUAL-RUNTIME CLOUD DEPLOYMENT)</text>
+
+        <!-- =================================================================
+             CONNECTION ARROWS (Defined early so they render behind component boxes)
+             ================================================================= -->
+
+        <!-- Phase 0 to Brownfield & Greenfield Track Headers -->
+        <path d="M 520 112 L 520 128 L 330 128 L 330 143" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+        <text x="415" y="123" fill="#a78bfa" font-size="8" text-anchor="middle">Existing Codebase</text>
+
+        <path d="M 760 112 L 760 128 L 950 128 L 950 143" fill="none" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+        <text x="865" y="123" fill="#22d3ee" font-size="8" text-anchor="middle">New Capability</text>
+
+        <!-- Track Headers to Step 1.1 -->
+        <line x1="330" y1="178" x2="330" y2="223" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+        <line x1="950" y1="178" x2="950" y2="223" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+        <!-- Phase 1 Vertical Arrows (Brownfield Left, Greenfield Right) -->
+        <line x1="330" y1="315" x2="330" y2="333" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+        <line x1="950" y1="315" x2="950" y2="333" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+        <line x1="330" y1="415" x2="330" y2="433" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+        <line x1="950" y1="415" x2="950" y2="433" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+        <line x1="330" y1="515" x2="330" y2="533" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+        <line x1="950" y1="515" x2="950" y2="533" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+        <!-- Step 1.4 to Gate 1 -->
+        <line x1="330" y1="615" x2="330" y2="646" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-rose)"/>
+        <line x1="950" y1="615" x2="950" y2="646" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-rose)"/>
+
+        <!-- Gate 1 to Step 2.0 -->
+        <line x1="330" y1="703" x2="330" y2="753" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+        <line x1="950" y1="703" x2="950" y2="753" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+        <!-- Step 2.0 to Step 2.1-2.2 -->
+        <line x1="330" y1="845" x2="330" y2="863" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+        <line x1="950" y1="845" x2="950" y2="863" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+
+        <!-- Step 2.1-2.2 to Sub-Gate 2A (Step 2.3) -->
+        <line x1="330" y1="950" x2="330" y2="966" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-rose)"/>
+        <line x1="950" y1="950" x2="950" y2="966" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-rose)"/>
+
+        <!-- Sub-Gate 2A (Step 2.3) to Step 2.4 -->
+        <line x1="250" y1="1020" x2="250" y2="1036" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+        <line x1="1030" y1="1020" x2="1030" y2="1036" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+        <!-- Bidirectional 4-Step RCA Arrows between Step 2.4B / 2.4G and Center RCA Box -->
+        <line x1="435" y1="1082" x2="463" y2="1082" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-rose)"/>
+        <text x="449" y="1075" fill="#fb7185" font-size="7" text-anchor="middle">Fail</text>
+        <line x1="465" y1="1115" x2="437" y2="1115" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+        <text x="449" y="1127" fill="#34d399" font-size="7" text-anchor="middle">Fix</text>
+
+        <line x1="845" y1="1082" x2="817" y2="1082" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-rose)"/>
+        <text x="831" y="1075" fill="#fb7185" font-size="7" text-anchor="middle">Fail</text>
+        <line x1="815" y1="1115" x2="843" y2="1115" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+        <text x="831" y="1127" fill="#34d399" font-size="7" text-anchor="middle">Fix</text>
+
+        <!-- Step 2.4 to Step 2.5 -->
+        <line x1="250" y1="1158" x2="250" y2="1176" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+        <line x1="1030" y1="1158" x2="1030" y2="1176" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+
+        <!-- Step 2.5 to Gate 2 -->
+        <line x1="330" y1="1258" x2="330" y2="1291" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-rose)"/>
+        <line x1="950" y1="1258" x2="950" y2="1291" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-rose)"/>
+
+        <!-- Gate 2 to Step 3.0-3.1 -->
+        <line x1="330" y1="1348" x2="330" y2="1398" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+        <line x1="950" y1="1348" x2="950" y2="1398" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+
+        <!-- Step 3.0-3.1 to Step 3.2 & 3.3 -->
+        <line x1="245" y1="1490" x2="245" y2="1508" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+        <line x1="520" y1="1490" x2="580" y2="1508" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+        <line x1="760" y1="1490" x2="700" y2="1508" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+        <line x1="1035" y1="1490" x2="1035" y2="1508" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+        <!-- Horizontal flow from Step 3.2 Git to Step 3.3A & 3.3B -->
+        <line x1="425" y1="1562" x2="453" y2="1562" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+        <line x1="825" y1="1562" x2="853" y2="1562" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+        <!-- Step 3.2, 3.3A, 3.3B to Step 3.4 Post-Deploy Verification -->
+        <line x1="245" y1="1615" x2="245" y2="1633" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+        <line x1="640" y1="1615" x2="640" y2="1633" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+        <line x1="1035" y1="1615" x2="1035" y2="1633" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+
+        <!-- =================================================================
+             PHASE 0: ACTIVATION & SCAFFOLDING COMPONENT
+             ================================================================= -->
+        <rect x="250" y="46" width="780" height="66" rx="6" fill="#0f172a" />
+        <rect x="250" y="46" width="780" height="66" rx="6" fill="rgba(120, 53, 15, 0.38)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="640" y="65" fill="white" font-size="12" font-weight="700" text-anchor="middle">Step 0.1: Activate ai-sdlc &amp; Scaffold Workspace (specs/ &amp; docs/)</text>
+        <text x="640" y="82" fill="#e2e8f0" font-size="9" text-anchor="middle">Seeds specs/{baseline,features,plan,templates} &amp; docs/ into repo root; determines Brownfield vs. Greenfield track</text>
+        <text x="640" y="99" fill="#fbbf24" font-size="8" text-anchor="middle">Skill: ai-sdlc • Tool: validate_sdlc_gate.py --init • Rules: AGENTS.md, ai_sdlc_and_sdd_standards.md (always_on)</text>
+
+        <!-- =================================================================
+             TRACK HEADERS (BROWNFIELD LEFT vs. GREENFIELD RIGHT)
+             ================================================================= -->
+        <rect x="65" y="145" width="530" height="32" rx="6" fill="#0f172a" />
+        <rect x="65" y="145" width="530" height="32" rx="6" fill="rgba(76, 29, 149, 0.55)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="330" y="165" fill="white" font-size="11" font-weight="700" text-anchor="middle">BROWNFIELD TRACK (Track A: Legacy .NET/3-Tier • Track B: Undocumented Cloud)</text>
+
+        <rect x="685" y="145" width="530" height="32" rx="6" fill="#0f172a" />
+        <rect x="685" y="145" width="530" height="32" rx="6" fill="rgba(8, 51, 68, 0.55)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="950" y="165" fill="white" font-size="11" font-weight="700" text-anchor="middle">GREENFIELD TRACK (New Cloud-Native Services &amp; ADK Agent Capabilities)</text>
+
+        <!-- =================================================================
+             PHASE 1: INCEPTION COMPONENTS
+             ================================================================= -->
+
+        <!-- Step 1.1B (Brownfield) -->
+        <rect x="65" y="225" width="530" height="90" rx="6" fill="#0f172a" />
+        <rect x="65" y="225" width="530" height="90" rx="6" fill="rgba(76, 29, 149, 0.38)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="330" y="244" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 1.1B: Two-Track Brownfield Assessment &amp; Strategy Selection</text>
+        <text x="330" y="260" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Track A: Scan *.sln, *.aspx, WCF *.svc, Web.config &amp; SQL Stored Procs (sp_*/usp_*)</text>
+        <text x="330" y="274" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Track B: Audit undocumented routes, type drift &amp; coupled LLM/regex anti-patterns</text>
+        <text x="330" y="290" fill="#a78bfa" font-size="8" text-anchor="middle">Skill: ai-sdlc (brownfield_assessment_playbook.md) • Output: Strategy Choice</text>
+        <text x="330" y="304" fill="#94a3b8" font-size="8" text-anchor="middle">Tools: find_by_name, grep_search, view_file, ask_question (Strangler vs Re-Arch)</text>
+
+        <!-- Step 1.1G (Greenfield) -->
+        <rect x="685" y="225" width="530" height="90" rx="6" fill="#0f172a" />
+        <rect x="685" y="225" width="530" height="90" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="950" y="244" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 1.1G: Greenfield Scope &amp; Repository Readiness Check</text>
+        <text x="950" y="260" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Confirm greenfield boundary with zero legacy debt; verify specs/features/ &amp; docs/</text>
+        <text x="950" y="274" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Establish clean target project layout (app/ for ADK, src/ &amp; server/ for Cloud Run)</text>
+        <text x="950" y="290" fill="#22d3ee" font-size="8" text-anchor="middle">Skill: ai-sdlc • Rule: ai_sdlc_and_sdd_standards.md</text>
+        <text x="950" y="304" fill="#94a3b8" font-size="8" text-anchor="middle">Tools: list_dir, view_file, validate_sdlc_gate.py --init</text>
+
+        <!-- Step 1.2B (Brownfield) -->
+        <rect x="65" y="335" width="530" height="80" rx="6" fill="#0f172a" />
+        <rect x="65" y="335" width="530" height="80" rx="6" fill="rgba(76, 29, 149, 0.38)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="330" y="354" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 1.2B: Modernization Intent &amp; Legacy Behavior Elicitation</text>
+        <text x="330" y="370" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Clarify legacy pain points, target cutover scope, and whether undocumented legacy</text>
+        <text x="330" y="384" fill="#cbd5e1" font-size="8.5" text-anchor="middle">behaviors are Baseline Invariants to preserve or Legacy Defects to remediate</text>
+        <text x="330" y="402" fill="#fb7185" font-size="8" text-anchor="middle">Skill: ai-sdlc • Tool: ask_question (Zero-Assumption Mandate)</text>
+
+        <!-- Step 1.2G (Greenfield) -->
+        <rect x="685" y="335" width="530" height="80" rx="6" fill="#0f172a" />
+        <rect x="685" y="335" width="530" height="80" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="950" y="354" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 1.2G: Business Intent, Personas &amp; System of Record Elicitation</text>
+        <text x="950" y="370" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Elicit core business problem, user personas/journeys, measurable goals &amp; non-goals,</text>
+        <text x="950" y="384" fill="#cbd5e1" font-size="8.5" text-anchor="middle">and live databases/APIs (Cloud SQL, Spanner, Firestore, Vertex AI Vector Search)</text>
+        <text x="950" y="402" fill="#fb7185" font-size="8" text-anchor="middle">Skill: ai-sdlc • Tool: ask_question (phase_questionnaires_and_checklists.md)</text>
+
+        <!-- Step 1.3B (Brownfield) -->
+        <rect x="65" y="435" width="530" height="80" rx="6" fill="#0f172a" />
+        <rect x="65" y="435" width="530" height="80" rx="6" fill="rgba(120, 53, 15, 0.36)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="330" y="454" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 1.3B: Target Dual-Runtime Split &amp; Legacy Auth/Config Mapping</text>
+        <text x="330" y="470" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Decouple inline LLM/business logic into agent_runtime (ADK) + cloud_run (UI/Proxy);</text>
+        <text x="330" y="484" fill="#cbd5e1" font-size="8.5" text-anchor="middle">map Web.config -> unified .env (NONPROD_*/PROD_*) &amp; Windows/AD -> IAP or OAuth 2.0</text>
+        <text x="330" y="502" fill="#fbbf24" font-size="8" text-anchor="middle">Skill: ai-sdlc • Rules: google_adk_*, devops_security_* • Tool: ask_question</text>
+
+        <!-- Step 1.3G (Greenfield) -->
+        <rect x="685" y="435" width="530" height="80" rx="6" fill="#0f172a" />
+        <rect x="685" y="435" width="530" height="80" rx="6" fill="rgba(120, 53, 15, 0.36)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="950" y="454" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 1.3G: Dual-Runtime Architecture, ADK Topology &amp; IAM Framing</text>
+        <text x="950" y="470" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Frame ADK OrchestratorAgent, Subagents, MECE Intent Topology (+OTHERS), Model Armor</text>
+        <text x="950" y="484" fill="#cbd5e1" font-size="8.5" text-anchor="middle">callbacks (agent_runtime) &amp; Cloud Run Proxy (/healthz) + IAM Pattern 1/2/3 (zero allUsers)</text>
+        <text x="950" y="502" fill="#fbbf24" font-size="8" text-anchor="middle">Skill: ai-sdlc • Rules: google_adk_*, devops_security_* • Tool: ask_question</text>
+
+        <!-- Step 1.4B (Brownfield) -->
+        <rect x="65" y="535" width="530" height="80" rx="6" fill="#0f172a" />
+        <rect x="65" y="535" width="530" height="80" rx="6" fill="rgba(251, 146, 60, 0.28)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="330" y="554" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 1.4B: Brownfield Companion Skills (As-Is vs Target, SAST, Cost)</text>
+        <text x="330" y="570" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Generate As-Is vs Target diagram (docs/*-architecture.{md,html}), run baseline SAST</text>
+        <text x="330" y="584" fill="#cbd5e1" font-size="8.5" text-anchor="middle">scan (docs/codemender-01-*.md), and live GCP Billing cost model (docs/gcp_cost_*.md)</text>
+        <text x="330" y="602" fill="#fb923c" font-size="8" text-anchor="middle">Skills: architecture-diagram, codemender, gcp-cost-estimator • Tools: cm find, query_gcp_pricing.py</text>
+
+        <!-- Step 1.4G (Greenfield) -->
+        <rect x="685" y="535" width="530" height="80" rx="6" fill="#0f172a" />
+        <rect x="685" y="535" width="530" height="80" rx="6" fill="rgba(251, 146, 60, 0.28)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="950" y="554" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 1.4G: Greenfield Companion Skills (Target Diagram &amp; Cost BoM)</text>
+        <text x="950" y="570" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Generate Target Dual-Runtime diagram (docs/*-architecture.{md,html}) and real-time</text>
+        <text x="950" y="584" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Google Cloud Billing API cost &amp; CUD report (docs/gcp_cost_estimate_*.md)</text>
+        <text x="950" y="602" fill="#fb923c" font-size="8" text-anchor="middle">Skills: architecture-diagram, gcp-cost-estimator • Tools: write_to_file, query_gcp_pricing.py</text>
+
+        <!-- =================================================================
+             INTERACTIVE GATE 1 (PHASE 1 -> PHASE 2)
+             ================================================================= -->
+        <rect x="140" y="648" width="1000" height="55" rx="8" fill="#0f172a" />
+        <rect x="140" y="648" width="1000" height="55" rx="8" fill="rgba(136, 19, 55, 0.45)" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <text x="640" y="669" fill="white" font-size="11.5" font-weight="700" text-anchor="middle">INTERACTIVE GATE 1: Phase 1 (Inception) -&gt; Phase 2 (Execution) Sign-Off</text>
+        <text x="640" y="688" fill="#fecdd3" font-size="8.5" text-anchor="middle">Skill: ai-sdlc • Tools: validate_sdlc_gate.py --phase inception + ask_question (Explicit User Approval Required)</text>
+
+        <!-- =================================================================
+             PHASE 2: EXECUTION (SDD CYCLE) COMPONENTS
+             ================================================================= -->
+
+        <!-- Step 2.0B (Brownfield Baseline SDD & Safety Net) -->
+        <rect x="65" y="755" width="530" height="90" rx="6" fill="#0f172a" />
+        <rect x="65" y="755" width="530" height="90" rx="6" fill="rgba(76, 29, 149, 0.42)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="330" y="774" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 2.0B: Codify Brownfield Baseline SDD &amp; Test Safety Net</text>
+        <text x="330" y="790" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Author specs/baseline/&lt;subsystem&gt;-baseline.md (Hidden SQL sp_*/UI logic matrix);</text>
+        <text x="330" y="804" fill="#cbd5e1" font-size="8.5" text-anchor="middle">lock in Characterization Unit Tests (Golden Master) + Generative PBT before changes</text>
+        <text x="330" y="820" fill="#a78bfa" font-size="8" text-anchor="middle">Skill: ai-sdlc (baseline-template.md) • Rule: ai_sdlc_and_sdd_standards.md (Sec 2.1)</text>
+        <text x="330" y="834" fill="#94a3b8" font-size="8" text-anchor="middle">Tools: write_to_file, ask_question (Triage), pytest/vitest, hypothesis/fast-check</text>
+
+        <!-- Step 2.0G (Greenfield Fast-Track) -->
+        <rect x="685" y="755" width="530" height="90" rx="6" fill="#0f172a" />
+        <rect x="685" y="755" width="530" height="90" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="950" y="774" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 2.0G: Greenfield Baseline Bypass (Proceed to Step 2.1)</text>
+        <text x="950" y="790" fill="#cbd5e1" font-size="8.5" text-anchor="middle">No legacy 3-tier or undocumented brownfield baseline to reverse-engineer;</text>
+        <text x="950" y="804" fill="#cbd5e1" font-size="8.5" text-anchor="middle">load specs/templates/sdd-template.md directly to author greenfield Feature SDD</text>
+        <text x="950" y="820" fill="#22d3ee" font-size="8" text-anchor="middle">Skill: ai-sdlc (sdd-template.md) • Rule: ai_sdlc_and_sdd_standards.md</text>
+        <text x="950" y="834" fill="#94a3b8" font-size="8" text-anchor="middle">Tools: view_file (specs/templates/sdd-template.md)</text>
+
+        <!-- Step 2.1-2.2B (Brownfield Feature SDD & Plan) -->
+        <rect x="65" y="865" width="530" height="85" rx="6" fill="#0f172a" />
+        <rect x="65" y="865" width="530" height="85" rx="6" fill="rgba(6, 78, 59, 0.42)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="330" y="884" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 2.1–2.2B: Author Delta Feature SDD &amp; Migration Test Plan</text>
+        <text x="330" y="900" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Author specs/features/SPEC-YYYYMMDD-*.md (Secs 1–8) referencing Baseline SDD;</text>
+        <text x="330" y="914" fill="#cbd5e1" font-size="8.5" text-anchor="middle">design step-by-step migration plan with Unit Tests + PBT + Live Agent Evals</text>
+        <text x="330" y="934" fill="#34d399" font-size="8" text-anchor="middle">Skill: ai-sdlc • Rules: All 3 Governance Rules • Tool: write_to_file (specs/features/*)</text>
+
+        <!-- Step 2.1-2.2G (Greenfield Feature SDD & Plan) -->
+        <rect x="685" y="865" width="530" height="85" rx="6" fill="#0f172a" />
+        <rect x="685" y="865" width="530" height="85" rx="6" fill="rgba(6, 78, 59, 0.42)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="950" y="884" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 2.1–2.2G: Author Full Feature SDD &amp; Step-by-Step Test Plan</text>
+        <text x="950" y="900" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Author specs/features/SPEC-YYYYMMDD-*.md (Models, APIs, FunctionTools, UI States,</text>
+        <text x="950" y="914" fill="#cbd5e1" font-size="8.5" text-anchor="middle">13-Rule Checklist) + granular implementation steps (Unit + PBT + Live Evals)</text>
+        <text x="950" y="934" fill="#34d399" font-size="8" text-anchor="middle">Skill: ai-sdlc • Rules: All 3 Governance Rules • Tool: write_to_file (specs/features/*)</text>
+
+        <!-- Step 2.3 (Sub-Gate 2A: Pre-Code Alignment) -->
+        <rect x="140" y="968" width="1000" height="52" rx="8" fill="#0f172a" />
+        <rect x="140" y="968" width="1000" height="52" rx="8" fill="rgba(136, 19, 55, 0.42)" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <text x="640" y="988" fill="white" font-size="11" font-weight="700" text-anchor="middle">Step 2.3 (Sub-Gate 2A): Pre-Code SDD Review &amp; Stakeholder Alignment Sub-Gate</text>
+        <text x="640" y="1006" fill="#fecdd3" font-size="8.5" text-anchor="middle">Code is a downstream artifact of specs: zero production code written until user approves SDD via ask_question</text>
+
+        <!-- Step 2.4B (Brownfield Implementation & Testing) -->
+        <rect x="65" y="1038" width="370" height="120" rx="6" fill="#0f172a" />
+        <rect x="65" y="1038" width="370" height="120" rx="6" fill="rgba(120, 53, 15, 0.38)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="250" y="1057" fill="white" font-size="10.5" font-weight="600" text-anchor="middle">Step 2.4B: Brownfield Refactor &amp; Migration</text>
+        <text x="250" y="1073" fill="#cbd5e1" font-size="8" text-anchor="middle">• Lift SQL sp_*/legacy rules into ADK Tools (app/)</text>
+        <text x="250" y="1087" fill="#cbd5e1" font-size="8" text-anchor="middle">• Build Cloud Run UI/Proxy + /healthz (src/, server/)</text>
+        <text x="250" y="1101" fill="#cbd5e1" font-size="8" text-anchor="middle">• Run Characterization + new Unit &amp; PBT suites</text>
+        <text x="250" y="1115" fill="#cbd5e1" font-size="8" text-anchor="middle">• Run live agents-cli eval (&gt;=95% prec, 1.000 ground)</text>
+        <text x="250" y="1133" fill="#fbbf24" font-size="7.5" text-anchor="middle">Tools: replace_file_content, pytest/vitest,</text>
+        <text x="250" y="1146" fill="#94a3b8" font-size="7.5" text-anchor="middle">hypothesis/fast-check, agents-cli eval run</text>
+
+        <!-- Center Box: Mandatory 4-Step RCA Protocol -->
+        <rect x="465" y="1038" width="350" height="120" rx="6" fill="#0f172a" />
+        <rect x="465" y="1038" width="350" height="120" rx="6" fill="rgba(136, 19, 55, 0.48)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="640" y="1057" fill="white" font-size="10.5" font-weight="700" text-anchor="middle">Mandatory 4-Step RCA Protocol</text>
+        <text x="640" y="1073" fill="#fecdd3" font-size="8" text-anchor="middle">Triggered on ANY Unit, PBT, or Live Eval Failure:</text>
+        <text x="640" y="1087" fill="#e2e8f0" font-size="8" text-anchor="middle">1. Deep RCA (DB, tool docstrings, prompts, logs)</text>
+        <text x="640" y="1101" fill="#e2e8f0" font-size="8" text-anchor="middle">2. Transparent failure diagnostic report to user</text>
+        <text x="640" y="1115" fill="#e2e8f0" font-size="8" text-anchor="middle">3. Propose &gt;=2 sustainable architectural options</text>
+        <text x="640" y="1129" fill="#e2e8f0" font-size="8" text-anchor="middle">4. Await user choice via ask_question</text>
+        <text x="640" y="1146" fill="#fb7185" font-size="7.5" font-weight="600" text-anchor="middle">ZERO Quick-Fixes, Mockups, or Regex Heuristics</text>
+
+        <!-- Step 2.4G (Greenfield Implementation & Testing) -->
+        <rect x="845" y="1038" width="370" height="120" rx="6" fill="#0f172a" />
+        <rect x="845" y="1038" width="370" height="120" rx="6" fill="rgba(120, 53, 15, 0.38)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="1030" y="1057" fill="white" font-size="10.5" font-weight="600" text-anchor="middle">Step 2.4G: Greenfield Step-by-Step Build</text>
+        <text x="1030" y="1073" fill="#cbd5e1" font-size="8" text-anchor="middle">• Build Models -&gt; ADK Agents &amp; Tools (app/)</text>
+        <text x="1030" y="1087" fill="#cbd5e1" font-size="8" text-anchor="middle">• Build Cloud Run Proxy (/healthz) &amp; UI (src/)</text>
+        <text x="1030" y="1101" fill="#cbd5e1" font-size="8" text-anchor="middle">• Execute Unit Tests + Generative PBT per step</text>
+        <text x="1030" y="1115" fill="#cbd5e1" font-size="8" text-anchor="middle">• Run live agents-cli eval (&gt;=95% prec, 1.000 ground)</text>
+        <text x="1030" y="1133" fill="#fbbf24" font-size="7.5" text-anchor="middle">Tools: write_to_file, pytest/vitest,</text>
+        <text x="1030" y="1146" fill="#94a3b8" font-size="7.5" text-anchor="middle">hypothesis/fast-check, agents-cli eval run</text>
+
+        <!-- Step 2.5B (Brownfield Living Spec Sync) -->
+        <rect x="65" y="1178" width="530" height="80" rx="6" fill="#0f172a" />
+        <rect x="65" y="1178" width="530" height="80" rx="6" fill="rgba(6, 78, 59, 0.42)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="330" y="1197" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 2.5B: Sync Baseline + Feature SDDs &amp; Progress Report</text>
+        <text x="330" y="1213" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Synchronize specs/baseline/* &amp; specs/features/* (zero spec drift); log characterization</text>
+        <text x="330" y="1227" fill="#cbd5e1" font-size="8.5" text-anchor="middle">parity, PBT &amp; live eval metrics in specs/plan/PROGRESS_REPORT_YYYYMMDD.md</text>
+        <text x="330" y="1245" fill="#34d399" font-size="8" text-anchor="middle">Skill: ai-sdlc • Tools: replace_file_content, write_to_file (specs/plan/*, specs/README.md)</text>
+
+        <!-- Step 2.5G (Greenfield Living Spec Sync) -->
+        <rect x="685" y="1178" width="530" height="80" rx="6" fill="#0f172a" />
+        <rect x="685" y="1178" width="530" height="80" rx="6" fill="rgba(6, 78, 59, 0.42)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="950" y="1197" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 2.5G: Sync Feature SDD &amp; Living Plan Progress Report</text>
+        <text x="950" y="1213" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Synchronize specs/features/SPEC-*.md (zero spec drift); record step completion matrix,</text>
+        <text x="950" y="1227" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Unit/PBT pass rates, live eval telemetry &amp; RCA history in specs/plan/PROGRESS_REPORT_*.md</text>
+        <text x="950" y="1245" fill="#34d399" font-size="8" text-anchor="middle">Skill: ai-sdlc • Tools: replace_file_content, write_to_file (specs/plan/*, specs/README.md)</text>
+
+        <!-- =================================================================
+             INTERACTIVE GATE 2 (PHASE 2 -> PHASE 3)
+             ================================================================= -->
+        <rect x="140" y="1293" width="1000" height="55" rx="8" fill="#0f172a" />
+        <rect x="140" y="1293" width="1000" height="55" rx="8" fill="rgba(136, 19, 55, 0.45)" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <text x="640" y="1314" fill="white" font-size="11.5" font-weight="700" text-anchor="middle">INTERACTIVE GATE 2: Phase 2 (Execution) -&gt; Phase 3 (Operation) Sign-Off</text>
+        <text x="640" y="1333" fill="#fecdd3" font-size="8.5" text-anchor="middle">Skill: ai-sdlc • Tools: validate_sdlc_gate.py --phase execution + ask_question (Explicit User Approval Required)</text>
+
+        <!-- =================================================================
+             PHASE 3: OPERATION (SAST, GIT & DUAL-RUNTIME DEPLOYMENT)
+             ================================================================= -->
+
+        <!-- Step 3.0-3.1B (Brownfield Pre-Merge & SAST) -->
+        <rect x="65" y="1400" width="530" height="90" rx="6" fill="#0f172a" />
+        <rect x="65" y="1400" width="530" height="90" rx="6" fill="rgba(136, 19, 55, 0.38)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="330" y="1419" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 3.0–3.1B: Pre-Merge Gate, Legacy SAST Patching &amp; .env Migration</text>
+        <text x="330" y="1435" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Clarify deploy params; remediate legacy SQLi/XSS/secrets via CodeMender (cm find/verify/fix);</text>
+        <text x="330" y="1449" fill="#cbd5e1" font-size="8.5" text-anchor="middle">consolidate Web.config / scattered .env.* into single unified .env (NONPROD_* / PROD_*)</text>
+        <text x="330" y="1465" fill="#fb7185" font-size="8" text-anchor="middle">Skills: ai-sdlc, codemender • Rule: devops_security_and_quality_standards.md (Rules 2,3,4,8)</text>
+        <text x="330" y="1479" fill="#94a3b8" font-size="8" text-anchor="middle">Tools: ask_question, cm find/verify/fix (docs/codemender-*.md), ruff/mypy/tsc, pip-audit/npm audit</text>
+
+        <!-- Step 3.0-3.1G (Greenfield Pre-Merge & SAST) -->
+        <rect x="685" y="1400" width="530" height="90" rx="6" fill="#0f172a" />
+        <rect x="685" y="1400" width="530" height="90" rx="6" fill="rgba(136, 19, 55, 0.38)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="950" y="1419" fill="white" font-size="11" font-weight="600" text-anchor="middle">Step 3.0–3.1G: Pre-Merge Quality, CodeMender SAST &amp; Unified .env Gate</text>
+        <text x="950" y="1435" fill="#cbd5e1" font-size="8.5" text-anchor="middle">Clarify deploy target; run static type/lint analysis, 3-stage CodeMender SAST audit</text>
+        <text x="950" y="1449" fill="#cbd5e1" font-size="8.5" text-anchor="middle">(Zero High/Critical CVEs), dependency audit, and unified single-file .env verification</text>
+        <text x="950" y="1465" fill="#fb7185" font-size="8" text-anchor="middle">Skills: ai-sdlc, codemender • Rule: devops_security_and_quality_standards.md (Rules 2,3,4,8)</text>
+        <text x="950" y="1479" fill="#94a3b8" font-size="8" text-anchor="middle">Tools: ask_question, cm find/verify/fix (docs/codemender-*.md), ruff/mypy/tsc, pip-audit/npm audit</text>
+
+        <!-- Step 3.2: Multi-Branch Git Integration -->
+        <rect x="65" y="1510" width="360" height="105" rx="6" fill="#0f172a" />
+        <rect x="65" y="1510" width="360" height="105" rx="6" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="245" y="1529" fill="white" font-size="10.5" font-weight="600" text-anchor="middle">Step 3.2: Multi-Branch Git Integration</text>
+        <text x="245" y="1545" fill="#cbd5e1" font-size="8" text-anchor="middle">• Verify clean working tree (specs, docs, code)</text>
+        <text x="245" y="1559" fill="#cbd5e1" font-size="8" text-anchor="middle">• Non-Prod: Conventional commit to main/develop</text>
+        <text x="245" y="1573" fill="#cbd5e1" font-size="8" text-anchor="middle">• Prod: Reviewed PR from main -&gt; prod/release</text>
+        <text x="245" y="1591" fill="#fb923c" font-size="7.5" text-anchor="middle">Skill: ai-sdlc • Rule: Rule 1 (Multi-Branch SCM)</text>
+        <text x="245" y="1604" fill="#94a3b8" font-size="7.5" text-anchor="middle">Tools: git status/commit/push, gh pr create</text>
+
+        <!-- Step 3.3A: Agent Runtime Deployment -->
+        <rect x="455" y="1510" width="370" height="105" rx="6" fill="#0f172a" />
+        <rect x="455" y="1510" width="370" height="105" rx="6" fill="rgba(120, 53, 15, 0.38)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="640" y="1529" fill="white" font-size="10.5" font-weight="600" text-anchor="middle">Step 3.3A: Deploy ADK (agent_runtime)</text>
+        <text x="640" y="1545" fill="#cbd5e1" font-size="8" text-anchor="middle">• Validate agents-cli-manifest.yaml</text>
+        <text x="640" y="1559" fill="#cbd5e1" font-size="8" text-anchor="middle">• Deploy OrchestratorAgent, Subagents &amp; Tools</text>
+        <text x="640" y="1573" fill="#cbd5e1" font-size="8" text-anchor="middle">• Wire Model Armor before_agent_callback &amp; sessions</text>
+        <text x="640" y="1591" fill="#fbbf24" font-size="7.5" text-anchor="middle">Skill: ai-sdlc • Rule: google_adk_and_agent_runtime.md</text>
+        <text x="640" y="1604" fill="#94a3b8" font-size="7.5" text-anchor="middle">Tool: agents-cli deploy --deployment-target agent_runtime</text>
+
+        <!-- Step 3.3B: Cloud Run & Cutover Deployment -->
+        <rect x="855" y="1510" width="360" height="105" rx="6" fill="#0f172a" />
+        <rect x="855" y="1510" width="360" height="105" rx="6" fill="rgba(8, 51, 68, 0.42)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="1035" y="1529" fill="white" font-size="10.5" font-weight="600" text-anchor="middle">Step 3.3B: Deploy Cloud Run (cloud_run)</text>
+        <text x="1035" y="1545" fill="#cbd5e1" font-size="8" text-anchor="middle">• Cloud Build -&gt; Artifact Registry (${ENV}-${SHA})</text>
+        <text x="1035" y="1559" fill="#cbd5e1" font-size="8" text-anchor="middle">• Terraform Infra Manager (&lt;svc&gt;-nonprod / -prod)</text>
+        <text x="1035" y="1573" fill="#cbd5e1" font-size="8" text-anchor="middle">• Strangler Fig / IAP / OAuth Ingress (Zero allUsers)</text>
+        <text x="1035" y="1591" fill="#22d3ee" font-size="7.5" text-anchor="middle">Skill: ai-sdlc • Rule: devops_security_* (Rules 5,6,9,10)</text>
+        <text x="1035" y="1604" fill="#94a3b8" font-size="7.5" text-anchor="middle">Tools: gcloud builds submit, terraform / infra-manager</text>
+
+        <!-- Step 3.4: Post-Deployment Verification & Live Eval -->
+        <rect x="65" y="1635" width="1150" height="82" rx="6" fill="#0f172a" />
+        <rect x="65" y="1635" width="1150" height="82" rx="6" fill="rgba(6, 78, 59, 0.45)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="640" y="1655" fill="white" font-size="11.5" font-weight="700" text-anchor="middle">Step 3.4: Post-Deployment Smoke Tests, Live Agent Evaluation &amp; Final Living Plan Sync</text>
+        <text x="640" y="1672" fill="#cbd5e1" font-size="8.5" text-anchor="middle">1. Cloud Run Smoke Test: GET /healthz == 200 OK &amp; streaming proxy auth • 2. Live Agent Eval: agents-cli eval run (&gt;=95% tool precision, 1.000 groundedness,</text>
+        <text x="640" y="1686" fill="#cbd5e1" font-size="8.5" text-anchor="middle">100% Model Armor &amp; HITL clarification) • 3. Sync final revisions &amp; metrics into specs/plan/PROGRESS_REPORT_YYYYMMDD.md (Rollback + 4-Step RCA on fail)</text>
+        <text x="640" y="1704" fill="#34d399" font-size="8" text-anchor="middle">Skill: ai-sdlc • Tools: curl /healthz, agents-cli eval run, validate_sdlc_gate.py --phase operation, write_to_file (specs/plan/*)</text>
+
+        <!-- =================================================================
+             LEGEND (Placed at y=1765, >25px below lowest boundary y=1735)
+             ================================================================= -->
+        <rect x="40" y="1760" width="1200" height="72" rx="8" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+        <text x="60" y="1780" fill="white" font-size="10" font-weight="700">Legend — Semantic Color &amp; Boundary Mapping</text>
+
+        <rect x="60" y="1794" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.45)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="84" y="1802" fill="#cbd5e1" font-size="8">Brownfield Discovery &amp; Baseline SDD</text>
+
+        <rect x="275" y="1794" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.45)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="299" y="1802" fill="#cbd5e1" font-size="8">Greenfield Framing &amp; Cloud Run (cloud_run)</text>
+
+        <rect x="515" y="1794" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.45)" stroke="#34d399" stroke-width="1"/>
+        <text x="539" y="1802" fill="#cbd5e1" font-size="8">Feature SDD, Verification &amp; Living Plan</text>
+
+        <rect x="745" y="1794" width="16" height="10" rx="2" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="769" y="1802" fill="#cbd5e1" font-size="8">ADK Agents &amp; Runtime (agent_runtime)</text>
+
+        <rect x="970" y="1794" width="16" height="10" rx="2" fill="rgba(136, 19, 55, 0.45)" stroke="#fb7185" stroke-width="1"/>
+        <text x="994" y="1802" fill="#cbd5e1" font-size="8">Phase Gates, 4-Step RCA &amp; CodeMender SAST</text>
+
+        <rect x="60" y="1812" width="16" height="10" rx="2" fill="rgba(251, 146, 60, 0.35)" stroke="#fb923c" stroke-width="1"/>
+        <text x="84" y="1820" fill="#cbd5e1" font-size="8">Companion Skills (Diagram/Cost) &amp; CI/CD</text>
+
+        <line x1="275" y1="1817" x2="295" y2="1817" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="302" y="1820" fill="#cbd5e1" font-size="8">Interactive Gate / RCA Trigger Flow (ask_question)</text>
+
+        <rect x="555" y="1812" width="16" height="10" rx="2" fill="transparent" stroke="#34d399" stroke-width="1" stroke-dasharray="4,2"/>
+        <text x="579" y="1820" fill="#cbd5e1" font-size="8">AI-SDLC Phase Boundary Container</text>
+      </svg>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot violet"></div>
+          <h3>Brownfield Track (Track A &amp; Track B)</h3>
+        </div>
+        <ul>
+          <li>• <strong>Track A (Legacy 3-Tier / .NET):</strong> Scans <code>*.sln</code>, <code>*.aspx</code>, WCF <code>*.svc</code>, <code>Web.config</code>, and extracts hidden business logic from SQL Stored Procedures (<code>sp_*</code> / <code>usp_*</code>) and Triggers.</li>
+          <li>• <strong>Track B (Undocumented Cloud-Native):</strong> Reverse-engineers implicit route contracts, reconciles type drift, and flags coupled LLM agents or regex intent routers.</li>
+          <li>• <strong>Safety Net First (Step 2.0B):</strong> Codifies <code>specs/baseline/*.md</code> and locks in Golden Master Characterization Tests + Generative PBTs before touching production code.</li>
+          <li>• <strong>Modernization Cutover:</strong> Supports Strangler Fig API Facade, Full Dual-Runtime Re-Architecture, or In-Place Hardening.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>Greenfield Track (Cloud-Native &amp; ADK)</h3>
+        </div>
+        <ul>
+          <li>• <strong>Direct Intent-to-Spec Framing:</strong> Elicits business intent, personas, measurable goals/non-goals, and systems of record via <code>ask_question</code>.</li>
+          <li>• <strong>Dual-Runtime Separation:</strong> Strictly decouples ADK reasoning agents (<code>agent_runtime</code>) from React/Vite UI &amp; FastAPI/Express streaming proxies (<code>cloud_run</code>).</li>
+          <li>• <strong>Step 2.0G Baseline Bypass:</strong> Bypasses legacy reverse-engineering and authors <code>specs/features/SPEC-YYYYMMDD-*.md</code> directly from <code>sdd-template.md</code>.</li>
+          <li>• <strong>Test-First Execution:</strong> Every implementation step requires Deterministic Unit Tests, Generative PBTs (<code>hypothesis</code>/<code>fast-check</code>), and live <code>agents-cli eval</code>.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot amber"></div>
+          <h3>Skills, Tools &amp; Governance Gates</h3>
+        </div>
+        <ul>
+          <li>• <strong>4 Specialized Skills:</strong> <code>ai-sdlc</code> (master orchestrator), <code>architecture-diagram</code> (visual topology), <code>gcp-cost-estimator</code> (live Billing API BoM), and <code>codemender</code> (SAST find/verify/fix).</li>
+          <li>• <strong>Interactive Gates (<code>ask_question</code>):</strong> Enforces Zero Silent Assumptions and explicit user sign-off at Gate 1, Sub-Gate 2A (Pre-Code), RCA Sub-Gate, and Gate 2.</li>
+          <li>• <strong>Mandatory 4-Step RCA:</strong> Prohibits quick fixes, mockup fallbacks, or regex patches; requires deep RCA and user selection of sustainable architectural fixes.</li>
+          <li>• <strong>Automated Gate Validator:</strong> <code>validate_sdlc_gate.py</code> scaffolds workspaces (<code>--init</code>) and audits phase readiness (<code>--phase inception|execution|operation</code>).</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <p class="footer">
+      SDD &amp; DevSecOps Platform • 3-Phase AI-SDLC Architecture (Brownfield vs. Greenfield Tracks) • Generated by architecture-diagram Skill
+    </p>
+  </div>
+</body>
+</html>

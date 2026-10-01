@@ -1,0 +1,8 @@
+# Agents CLI Deployment Manifest for Separate OKF Spanner Query Agent
+# Deploys the ADK Query Agent to Gemini Enterprise Agent Platform (agent_runtime)
+name: okf-query-agent
+agent_directory: query_agent
+region: asia-southeast1
+project: your-gcp-project-id
+deployment_target: agent_runtime
+base_template: adk

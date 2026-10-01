@@ -1,0 +1,230 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+/Title (Corporate Engineering Standard\072 Overpressure Protection\054 PSV Sizing \046 Flare Header Hydraulics)
+/Author (Acme Process Engineering Group)
+/Creator (Acme Engineering Document System)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 4
+/Kids [ 5 0 R 7 0 R 9 0 R 11 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+4 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Courier
+>>
+endobj
+5 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/Length 1300
+>>
+stream
+q
+0.15 0.25 0.45 RG
+1.0 w
+28 28 556 736 re S
+28 724 m 584 724 l S
+Q
+BT
+/F1 8.5 Tf
+12 TL
+38 740 Td
+(ACME PETROCHEMICAL DEMO COMPLEX | STD-ENG-014 \(Rev R1\) | Page 1 of 4) Tj
+0 -28 Td
+(==============================================================================) Tj
+T*
+(ACME PETROCHEMICAL DEMO COMPLEX - CORPORATE ENGINEERING STANDARD) Tj
+T*
+(DOCUMENT CODE: STD-ENG-014 | REVISION: R1) Tj
+T*
+(TITLE: OVERPRESSURE PROTECTION, PSV SIZING & FLARE HEADER HYDRAULICS \(API 520 / API 521 / DIERS\)) Tj
+T*
+() Tj
+T*
+(1. MANDATORY SET PRESSURE & ACCUMULATION LIMITS \(ASME SECTION VIII DIV. 1\)) Tj
+T*
+(- Single PSV \(Non-Fire Contingency\): Set pressure <= 100% of authoritative Equipment Internal Design Pressure \(MAWP\); maximum accumulation = 10%.) Tj
+T*
+(- Dual/Multiple PSVs: Primary PSV set pressure <= 100% of lowest authoritative Equipment Design Pressure; maximum accumulation = 16%.) Tj
+T*
+(- External Fire Contingency: Maximum accumulation = 21% above MAWP.) Tj
+T*
+(- Governance Rule on Conflicting Design Pressures: Where a P&ID and Process Data Sheet exhibit a discrepancy \(e.g., D-2304 showing 11.0 kg/cm2g on DS-D2304 vs 12.2 kg/cm2g on PID-23-0013\), the PSV set pressure MUST be governed by the lower conservative rating \(11.0 kg/cm2g\) until mechanical re-rating is certified.) Tj
+T*
+ET
+endstream
+endobj
+7 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 8 0 R
+>>
+endobj
+8 0 obj
+<<
+/Length 756
+>>
+stream
+q
+0.15 0.25 0.45 RG
+1.0 w
+28 28 556 736 re S
+28 724 m 584 724 l S
+Q
+BT
+/F1 8.5 Tf
+12 TL
+38 740 Td
+(ACME PETROCHEMICAL DEMO COMPLEX | STD-ENG-014 \(Rev R1\) | Page 2 of 4) Tj
+0 -28 Td
+(==============================================================================) Tj
+T*
+(STD-ENG-014 PAGE 2 OF 4 - DIERS TWO-PHASE REACTIVE RUNAWAY SIZING) Tj
+T*
+(- Reactive Peroxide Systems \(Unit 2300 V-2301 & D-2304\):) Tj
+T*
+(  * Relief valves protecting vessels containing > 5 wt% Cumene Hydroperoxide \(CHP\) must be sized for homogeneous two-phase vapor-liquid flashing flow using the Leung Omega method \(DIERS\).) Tj
+T*
+(  * PSV-2304A/B on D-2304 requires API 526 Orifice 4J6 \(8.303 cm2\) to pass 38,400 kg/hr two-phase flow at 11.0 kg/cm2g set pressure.) Tj
+T*
+ET
+endstream
+endobj
+9 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 10 0 R
+>>
+endobj
+10 0 obj
+<<
+/Length 682
+>>
+stream
+q
+0.15 0.25 0.45 RG
+1.0 w
+28 28 556 736 re S
+28 724 m 584 724 l S
+Q
+BT
+/F1 8.5 Tf
+12 TL
+38 740 Td
+(ACME PETROCHEMICAL DEMO COMPLEX | STD-ENG-014 \(Rev R1\) | Page 3 of 4) Tj
+0 -28 Td
+(==============================================================================) Tj
+T*
+(STD-ENG-014 PAGE 3 OF 4 - INLET PRESSURE DROP & BACKPRESSURE LIMITS) Tj
+T*
+(- Inlet Piping Pressure Drop: Must not exceed 3.0% of set pressure at rated capacity \(requires 6 in short-coupled inlet nozzle N6 on D-2304\).) Tj
+T*
+(- Balanced Bellows Backpressure Limit: Total superimposed + built-up backpressure in header 8"-PR-2320-316L to D-2320 must not exceed 30% of set pressure \(actual = 10.5%\).) Tj
+T*
+ET
+endstream
+endobj
+11 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 12 0 R
+>>
+endobj
+12 0 obj
+<<
+/Length 508
+>>
+stream
+q
+0.15 0.25 0.45 RG
+1.0 w
+28 28 556 736 re S
+28 724 m 584 724 l S
+Q
+BT
+/F1 8.5 Tf
+12 TL
+38 740 Td
+(ACME PETROCHEMICAL DEMO COMPLEX | STD-ENG-014 \(Rev R1\) | Page 4 of 4) Tj
+0 -28 Td
+(==============================================================================) Tj
+T*
+(STD-ENG-014 PAGE 4 OF 4 - FLARE KNOCK-OUT DRUM SIZING CRITERIA) Tj
+T*
+(- Knock-Out Drum D-2320 must separate liquid droplets >= 300 microns and provide 20 minutes of emergency liquid holdup from the largest single relief event.) Tj
+T*
+ET
+endstream
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000015 00000 n 
+0000000251 00000 n 
+0000000329 00000 n 
+0000000378 00000 n 
+0000000446 00000 n 
+0000000578 00000 n 
+0000001930 00000 n 
+0000002062 00000 n 
+0000002869 00000 n 
+0000003002 00000 n 
+0000003736 00000 n 
+0000003870 00000 n 
+trailer
+<<
+/Size 13
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+4430
+%%EOF

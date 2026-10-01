@@ -1,0 +1,41 @@
+[project]
+name = "extracter-agent"
+version = "0.1.0"
+description = "Autonomous chemical engineering knowledge extraction and OKF bundle publisher on Google ADK and Gemini Enterprise Agent Platform."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk>=2.9.0",
+    "google-genai>=2.24.0",
+    "google-cloud-storage>=3.14.0",
+    "google-cloud-spanner>=3.71.0",
+    "google-cloud-dataplex>=2.6.0",
+    "google-cloud-datacatalog-lineage>=0.7.0",
+    "pypdf>=6.18.0",
+    "fonttools>=4.50.0",
+    "pydantic>=2.13.0",
+    "pyyaml>=6.0.0",
+    "python-dotenv>=1.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.0",
+    "hypothesis>=6.168.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "evals"]
+python_files = ["test_*.py"]
+
+[tool.setuptools.packages.find]
+include = ["extracter_agent*", "query_agent*"]
+
+[tool.ruff]
+exclude = ["_agents", ".agents", "build", "reference"]
+
+[tool.ruff.lint]
+ignore = ["BLE001"]
+
+
+

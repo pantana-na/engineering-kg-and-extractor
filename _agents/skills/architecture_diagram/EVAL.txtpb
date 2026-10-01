@@ -1,0 +1,38 @@
+# proto-file: learning/gemini/agents/evaluation/evalin/proto/eval_suite.proto
+# proto-message: EvalSuite
+# txtpbfmt: wrap_strings_after_newlines
+
+suite_name: "architecture_diagram"
+timeout_seconds: 300
+
+cases {
+  name: "generate_3_tier_web_app"
+  prompt: "Create a high-level architecture diagram for a 3-tier web application (Frontend, Backend API, PostgreSQL Database)."
+  expectations: "The agent generates a standalone HTML file for the architecture diagram"
+  expectations: "The agent uses view_file to examine the template at resources/template.html"
+  expectations: "The generated HTML contains a 4-part layout (Header, Main SVG, Summary Cards, Footer)"
+  expectations: "The agent suggests opening the file in a browser using xdg-open or open"
+}
+
+cases {
+  name: "implement_double_rect_masking"
+  prompt: "Draw an architecture Gateway connecting to an Auth Service and a Core Backend Service. Ensure connection arrows pass behind the service boxes."
+  expectations: "The agent implements the double-rect masking technique for the service components (opaque background rect + semi-transparent styled rect)"
+  expectations: "The agent draws connection arrows early in the SVG so they render behind the component boxes"
+  expectations: "The font size for primary component names is set to 12px"
+}
+
+cases {
+  name: "place_legend_outside_boundary"
+  prompt: "Create a cloud infrastructure diagram for an AWS deployment in us-east-1 containing a VPC boundary, public subnet, private subnet, and several microservices."
+  expectations: "The agent creates dashed boundary boxes representing the VPC and subnets"
+  expectations: "The agent calculates the lowest Y-coordinate of all boundaries and places the legend at least 20px below it"
+  expectations: "The SVG viewBox height is appropriately expanded to ensure the legend is fully visible without clipping"
+}
+
+cases {
+  name: "layout_message_bus_in_gap"
+  prompt: "Visualize an event-driven architecture where an Order Service sends events to a Kafka Message Bus, which are then consumed by an Inventory Service and a Notification Service."
+  expectations: "The agent places the Kafka Message Bus in the gap between the producing and consuming services, avoiding overlapping service boxes"
+  expectations: "Flows use correct SVG marker arrowheads to indicate the direction of event publishing and consumption"
+}

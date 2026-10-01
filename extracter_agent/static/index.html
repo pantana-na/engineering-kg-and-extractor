@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OKF v0.2 Engineering Extraction Workbench | Cloud Run</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <!-- TOP WORKBENCH HEADER -->
+  <header class="wb-header">
+    <div class="wb-brand">
+      <div class="wb-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <div>
+        <div class="wb-title-row">
+          <h1 class="wb-title">OKF v0.2 Engineering Workbench</h1>
+          <span class="wb-badge wb-badge-primary">Unit 2300</span>
+        </div>
+        <div class="wb-subtitle" id="gcs-bucket-banner">
+          <span id="stat-gcs-bucket">gs://your-gcp-project-id-okf-knowledge</span> • <span id="stat-raw-count">0</span> Raw PDFs • <span id="stat-okf-count">0</span> OKF Files • <span id="stat-conflict-count">0</span> Conflicts
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER VIEW MODE SWITCHER -->
+    <div class="wb-view-switcher" role="group" aria-label="Document Viewer Layout Mode">
+      <button type="button" class="wb-mode-btn active" id="view-mode-split" data-mode="split" title="Side-by-Side PDF + Markdown Split View">
+        Split (PDF + MD)
+      </button>
+      <button type="button" class="wb-mode-btn" id="view-mode-pdf" data-mode="pdf" title="Full-Width Raw PDF Viewer">
+        PDF Only
+      </button>
+      <button type="button" class="wb-mode-btn" id="view-mode-md" data-mode="md" title="Full-Width OKF Markdown Viewer">
+        MD Only
+      </button>
+    </div>
+
+    <!-- RIGHT TELEMETRY, GCS AUTO-REFRESH & THEME TOGGLE -->
+    <div class="wb-actions">
+      <div class="gcs-sync-pill" id="gcs-sync-indicator" title="Automatic GCS synchronization every 8 seconds">
+        <span class="sync-dot" id="gcs-sync-dot"></span>
+        <span id="gcs-sync-text">GCS Synced</span>
+        <code id="gcs-sync-version">v--------</code>
+      </div>
+      <button type="button" class="wb-btn wb-btn-outline" id="btn-sync-gcs" title="Force immediate refresh from GCS bucket">
+        ↻ Sync GCS
+      </button>
+      <a href="/architecture-diagram" target="_blank" rel="noopener" class="wb-btn wb-btn-outline" title="View System Architecture Diagram">
+        Architecture ↗
+      </a>
+      <button type="button" class="wb-btn wb-btn-icon" id="theme-toggle" title="Toggle Clean Industrial Light / Dark Technical Blueprint Theme" aria-label="Toggle Theme">
+        <span id="theme-toggle-label">🌙 Dark</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 3-PANE SPLIT ENGINEERING WORKBENCH -->
+  <main class="wb-grid" id="workbench-main">
+    <!-- LEFT PANE: RAW PDF & EXTRACTED OKF FILE EXPLORER -->
+    <aside class="wb-pane wb-pane-explorer" id="pane-explorer">
+      <div class="pane-header">
+        <span class="pane-title">Repository &amp; GCS Explorer</span>
+        <span class="pane-meta" id="explorer-total-badge">0 files</span>
+      </div>
+
+      <div class="explorer-controls">
+        <div class="search-box">
+          <input
+            type="search"
+            id="file-search-input"
+            placeholder="Filter tag (D-2304, V-2301) or PDF..."
+            autocomplete="off"
+          />
+        </div>
+        <div class="filter-tabs" role="tablist">
+          <button type="button" class="filter-tab active" id="tab-filter-all" data-filter="all">All</button>
+          <button type="button" class="filter-tab" id="tab-filter-raw" data-filter="raw">Raw PDFs</button>
+          <button type="button" class="filter-tab" id="tab-filter-okf" data-filter="okf">Extracted MD</button>
+          <button type="button" class="filter-tab" id="tab-filter-conflicts" data-filter="conflicts">⚠️ Conflicts</button>
+        </div>
+      </div>
+
+      <div class="explorer-tree" id="explorer-tree-container">
+        <!-- Populated dynamically by app.js from /api/files -->
+        <div class="loading-state">Loading Raw PDFs and OKF Markdown files from GCS...</div>
+      </div>
+    </aside>
+
+    <!-- CENTER PANE: SIDE-BY-SIDE (OR TABBED) PDF + MARKDOWN VIEWER -->
+    <section class="wb-pane wb-pane-viewer mode-split" id="pane-viewer">
+      <!-- SUB-PANE 1: NATIVE RAW PDF VIEWER -->
+      <div class="viewer-subpane viewer-pdf" id="pane-viewer-pdf">
+        <div class="viewer-toolbar">
+          <div class="viewer-file-info">
+            <span class="file-badge badge-pdf">PDF</span>
+            <span class="viewer-file-path" id="active-pdf-title">Select a Raw Engineering PDF...</span>
+          </div>
+          <div class="viewer-toolbar-actions">
+            <select id="pdf-quick-select" class="wb-select" title="Switch Raw PDF Document"></select>
+            <button type="button" class="wb-btn wb-btn-accent" id="btn-extract-current-pdf" title="Run ADK Extraction on this Raw PDF">
+              ⚡ Extract PDF
+            </button>
+            <a id="link-open-pdf-tab" href="#" target="_blank" rel="noopener" class="wb-btn wb-btn-outline" title="Open Raw PDF in new browser tab">
+              ↗
+            </a>
+          </div>
+        </div>
+        <div class="pdf-frame-container">
+          <iframe
+            id="pdf-iframe"
+            title="Raw Engineering PDF Viewer"
+            src="about:blank"
+          ></iframe>
+        </div>
+      </div>
+
+      <!-- SUB-PANE 2: RICH OKF v0.2 MARKDOWN VIEWER -->
+      <div class="viewer-subpane viewer-md" id="pane-viewer-md">
+        <div class="viewer-toolbar">
+          <div class="viewer-file-info">
+            <span class="file-badge badge-md">OKF MD</span>
+            <span class="viewer-file-path" id="active-md-title">No OKF Markdown Selected</span>
+            <span class="conflict-status-pill" id="active-md-conflict-pill"></span>
+          </div>
+          <div class="viewer-toolbar-actions">
+            <button type="button" class="wb-btn wb-btn-outline" id="btn-toggle-frontmatter" title="Show/Hide YAML Frontmatter Inspector">
+              YAML Meta
+            </button>
+            <button type="button" class="wb-btn wb-btn-outline" id="btn-toggle-md-raw" title="Toggle Rendered GFM vs Raw Markdown Source">
+              Raw MD
+            </button>
+            <button type="button" class="wb-btn wb-btn-accent" id="btn-extract-current-md" title="Re-run ADK Extraction for this Equipment / Concept">
+              ⚡ Extract Concept
+            </button>
+          </div>
+        </div>
+
+        <!-- CITED SOURCE PDF CHIPS BAR (Clicking loads the PDF in the adjacent PDF pane) -->
+        <div class="md-sources-bar" id="md-source-pdfs-bar">
+          <span class="sources-label">Cited Raw PDFs:</span>
+          <div class="sources-chips" id="md-source-chips-list"></div>
+        </div>
+
+        <!-- CONFLICT ALERT BANNER (Shown automatically when CONFLICT rows exist) -->
+        <div class="md-conflict-banner hidden" id="md-conflict-banner">
+          <div class="conflict-banner-title">⚠️ Cross-Document Engineering Discrepancy Preserved (OKF v0.2 Rule)</div>
+          <ul class="conflict-banner-list" id="md-conflict-list"></ul>
+        </div>
+
+        <!-- COLLAPSIBLE YAML FRONTMATTER INSPECTOR -->
+        <div class="md-frontmatter-drawer hidden" id="md-frontmatter-panel">
+          <pre id="md-frontmatter-json"></pre>
+        </div>
+
+        <!-- MARKDOWN BODY CONTENT (RENDERED GFM OR RAW SOURCE) -->
+        <div class="md-content-scroll">
+          <article class="markdown-body" id="md-rendered-body">
+            Checking GCS bucket for Raw PDFs and OKF v0.2 Markdown files...
+          </article>
+          <pre class="md-raw-source hidden" id="md-raw-body"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT PANE: PERSISTENT AGENT EXTRACTION CHAT -->
+    <aside class="wb-pane wb-pane-chat" id="pane-chat">
+      <div class="pane-header">
+        <div>
+          <span class="pane-title">ADK Extraction Agent Chat</span>
+          <span class="agent-subtitle">By-PDF &amp; By-Equipment OKF v0.2 Compiler</span>
+        </div>
+        <label class="llm-toggle-label" title="When enabled, invokes live Vertex AI Gemini LLM in addition to ADK deterministic tools">
+          <input type="checkbox" id="toggle-live-llm" checked />
+          <span>Live Gemini LLM</span>
+        </label>
+      </div>
+
+      <!-- TARGETED EXTRACTION CONTROLS -->
+      <div class="chat-target-bar">
+        <div class="target-row">
+          <select id="chat-extract-mode" class="wb-select" title="Extraction Routing Mode">
+            <option value="auto">Mode: Auto-Detect</option>
+            <option value="by_equipment">Mode: Extract Equipment Tag</option>
+            <option value="by_pdf">Mode: Extract Raw PDF</option>
+          </select>
+          <select id="chat-select-equipment" class="wb-select" title="Pick Equipment Tag to Extract">
+            <option value="">Select Equipment...</option>
+          </select>
+        </div>
+        <div class="target-row">
+          <select id="chat-select-pdf" class="wb-select" title="Pick Raw PDF to Extract">
+            <option value="">Select Raw PDF...</option>
+          </select>
+        </div>
+        <div class="quick-action-pills">
+          <button type="button" class="chip-btn" id="btn-chat-extract-open-eq" title="Extract currently open equipment concept">
+            ⚡ Extract Open Equipment
+          </button>
+          <button type="button" class="chip-btn" id="btn-chat-extract-open-pdf" title="Extract currently open Raw PDF">
+            📄 Extract Open PDF
+          </button>
+          <button type="button" class="chip-btn chip-btn-warn" id="btn-chat-test-guardrail" title="Verify Model Armor Pre-Flight Prompt Injection Block">
+            🛡️ Test Guardrail
+          </button>
+        </div>
+      </div>
+
+      <!-- CHAT MESSAGE STREAM -->
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-msg chat-msg-agent">
+          <div class="msg-header">
+            <span class="msg-author">OrchestratorAgent</span>
+            <span class="msg-meta">Ready • GCS Auto-Refresh Active</span>
+          </div>
+          <div class="msg-body">
+            Welcome to the <strong>OKF v0.2 Engineering Workbench</strong>. You can:
+            <ul>
+              <li>Browse <strong>Raw Engineering PDFs</strong> and <strong>Extracted OKF Markdown files</strong> in the left explorer.</li>
+              <li>Inspect any Markdown file side-by-side with its cited <strong>Raw Engineering PDF</strong>.</li>
+              <li>Click <strong>⚡ Extract</strong> on any PDF or equipment tag—or message me below—to run ADK extraction and automatically sync updated files from GCS.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- CHAT INPUT FORM -->
+      <form class="chat-input-area" id="chat-form">
+        <textarea
+          id="chat-input"
+          rows="2"
+          placeholder="Ask to extract a specific PDF or equipment tag (e.g., 'Extract D-2304 from its process data sheet' or 'Extract C-2201')..."
+        ></textarea>
+        <div class="chat-send-row">
+          <span class="chat-hint" id="chat-status-hint">Model Armor Guardrail Active</span>
+          <button type="submit" class="wb-btn wb-btn-primary" id="btn-chat-send">
+            Run Extraction ↵
+          </button>
+        </div>
+      </form>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+# Agents CLI Deployment Manifest
+# Deploys the ADK Agent to Gemini Enterprise Agent Platform (agent_runtime)
+name: extracter-agent
+agent_directory: extracter_agent
+region: asia-southeast1
+project: your-gcp-project-id
+deployment_target: agent_runtime
+base_template: adk

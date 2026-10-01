@@ -1,0 +1,41 @@
+"""Cloud Spanner Graph-RAG & Data Lineage ADK FunctionTool Registry."""
+
+from query_agent.tools.spanner_rag_tools import (
+    ALL_QUERY_AGENT_TOOLS,
+    execute_multistage_risk_and_hazop_query,
+    execute_multistage_risk_and_hazop_query_tool,
+    get_active_spanner_repository,
+    hybrid_search_okf_spanner,
+    hybrid_search_okf_spanner_tool,
+    lookup_entity_and_parameters,
+    lookup_entity_and_parameters_tool,
+    read_full_okf_concept_from_spanner,
+    read_full_okf_concept_from_spanner_tool,
+    set_active_spanner_repository,
+    sync_or_inspect_knowledge_catalog,
+    sync_or_inspect_knowledge_catalog_tool,
+    trace_data_lineage_and_conflicts,
+    trace_data_lineage_and_conflicts_tool,
+    traverse_equipment_connectivity_graph,
+    traverse_equipment_connectivity_graph_tool,
+)
+
+__all__ = [
+    "ALL_QUERY_AGENT_TOOLS",
+    "execute_multistage_risk_and_hazop_query",
+    "execute_multistage_risk_and_hazop_query_tool",
+    "get_active_spanner_repository",
+    "hybrid_search_okf_spanner",
+    "hybrid_search_okf_spanner_tool",
+    "lookup_entity_and_parameters",
+    "lookup_entity_and_parameters_tool",
+    "read_full_okf_concept_from_spanner",
+    "read_full_okf_concept_from_spanner_tool",
+    "set_active_spanner_repository",
+    "sync_or_inspect_knowledge_catalog",
+    "sync_or_inspect_knowledge_catalog_tool",
+    "trace_data_lineage_and_conflicts",
+    "trace_data_lineage_and_conflicts_tool",
+    "traverse_equipment_connectivity_graph",
+    "traverse_equipment_connectivity_graph_tool",
+]
