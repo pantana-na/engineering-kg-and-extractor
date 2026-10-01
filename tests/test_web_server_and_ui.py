@@ -114,12 +114,13 @@ def test_workbench_root_healthz_and_architecture_html(client: TestClient) -> Non
 
 
 def test_workbench_status_and_files_tree_endpoints(client: TestClient) -> None:
-    """Verify /api/status and /api/files return live telemetry, 20 Raw PDFs, OKF files, and sync_version."""
+    """Verify /api/status and /api/files return live telemetry, Raw PDFs, OKF files, and sync_version."""
+    expected_pdf_count = len(list(Path("reference/raw").rglob("*.pdf")))
     resp = client.get("/api/status")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "online"
-    assert data["raw_pdf_count"] == 20
+    assert data["raw_pdf_count"] == expected_pdf_count
     assert data["okf_domain_documents"] >= 2
     assert data["total_markdown_files"] >= 4
     assert data["conflict_count"] >= 1
@@ -132,7 +133,7 @@ def test_workbench_status_and_files_tree_endpoints(client: TestClient) -> None:
     files_data = files_resp.json()
     assert files_data["status"] == "success"
     assert files_data["changed"] is True
-    assert files_data["raw_pdf_count"] == 20
+    assert files_data["raw_pdf_count"] == expected_pdf_count
     assert files_data["okf_file_count"] >= 4
     sync_ver = files_data["sync_version"]
     assert len(sync_ver) == 16
