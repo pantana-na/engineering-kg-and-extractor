@@ -27,7 +27,8 @@ In complex process plants, critical engineering data is scattered across hundred
    - [Agent 1: OKF Extracter Agent (`extracter_agent`)](#21-agent-1-okf-extracter-agent-extracter_agent)
    - [Bridge: Consolidated 100% `.md`-Only Spanner Sync (`sync_markdown_bundle_to_spanner`)](#22-bridge-consolidated-100-md-only-spanner-sync-sync_markdown_bundle_to_spanner)
    - [Agent 2: OKF Spanner Graph-RAG Query Agent (`query_agent`)](#23-agent-2-okf-spanner-graph-rag-query-agent-query_agent)
-3. [How to Use the Platform (Web UIs, Demo Data Walkthrough, Local Dev & CLI)](#-3-how-to-use-the-platform-web-uis-local-dev--cli)
+3. [How to Use the Platform (Source Data Setup, Web UIs, Demo Walkthrough, Local Dev & CLI)](#-3-how-to-use-the-platform-web-uis-local-dev--cli)
+   - [How to Put Source Data in Local (`reference/raw/`) & Google Cloud Storage (GCS)](#30-how-to-put-source-data-in-local-referenceraw--google-cloud-storage-gcs)
    - [Using the Cloud Run Web Workbenches](#31-using-the-cloud-run-web-workbenches)
    - [Running Both Workbenches Locally](#32-running-both-workbenches-locally)
    - [Running `.md`-to-Spanner Purge, Reload & Incremental Sync (CLI)](#33-running-md-to-spanner-purge-reload--incremental-sync-cli)
@@ -142,6 +143,73 @@ flowchart LR
 ---
 
 ## 🖥️ 3. How to Use the Platform (Web UIs, Local Dev & CLI)
+
+### 3.0 How to Put Source Data in Local (`reference/raw/`) & Google Cloud Storage (GCS)
+
+All raw engineering PDF documents ingested by **Agent 1 (`extracter_agent`)** and displayed in **Workbench 1 (`extracter-agent-web`)** are organized under **5 canonical category folders** inside [`reference/raw/`](./reference/raw/README.md):
+
+| Canonical Subfolder | What PDFs to Put Here | Folder Guide |
+| :--- | :--- | :--- |
+| [`reference/raw/data_sheets/`](./reference/raw/data_sheets/README.md) | Process Data Sheets, Mechanical Vessel/Exchanger/Pump Data Sheets, Control Valve & Relief Valve (PSV) Sizing Packages | [`data_sheets/README.md`](./reference/raw/data_sheets/README.md) |
+| [`reference/raw/pid/`](./reference/raw/pid/README.md) | Piping & Instrumentation Diagrams (P&IDs) — single-sheet or multi-sheet CAD/scanned drawing packages (e.g., `ML101620329-part-1.pdf` .. `part-8.pdf`) | [`pid/README.md`](./reference/raw/pid/README.md) |
+| [`reference/raw/pfd/`](./reference/raw/pfd/README.md) | Process Flow Diagrams (PFDs), Heat & Material Balance (H&MB) tables, and Material Selection Diagrams | [`pfd/README.md`](./reference/raw/pfd/README.md) |
+| [`reference/raw/operating_manuals/`](./reference/raw/operating_manuals/README.md) | Plant Operating Manuals, Equipment Inspection & Maintenance Manuals (`Inspection_Manual_for_Heat_Exchangers_1.pdf`), Startup/Shutdown SOPs | [`operating_manuals/README.md`](./reference/raw/operating_manuals/README.md) |
+| [`reference/raw/standards/`](./reference/raw/standards/README.md) | Engineering Design Standards, HAZOP Guides (`HAZOP_Training_Guide.pdf`), Risk Assessment Matrices (`Risk_Assessment_Matrix.pdf`), SIS Interlock Registers, Safety Data Sheets (SDS) | [`standards/README.md`](./reference/raw/standards/README.md) |
+
+#### Option A — Putting Source Data Locally (`reference/raw/<subfolder>/`)
+1. **Copy your PDF files** into the matching category folder under `reference/raw/`:
+   ```bash
+   cp /path/to/your_datasheet.pdf        reference/raw/data_sheets/
+   cp /path/to/your_pid_drawing.pdf      reference/raw/pid/
+   cp /path/to/your_pfd.pdf              reference/raw/pfd/
+   cp /path/to/your_operating_manual.pdf reference/raw/operating_manuals/
+   cp /path/to/your_standard_or_sds.pdf  reference/raw/standards/
+   ```
+2. *(Optional)* **Generate the 20 synthetic chemical plant reference PDFs** across all 5 folders for local testing:
+   ```bash
+   PYTHONPATH=. .venv/bin/python scripts/generate_synthetic_reference.py
+   ```
+3. **Configure `.env` for local source discovery:**
+   - `REFERENCE_RAW_DIR=reference/raw` (default) points `extracter_agent` and `extracter-agent-web` to your local `reference/raw/` folders.
+   - Set `USE_GCS_STORAGE=false` in `.env` if you want `extracter_agent` to read strictly from your local filesystem (`reference/raw/`), or leave `USE_GCS_STORAGE=true` to merge GCS + local PDFs automatically.
+
+#### Option B — Putting Source Data in Google Cloud Storage (`gs://$DESTINATION_GCS_BUCKET/$SOURCE_GCS_RAW_PREFIX/`)
+When running on **Vertex AI Agent Runtime (`agent_runtime`)** and **Google Cloud Run (`cloud_run`)**, `extracter_agent` discovers and streams raw PDFs from `gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX}/<subfolder>/<filename>.pdf` (where `SOURCE_GCS_RAW_PREFIX` defaults to `reference/raw`):
+
+```bash
+# Load bucket, project, and prefix variables from .env
+source .env
+
+# 1. Sync your entire local reference/raw/ directory tree (all 5 subfolders) to GCS:
+gcloud storage rsync reference/raw \
+  "gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX:-reference/raw}" \
+  --project="${GOOGLE_CLOUD_PROJECT}" \
+  --recursive
+
+# 2. Or upload individual PDFs directly to a specific GCS subfolder:
+gcloud storage cp /path/to/your_datasheet.pdf \
+  "gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX:-reference/raw}/data_sheets/"
+
+gcloud storage cp /path/to/your_pid_drawing.pdf \
+  "gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX:-reference/raw}/pid/"
+
+gcloud storage cp /path/to/your_pfd.pdf \
+  "gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX:-reference/raw}/pfd/"
+
+gcloud storage cp /path/to/your_manual.pdf \
+  "gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX:-reference/raw}/operating_manuals/"
+
+gcloud storage cp /path/to/your_standard.pdf \
+  "gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX:-reference/raw}/standards/"
+
+# 3. Or run deploy.sh --target infra (creates bucket if needed + rsyncs reference/raw/ to GCS):
+./deploy.sh --target infra
+
+# 4. Verify uploaded PDFs in GCS:
+gcloud storage ls -r "gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX:-reference/raw}/**.pdf"
+```
+
+---
 
 ### 3.1 Using the Cloud Run Web Workbenches
 
@@ -420,7 +488,13 @@ bash scripts/run_dual_evals_v5.sh
 │       ├── PROGRESS_REPORT_20260922.md
 │       └── QUERY_AGENT_EVAL_REPORT.md
 ├── evals/ & tests/                  # Live Evaluation Suites & 143 Unit + Hypothesis PBT Tests
-├── reference/raw/                   # STRICTLY IMMUTABLE Read-Only Reference Data (20 Synthetic Engineering PDFs)
+├── reference/raw/                   # STRICTLY IMMUTABLE Read-Only Source PDFs (Local & GCS Mirror)
+│   ├── README.md                    # Source data layout & Local/GCS upload guide
+│   ├── data_sheets/                 # Equipment, control valve & relief valve (PSV) data sheets (with README.md)
+│   ├── pid/                         # Piping & Instrumentation Diagrams (P&IDs, with README.md)
+│   ├── pfd/                         # Process Flow Diagrams (PFDs) & Heat/Material Balances (with README.md)
+│   ├── operating_manuals/           # Plant operating & equipment inspection manuals (with README.md)
+│   └── standards/                   # Engineering standards, HAZOP guides, Risk Matrix & SDS (with README.md)
 └── terraform/                       # Declarative Terraform IaC for Cloud Run, Cloud Spanner & IAM
 ```
 
