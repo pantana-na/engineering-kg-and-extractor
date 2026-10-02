@@ -127,21 +127,30 @@ All historical defects and evaluation findings were resolved under the mandatory
      2. **Selection Race Condition, Unreset `state.graphData` & Slow 12-Query Hop-2 Loop:** Reset `state.graphData = null` and `state.conceptDetail = null` in `setFocusTag()`, added `state.selectionRequestSeq` + `AbortController` in `loadSpannerGraph()`, eliminated the duplicate parallel `loadConceptDetail()` call on selection switch, batched Hop-2+ GQL traversal into a single `UNNEST(@tags)` query in `traverse_connectivity_gql()`, skipped equipment-only queries for non-equipment concepts, and added a 60s `_GRAPH_CACHE` in `web_server.py`.
      3. **Nested `frontmatter.entity_metadata` Provenance & `STRPOS` Tag Hijacking (`C-2301` vs `UC-2301`):** Updated `build_catalog_dossier()` to extract nested `frontmatter.entity_metadata` (`approver`, `author`, `document_id`, `effective_date`, `governing_authority`, `revision`) and markdown body PDF citations, and updated `read_full_concept()`, `lookup_entity_and_parameters()`, and `get_interactive_graph()` to prioritize exact `/tag` boundaries so `C-2301` never resolves to `UC-2301`.
      4. **Strict 50% Right Chat Pane Containment:** Added `min-width: 0` to `.wb-pane`, `.wb-pane-middle`, `.wb-pane-chat`, `flex: 1; min-width: 0` to `.prebuilt-chips-scroll`, and `flex-wrap: wrap` to `.graph-legend-bar` (`136 / 136` unit & property tests passing).
+8. **RCA-8 (Spanner Graph Connectivity Upgrade `v8`, Schema Pre-Validators & Multi-PDF Spanner Ingestion):**
+   - Upgraded `ConnectionStream` (`direction`, `source_tag`, `target_tag`, `line_size`, `inline_components`), added `@model_validator(mode="before")` on `EngineeringParameter`, `ConnectionStream`, and `InstrumentLoop` (`extracter_agent/models/domain.py`), fixed `derive_canonical_equipment_tag` base-tag isolation, and generalized `_EQUIP_TAG_RE` / `_INST_TAG_RE` / `_resolve_graph_equip_slug` in `query_agent/spanner/lineage_extractor.py`.
+   - Reloaded the multi-PDF Seabrook + HAZOP/RAM bundle (`build/okf_bundle`, `v8-seabrook`, `49` `.md` files / `42` concepts) into live Cloud Spanner (`okf-demo-spanner/okf_demo_graph`) and Dataplex Universal Catalog (`entryGroups/okf-demo-assets` -> `SYNCED_LIVE`): **`10` `RawSourceDocuments`, `42` `OkfConcepts`, `314` `OkfSectionChunks` (768-d vectors), `443` `EngineeringEntities`, `862` `FactAssertions`, `560` `ProcessConnections` (`CONNECTS_TO`), `208` `InstrumentControlEdges` (`MONITORS_OR_TRIPS`), and `981` `FactLineageEdges` (`DERIVED_FROM`)**.
 
 ---
 
-## 7. Resumption Guide & Next Actions
+## 7. Resumption Guide & Planned Next-Revision Backlog (`v9`)
 
-All planned milestones across `SPEC-20260922-OKF-EXTRACTER-AGENT` (Steps 1–28), `SPEC-20260929-OKF-SPANNER-GRAPH-RAG-AGENT` (Steps 1–7), and `SPEC-20260929-QUERY-AGENT-RETRIEVAL-WORKBENCH-UI` (`v2.2`) are **COMPLETED and verified**. To operate or extend the platform:
+### 7.1 Planned Fix for Next Revision (`v9` — Multi-Sheet Provenance & Conflict Matcher Refinement)
+- **Issue Identified (Zero Data Loss, False-Positive Conflict Flag Only):**
+  - When an equipment item spans consecutive P&ID continuation sheets across separate PDFs (e.g., `RH-E-9A` and `RH-E-9B` appearing on `PID-1-SI-LR20448` in `ML101620329-part-1.pdf` and continuing on `PID-1-SI-LR20449` in `ML101620329-part-2.pdf`), `_merge_parameter_lists` in `extracter_agent/okf/synthesizer.py` compares the `"Drawing Number"` row in `## Design Data` across both sheets and emits a false-positive `⚠️ CONFLICT — Drawing Number` bullet because `PID-1-SI-LR20448 != PID-1-SI-LR20449`.
+  - Secondary conflict-matcher false positives: `query_agent/spanner/lineage_extractor.py` (`row_has_conflict`) matches `r"\bvs\.?\b"` on differential pressure tap descriptions (`"Across F-33 (Inlet shell vs Outlet pipe)"` on `PDIS-2622`, `PDIS-2623`, `PDIS-2624`), and `extracter_agent/okf/indexer.py` (`_build_master_root_index`) sweeps generic `> ⚠️ **CRITICAL PROCESS SAFETY / DISCREPANCY WARNING:**` callouts from `hazop/`, `procedures/`, and `standards/` into Section 5 of `index.md`.
+- **Planned `v9` Resolution (Option 1):**
+  1. Update `_merge_parameter_lists` in `extracter_agent/okf/synthesizer.py` so multi-sheet provenance/reference metadata keys (`Drawing Number`, `Drawing Reference`, `Reference Drawing`, `Associated Drawings`, `Grid Location`, `Sheet`) merge additively (`val1; val2`) across continuation drawings instead of raising `⚠️ CONFLICT`, while keeping strict conflict detection on all physical/process parameters.
+  2. Refine `extracter_agent/agent/prompts.py` so `design_data` is reserved for physical/engineering specifications rather than duplicating `sources` drawing numbers.
+  3. Tighten `extracter_agent/okf/indexer.py` and `query_agent/spanner/lineage_extractor.py` to only flag genuine `⚠️ CONFLICT` markers.
+
+### 7.2 Standard Operations
 1. **Extract New or Updated PDFs:** Use `extracter-agent-web` or `extracter_agent` CLI to synthesize/update `.md` files in the OKF bundle.
 2. **Purge & Reload or Incrementally Sync `.md` Changes to Spanner & Dataplex:**
-   - Full Purge & Reload: `PYTHONPATH=. .venv/bin/python scripts/purge_and_reload_spanner.py --bundle-dir build/okf_bundle_by_equipment_v5`
-   - Incremental Mirror Sync: `PYTHONPATH=. .venv/bin/python scripts/ingest_okf_bundle_to_spanner.py --no-purge --bundle-dir build/okf_bundle_by_equipment_v5`
+   - Full Purge & Reload: `PYTHONPATH=. .venv/bin/python scripts/ingest_okf_bundle_to_spanner.py --bundle-dir build/okf_bundle --bundle-version v8-seabrook --purge`
+   - Incremental Mirror Sync: `PYTHONPATH=. .venv/bin/python scripts/ingest_okf_bundle_to_spanner.py --no-purge --bundle-dir build/okf_bundle --bundle-version v8-seabrook`
 3. **Run Regression & Live Eval Suites:**
-   - Unit & Property Tests (`136` tests): `PYTHONPATH=. .venv/bin/pytest tests/ -q`
+   - Unit & Property Tests: `PYTHONPATH=. .venv/bin/pytest tests/ -q`
    - Live Query Agent Eval (`120` questions): `PYTHONPATH=. .venv/bin/python -u evals/run_live_query_agent_eval.py --use-agent-runtime`
    - Live Extracter Agent V5 Eval (`275` cases across `By-PDF` & `By-Equipment`): `bash scripts/run_dual_evals_v5.sh`
-
-
-
 
