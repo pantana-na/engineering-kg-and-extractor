@@ -27,7 +27,11 @@ In complex process plants, critical engineering data is scattered across hundred
    - [Agent 1: OKF Extracter Agent (`extracter_agent`)](#21-agent-1-okf-extracter-agent-extracter_agent)
    - [Bridge: Consolidated 100% `.md`-Only Spanner Sync (`sync_markdown_bundle_to_spanner`)](#22-bridge-consolidated-100-md-only-spanner-sync-sync_markdown_bundle_to_spanner)
    - [Agent 2: OKF Spanner Graph-RAG Query Agent (`query_agent`)](#23-agent-2-okf-spanner-graph-rag-query-agent-query_agent)
-3. [How to Use the Platform (Web UIs, Local Dev & CLI)](#-3-how-to-use-the-platform-web-uis-local-dev--cli)
+3. [How to Use the Platform (Web UIs, Demo Data Walkthrough, Local Dev & CLI)](#-3-how-to-use-the-platform-web-uis-local-dev--cli)
+   - [Using the Cloud Run Web Workbenches](#31-using-the-cloud-run-web-workbenches)
+   - [Running Both Workbenches Locally](#32-running-both-workbenches-locally)
+   - [Running `.md`-to-Spanner Purge, Reload & Incremental Sync (CLI)](#33-running-md-to-spanner-purge-reload--incremental-sync-cli)
+   - [End-to-End Walkthrough with Demo Data (Seabrook P&IDs, HAZOP/RAM & Synthetic Reference)](#34-end-to-end-walkthrough-with-demo-data-seabrook-pids-hazopram--synthetic-reference)
 4. [How to Configure & Deploy (`deploy.sh`)](#-4-how-to-configure--deploy-deploysh)
 5. [Testing & Live Evaluation Benchmarks](#-5-testing--live-evaluation-benchmarks)
 6. [Repository Structure & Specification Links](#-6-repository-structure--specification-links)
@@ -223,6 +227,74 @@ PYTHONPATH=. .venv/bin/python scripts/ingest_okf_bundle_to_spanner.py \
 - `--force-reingest`: Force re-extraction and re-embedding even if `.md` MD5 hashes match.
 - `--skip-embeddings`: Skip computing 768-d `text-embedding-005` vectors.
 - `--skip-catalog`: Skip synchronizing Google Cloud Dataplex Universal Catalog & OpenLineage.
+
+---
+
+### 3.4 End-to-End Walkthrough with Demo Data (Seabrook P&IDs, HAZOP/RAM & Synthetic Reference)
+
+The platform supports both **real multi-sheet P&ID & HAZOP/RAM PDF packages** in Google Cloud Storage and **deterministic synthetic reference PDFs** for offline/CI testing.
+
+#### A. Available Demo Datasets
+
+| Dataset | Source PDFs (`reference/raw/`) | Key Extracted Equipment & Domain Concepts | Live Spanner Graph Scale (`v8-seabrook`) |
+| :--- | :--- | :--- | :--- |
+| **1. Seabrook Station LR P&IDs + HAZOP/RAM Package (Live Cloud Demo)** | • `pid/ML101620329-part-1.pdf` (`5` sheets: `LR20483`, `LR20484`, `LR20446`, `LR20447`, `LR20448`)<br>• `pid/ML101620329-part-2.pdf` (`5` sheets: `LR20449`, `LR20450`, `LR20518`, `LR20519`, `LR20520`)<br>• `standards/hazop-training-guide.pdf`<br>• `standards/risk-assessment-matrix.pdf` | • **31 Equipment Concepts (`equipment/`):**<br>  - *Spent Fuel Pool (`SF`):* `P-12`, `F-33`, `DM-8`, `F-34`, `P-272`, `F-207`<br>  - *Safety Injection (`SI` / `CS`):* `SI-P-6A/B`, `CS-P-2A/B`, `SI-TK-9A..D`<br>  - *Residual Heat Removal (`RH` / `CBS`):* `RH-P-8A/B`, `RH-E-9A/B`, `CBS-TK-10A/B`<br>  - *Nuclear Sample System (`SS`):* `SS-E-12A/B`, `SS-E-13A/B`, `SS-E-106`, `SS-CP-166A`, `SS-CP-419`, `SS-P-392`, `SS-T-312`, `SS-TK-197`, `SS-TK-228A/B`<br>• **11 Governance & Source Concepts:** `hazop/guide-words-and-deviations`, `hazop/risk-assessment-matrix`, `procedures/*`, `standards/*`, `sources/*` | • **`10`** `RawSourceDocuments`<br>• **`42`** `OkfConcepts`<br>• **`314`** `OkfSectionChunks` (768-d vectors)<br>• **`443`** `EngineeringEntities`<br>• **`862`** `FactAssertions`<br>• **`560`** `ProcessConnections` (`CONNECTS_TO`)<br>• **`208`** `InstrumentControlEdges` (`MONITORS_OR_TRIPS`)<br>• **`981`** `FactLineageEdges` (`DERIVED_FROM`) |
+| **2. Synthetic Chemical Plant Reference Dataset (Local / CI)** | Generated via `scripts/generate_synthetic_reference.py` (`20` PDFs across `data_sheets/`, `pid/`, `pfd/`, `operating_manuals/`, `standards/`) | Unit 2100/2200/2300 equipment (`D-2304`, `C-2301`, `R-2101`, `V-2301`, `E-2307`, `P-2301A/B`), SIS interlock registers, and Cumene/Phenol SDS hazards | Used by automated `pytest` unit/property suites and `evals/` benchmarks |
+
+#### B. Step-by-Step Demo Workflow
+
+**Step 1 — Extract Raw PDFs into Structured OKF `.md` Files (Workbench 1 or API)**
+1. Open **`extracter-agent-web`** (or local `http://localhost:8080`).
+2. In the **Left Pane**, filter by **`Raw PDFs`** and click the **`⚡`** extract button next to `pid/ML101620329-part-1.pdf` and `pid/ML101620329-part-2.pdf` (or trigger via API):
+   ```bash
+   curl -X POST "$EXTRACTER_WEB_URL/api/extract" \
+     -H "Content-Type: application/json" \
+     -d '{"target": "pid/ML101620329-part-1.pdf"}'
+   ```
+3. Each extracted `equipment/<TAG>.md` file is automatically synthesized (or incrementally merged via `Read-Merge-Upsert` when equipment like `RH-E-9A`, `RH-P-8A`, or `SI-P-6A` spans multiple P&ID sheets) with structured Spanner Graph connectivity in both YAML frontmatter (`entity_metadata.connections` & `entity_metadata.instruments`) and the 10-column `## Connections & Stream Summary` table (`Stream | Direction | From (Source) | To (Target) | Line Size | Inline Valves / Components | Temp | Pressure | Flow Rate | Description`).
+
+**Step 2 — Sync Extracted `.md` Bundle from GCS & Load into Cloud Spanner (`okf_knowledge_graph`)**
+Download the latest extracted `.md` bundle from GCS into `build/okf_bundle` and run `ingest_okf_bundle_to_spanner.py`:
+
+```bash
+# 1. Pull the latest extracted .md files from GCS into build/okf_bundle
+PYTHONPATH=. .venv/bin/python -c "
+import shutil
+from pathlib import Path
+from google.cloud import storage
+from extracter_agent.config import get_config
+
+cfg = get_config()
+client = storage.Client(project=cfg.google_cloud_project)
+bucket = client.bucket(cfg.destination_gcs_bucket)
+out_dir = Path('build/okf_bundle')
+if out_dir.exists():
+    shutil.rmtree(out_dir)
+out_dir.mkdir(parents=True, exist_ok=True)
+prefix = cfg.destination_gcs_prefix.strip('/') + '/'
+for blob in bucket.list_blobs(prefix=prefix):
+    if not blob.name.endswith('/'):
+        dest = out_dir / blob.name.removeprefix(prefix)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(str(dest))
+"
+
+# 2. Purge & reload Cloud Spanner (OkfKnowledgeGraph) + Dataplex Universal Catalog
+PYTHONPATH=. .venv/bin/python scripts/ingest_okf_bundle_to_spanner.py \
+  --bundle-dir build/okf_bundle \
+  --bundle-version v8-seabrook \
+  --purge
+```
+
+**Step 3 — Explore the Knowledge Graph & Run Engineering Queries in Workbench 2 (`okf-query-agent-web`)**
+Open **`okf-query-agent-web`** (or local `http://localhost:8081`) and try these demo scenarios:
+- **Scenario 1 — Spent Fuel Pool Purification Train (`P-12 -> F-33 -> DM-8 -> F-34`):**
+  - Click **`F-33`** (*Fuel Pool Prefilter*) in the **Left Pane**.
+  - Inspect the **Live Spanner Graph Explorer** (Middle Pane Upper) to trace the 4" inlet from `P-12` (via `1-SF-V20`), the 3"x4" outlet to Demineralizer `DM-8` (via `1-SF-V27`), the 4" bypass (`1-SF-V25`), and differential pressure switch `PDIS-2622` (`MONITORS_OR_TRIPS`).
+- **Scenario 2 — Multi-Sheet RHR & Low Head Safety Injection Topology (`CBS-TK-10A -> RH-P-8A -> RH-E-9A -> SI-TK-9A/B`):**
+  - Select **`RH-E-9A`** (*RHR Loop A Heat Exchanger*) to view merged connectivity across `PID-1-SI-LR20448` (`part-1.pdf`) and `PID-1-SI-LR20449` (`part-2.pdf`), including tube-side supply from `RH-P-8A`, 20" CCW Loop A shell cooling, thermal relief valve `RH-V13` (`Set @ 600 PSIG`), and 8" Low Head SI injection through `PENETRATION-X-11` to `SI-TK-9A` / `SI-TK-9B`.
+- **Scenario 3 — 5-Stage HAZOP & Risk Assessment Study:**
+  - Select any equipment item (e.g., `RH-E-9A`, `SI-TK-9A`, or `F-33`) and click the **`HAZOP // 5-STAGE`** chip in the **Right Pane** to execute `execute_multistage_risk_and_hazop_query`, combining the extracted `hazop/risk-assessment-matrix` and `hazop/guide-words-and-deviations` standards with live GQL upstream/downstream propagation paths and active safeguards.
 
 ---
 
