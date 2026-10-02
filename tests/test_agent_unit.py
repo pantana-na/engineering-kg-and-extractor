@@ -70,11 +70,14 @@ def test_orchestrator_instruction_contract():
 
 
 def _ensure_raw_fixtures_if_empty(tmp_path: Path, monkeypatch) -> None:
-    """Seed minimal raw PDFs in tmp_path and point REFERENCE_RAW_DIR to it if reference/raw is empty."""
+    """Seed minimal raw PDFs in tmp_path and point REFERENCE_RAW_DIR to it if required fixture PDFs are absent."""
     from extracter_agent.config import get_config
 
     cfg = get_config()
-    if (cfg.reference_raw_dir / "pid" / "PID-23-0004_Preflash_Column_Z1.pdf").exists():
+    if (
+        (cfg.reference_raw_dir / "pid" / "PID-23-0004_Preflash_Column_Z1.pdf").exists()
+        and (cfg.reference_raw_dir / "data_sheets" / "DS-V2301_Preflash_Column_Z1.pdf").exists()
+    ):
         return
     from scripts.generate_synthetic_reference import generate_synthetic_raw_pdfs
 

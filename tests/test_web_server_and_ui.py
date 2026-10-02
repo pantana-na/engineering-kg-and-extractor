@@ -79,7 +79,11 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> TestClient:
     os.environ["USE_GCS_STORAGE"] = "false"
     os.environ["OUTPUT_BUNDLE_DIR"] = str(tmp_bundle)
 
-    if not list(Path("reference/raw").rglob("*.pdf")):
+    raw_root = Path("reference/raw")
+    if not (
+        (raw_root / "data_sheets" / "DS-D2304_Decomposer_Reactor_Z1.pdf").exists()
+        and (raw_root / "data_sheets" / "DS-V2301_Preflash_Column_Z1.pdf").exists()
+    ):
         from scripts.generate_synthetic_reference import generate_synthetic_raw_pdfs
 
         tmp_raw = tmp_path_factory.mktemp("workbench_test_raw") / "raw"
