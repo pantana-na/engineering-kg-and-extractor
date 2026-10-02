@@ -648,8 +648,84 @@ In chemical engineering facilities, instrumentation is inextricably bound to equ
 - **Unit & Property-Based Tests (`tests/test_okf_unit.py`, `tests/test_okf_property.py`):**
   - `test_zero_collision_canonical_concept_resolution_v5`, `test_multi_unit_equipment_tag_suffix_preservation_v5`, `test_dummy_probe_guard_and_inspect_canonical_alignment_v5`, `test_pbt_distinct_identifier_concepts_never_collide`.
 
+### Step 29: High-Resolution 300-DPI P&ID PNG Rasterization, Single-Page Vector Windowing & Verbatim Symbol Tag Grounding (Option A — RCA Approved)
+- **Root Cause Addressed:**
+  Sending multi-page landscape E-size P&ID `application/pdf` byte streams at default media resolution caused internal downsampling (~1000 px width across a 44-inch sheet), blurring 6-pt equipment/valve callouts inside symbols and causing visual tag hallucination and inconsistent General Note prefix synthesis.
+- **Architectural & Behavioral Specifications (Option A):**
+  1. **300-DPI PNG Page Rasterization (`_render_pdf_pages_to_png_parts` in `extracter_agent/pdf/processor.py`):**
+     - For vector/raster-only PDF windows (0 native text characters across pages), rasterize each page at **300 DPI (`image/png`)** via `pdftoppm -png -r 300` into `types.Part.from_bytes(data=png_bytes, mime_type="image/png")`, falling back cleanly to `application/pdf` if `pdftoppm` is unavailable.
+     - Configure `types.GenerateContentConfig` with `media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH` (when supported by the SDK).
+  2. **Single-Page Vector Drawing Windowing in `process_raw_pdf_tool` (`extracter_agent/tools/pdf_tools.py`):**
+     - Set `mm_kwargs["window_size"] = 1` when `is_vector` is `True` in `process_raw_pdf_tool` so each large-format P&ID/PFD sheet receives an isolated 300-DPI vision call.
+  3. **Cache Digest Version Bump (`PROMPT_V5_300DPI` in `extracter_agent/pdf/processor.py`):**
+     - Bump `_compute_multimodal_cache_digest` salt to `b"\x00PROMPT_V5_300DPI\x00"` and cache directory/prefix to `extracter_multimodal_cache_v5` / `cache/multimodal_v5/` to invalidate all stale low-resolution cached transcriptions.
+  4. **Verbatim Printed Symbol Tag Grounding (`_build_multimodal_prompt` & `ORCHESTRATOR_INSTRUCTIONS`):**
+     - Mandate transcribing the exact verbatim characters printed inside or beside each equipment symbol, valve, and instrument bubble without guessing or extrapolating sequential tag numbers.
+     - When a drawing General Note defines a default system prefix, require recording both the verbatim printed symbol tag and the General-Note system prefix explicitly rather than fabricating a hybrid tag.
+- **Unit & Property-Based Tests (`tests/test_pdf_unit.py`, `tests/test_pdf_property.py`):**
+  - `test_vector_pdf_300dpi_png_rasterization_and_single_page_windowing`, `test_verbatim_tag_prompt_and_v5_300dpi_cache_invalidation`, `test_pbt_render_pdf_pages_to_png_parts_fallback_and_digest_invariants`.
+
+### Step 30: Multi-Scale 2×2 Overlapping Quadrant Tiling + Leader-Line & Pipe-Tracing Topology Grounding (`multimodal_v6` — Option A)
+- **Root Cause Addressed:**
+  Even when an E-size P&ID sheet is rendered at 300 DPI (`~5000 × 3300` px) with `MEDIA_RESOLUTION_HIGH`, passing only a single full-sheet image per page causes the vision encoder's single-image patch grid to downscale 6-pt font digits (`TI 608` vs `TI 600`, `FE 610` vs `FE 611`, `V81`–`V88` vs `V70`–`V77`) and 1-pixel instrument leader lines (`TE 2564`/`2565` touching `RH-P-8A` below an adjacent `RH 12"` pipe).
+- **Architectural & Behavioral Specifications (Option A):**
+  1. **Multi-Scale 2×2 Overlapping Quadrant Tiling (`_encode_raw_crop_as_png` & `_build_multiscale_png_parts_from_raw` in `extracter_agent/pdf/processor.py`):**
+     - For landscape high-resolution engineering drawings (`w > h` and `w >= 1600`), emit **5 PNG `Part` objects per page**:
+       1. Full-sheet overview (`[0..w, 0..h]`) for global layout, title block, and cross-sheet routing.
+       2. Top-Left quadrant (`55% × 55%`: `[0..0.55w, 0..0.55h]`).
+       3. Top-Right quadrant (`55% × 55%`: `[0.45w..w, 0..0.55h]`).
+       4. Bottom-Left quadrant (`55% × 55%`: `[0..0.55w, 0.45h..h]`).
+       5. Bottom-Right quadrant (`55% × 55%`: `[0.45w..w, 0.45h..h]`).
+     - Implemented in pure Python (`struct` + `zlib`) across both embedded FlateDecode XObject extraction (`_extract_flate_xobjects_as_png_parts`, prioritized first for lossless native 300-DPI palette/gray/RGB images) and `pdftoppm -r 300` PPM rasterization, requiring zero external image libraries.
+  2. **Leader-Line Attachment, Step-by-Step Pipe Tracing & Smart Prefix Deduplication (`_build_multimodal_prompt` & `ORCHESTRATOR_INSTRUCTIONS`):**
+     - Instruct the vision model and orchestrator to trace each instrument bubble's physical leader line or impulse tap to the exact pipe or equipment body it touches (never associating by 2D proximity alone).
+     - Trace equipment-to-equipment and off-page piping paths step-by-step across grid coordinates, preserving train-specific vent/drain valve manifolds and drain headers (e.g., `RH-V81`–`V88` to `DR 154` on `RH-E-9A` vs. `RH-V73`–`V77` to `DR 155` on `RH-E-9B`).
+     - Never double-prefix tags that already carry an explicit system prefix (`SI-`, `RH-`, `CBS-`, `CS-`, `RC-`, `CC-`, `SF-`).
+     - Record both the graphic bubble tag (`FE 610` / `FIS 610` / `FCV 610`) and any differing General Note reference (`611`) when a drawing discrepancy exists.
+  3. **Cache Digest Version Bump (`PROMPT_V6_300DPI_QUAD` / `multimodal_v6`):**
+     - Bump `_compute_multimodal_cache_digest` salt to `b"\x00PROMPT_V6_300DPI_QUAD\x00"` and cache directory/prefix to `extracter_multimodal_cache_v6` / `cache/multimodal_v6/`.
+- **Unit & Property-Based Tests (`tests/test_pdf_unit.py`, `tests/test_pdf_property.py`):**
+  - Verify 5-part multi-scale PNG generation (`1 full + 4 overlapping quadrants`) on landscape high-res drawings, 1-part generation on portrait pages, leader-line/pipe-tracing prompt directives, and `v6` cache digest isolation.
+
+### Step 31: Multi-Scale 3×2 Center-Bridge Overlapping Tiling & 5 P&ID Topological/Symbol Rules (`multimodal_v7`)
+- **Root Cause Addressed:**
+  A 500–600 DPI visual audit across all 5 pages of `ML101620329-part-1.pdf` revealed that:
+  1. Splitting wide landscape P&IDs (`~1.6:1` aspect ratio) into a `2×2` quadrant grid cuts directly down the vertical center (`x = 45%–55%`) where central equipment (`F-33`, `DM-8`, `SF-P-272`, `X-25/X-26/X-27`) and cross-sheet horizontal transitions sit, causing long bottom/perimeter return headers (`F-34` $\rightarrow$ `V33` $\rightarrow$ `V34` $\rightarrow$ `V205`) to be detached from their true origin and falsely attributed to bypassed equipment (`1-SF-P-12`).
+  2. Without explicit nozzle line-size (`4"`/`3"` reducer vs. `3/4"` top vent), arrowhead/check-valve flow direction, and relief-valve + open-drain (`SET @ ... PSIG` $\rightarrow$ `DR *`) vs. restriction orifice (`RO-*`) rules, the model swapped `3/4"` vents with `4"` process nozzles on `F-33`/`F-34`, reversed flow on `SF-F-287`/`SF-P-272`, and merged `DR 153`/`152` + `2235 PSIG` into fake orifices `RO-153`/`RO-152`.
+- **Architectural & Behavioral Specifications:**
+  1. **7-Part Multi-Scale 3×2 Center-Bridge Tiling (`_build_multiscale_png_parts_from_raw` in `extracter_agent/pdf/processor.py`):**
+     - Emit **7 lossless PNG `Part` objects per non-blank landscape drawing page**:
+       - Image 1: Full-Sheet Overview (`0–100% X, 0–100% Y`) for end-to-end cross-sheet line tracing across all columns `12..1`.
+       - Image 2: Top-Left (`0–45% X, 0–55% Y`)
+       - Image 3: Top-Center Bridge (`28–72% X, 0–55% Y` — 17% horizontal overlap on both sides so center equipment and horizontal transitions are never split)
+       - Image 4: Top-Right (`55–100% X, 0–55% Y`)
+       - Image 5: Bottom-Left (`0–45% X, 45–100% Y`)
+       - Image 6: Bottom-Center Bridge (`28–72% X, 45–100% Y`)
+       - Image 7: Bottom-Right (`55–100% X, 45–100% Y`)
+  2. **5 General P&ID Topological & Symbol Rules (`_build_multimodal_prompt` & `ORCHESTRATOR_INSTRUCTIONS`):**
+     - Cross-sheet line continuity & zero false proximity attachment on passing perimeter/tunnel headers.
+     - Nozzle line-size verification (`4"`/`3"` reducer cones vs. `3/4"`/`1/2"` vents/instrument taps) and bypass tee tracing.
+     - True flow direction determination via inline arrowheads, check valve orientation, and discharge pressure gauge placement.
+     - Relief valve (`SET @ <pressure> PSIG` discharging to open drain `DR <num>`) vs. inline Restriction Orifice (`RO-<num>`) distinction.
+     - Verbatim status modifier transcription (`NON-FUNCTIONAL`, `SPARE`) and internal sub-tag completeness (`EP-*`, `S-*`).
+  3. **Cache Digest Version Bump (`PROMPT_V7_300DPI_3X2` / `multimodal_v7`):**
+     - Bump `_compute_multimodal_cache_digest` salt to `b"\x00PROMPT_V7_300DPI_3X2\x00"` and cache directory/prefix to `extracter_multimodal_cache_v7` / `cache/multimodal_v7/`.
+
+### Step 32: Spanner-Graph-Ready Equipment Connectivity Schema (`ConnectionStream`, `entity_metadata.connections`) & Unique Nozzle-Branch Valve Rule (`multimodal_v8`)
+- **Root Cause Addressed:**
+  Previously, `ConnectionStream` only captured `(stream_id, temperature, pressure, flow_rate, description, source)` and was omitted from `entity_metadata` YAML frontmatter, burying upstream/downstream equipment tags (`source_tag`, `target_tag`), edge direction (`direction`), line diameter (`line_size`), and ordered inline components (`inline_components`) inside free-text prose descriptions. In addition, without a strict unique-valve-per-nozzle-branch constraint, a vessel's inlet valve or bottom drain valve could be reused on its top vent or main process outlet.
+- **Architectural & Behavioral Specifications:**
+  1. **Spanner-Graph-Ready `ConnectionStream` Model (`extracter_agent/models/domain.py`):**
+     - Extend `ConnectionStream` with `direction` (`INLET | OUTLET | BYPASS | VENT | DRAIN | RELIEF | RECIRC | UTILITY`), `source_tag`, `target_tag`, `line_size`, and `inline_components: list[str]` (with `@field_validator("inline_components", mode="before")` normalizing comma/arrow-delimited strings and lists).
+  2. **Structured YAML Frontmatter (`entity_metadata.connections`) & 10-Column Markdown Table (`extracter_agent/okf/synthesizer.py`):**
+     - Serialize `entity_metadata.connections` in every Equipment Concept YAML frontmatter and render a 10-column `## Connections & Stream Summary` table (`Stream | Direction | From (Source) | To (Target) | Line Size | Inline Valves / Components | Temp | Pressure | Flow Rate | Description`), with full backward-compatible parsing and non-destructive field merging in `merge_equipment_entity_with_existing`.
+  3. **Unique Valve Per Nozzle Branch & Circular Bubble Digit Disambiguation (`_build_multimodal_prompt` & `ORCHESTRATOR_INSTRUCTIONS`, `multimodal_v8`):**
+     - Enforce that each distinct nozzle branch on a vessel (Main Inlet, Main Outlet, Full-Flow Bypass, Top-Head Vent, Bottom-Head Drain) has its own unique valve tag (never reusing an inlet valve as a top vent valve or a bottom drain valve as a main outlet valve), and disambiguate `8` vs `6` in circular instrument bubbles (`PROMPT_V8_SPANNER_GRAPH_3X2`, `cache/multimodal_v8/`).
+
 ---
 
 ## 8. Plan Progress Tracking & Living Spec Synchronization
 - All milestones, verification metrics, and test results will be continuously recorded under `specs/plan/`.
 - If any data model or interface evolves during implementation, this specification will be updated synchronously to prevent spec drift.
+
+

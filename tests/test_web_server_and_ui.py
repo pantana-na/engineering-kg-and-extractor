@@ -668,11 +668,19 @@ def test_fresh_and_partial_project_without_golden_wiki(
         repo_root / "extracter_agent" / "static" / "app.js"
     ).read_text(encoding="utf-8")
 
+    index_html_src = (
+        repo_root / "extracter_agent" / "static" / "index.html"
+    ).read_text(encoding="utf-8")
+
     assert "reference_wiki_dir" not in domain_src
     assert "reference_wiki_dir" not in ws_src
     assert "COPY reference" not in dockerfile_src
     assert "function discoverRawEquipmentCandidates(" in app_js_src
     assert "function renderEmptyOkfState(" in app_js_src
+    for forbidden in ("D-2304", "V-2301", "C-2201", "Unit 2300"):
+        assert forbidden not in index_html_src
+        assert forbidden not in app_js_src
+        assert forbidden not in ws_src
 
 
 @settings(

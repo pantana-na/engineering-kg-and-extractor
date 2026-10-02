@@ -146,3 +146,143 @@ def test_resolve_bundle_instrument_link_case_insensitive_and_no_cross_unit_colli
         == "/instruments/index.md"
     )
 
+
+def test_vector_pdf_300dpi_png_rasterization_and_single_page_windowing(monkeypatch, tmp_path):
+    """Verify Option A: vector PDF windows rasterize to 300-DPI image/png Parts and process_raw_pdf_tool uses window_size=1 on vector drawings."""
+    import pypdf
+
+    from extracter_agent.pdf import processor
+    from extracter_agent.tools import pdf_tools
+
+    vec_pdf = tmp_path / "VECTOR_PID_SHEET.pdf"
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=792, height=612)
+    with open(vec_pdf, "wb") as f:
+        writer.write(f)
+    pdf_bytes = vec_pdf.read_bytes()
+
+    parts = processor._render_pdf_pages_to_png_parts(pdf_bytes, dpi=300)
+    assert len(parts) == 1
+    inline_data = getattr(parts[0], "inline_data", None)
+    assert inline_data is not None
+    assert inline_data.mime_type in ("image/png", "application/pdf")
+
+    # When pdftoppm is absent, falls back cleanly to application/pdf
+    monkeypatch.setattr("shutil.which", lambda cmd: None)
+    fallback_parts = processor._render_pdf_pages_to_png_parts(pdf_bytes, dpi=300)
+    assert len(fallback_parts) == 1
+    assert fallback_parts[0].inline_data.mime_type == "application/pdf"
+
+    # Verify process_raw_pdf_tool passes window_size=1 when is_vector_drawing is True
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_mm_summary(file_path, **kwargs):
+        captured_kwargs.update(kwargs)
+        return "Verbatim Tag: F-33 (1-SF-F-33)"
+
+    monkeypatch.setattr(pdf_tools, "is_vector_drawing", lambda p: True)
+    monkeypatch.setattr(pdf_tools, "extract_pdf_multimodal_summary", fake_mm_summary)
+
+    res = pdf_tools.process_raw_pdf_tool(
+        pdf_filename=str(vec_pdf),
+        subfolder="pid",
+        enable_multimodal=True,
+    )
+    assert res["status"] == "success"
+    assert captured_kwargs.get("window_size") == 1
+    assert "F-33" in (res["multimodal_analysis"] or "")
+
+
+def test_verbatim_tag_prompt_and_v5_300dpi_cache_invalidation():
+    """Verify _build_multimodal_prompt mandates verbatim printed symbol tags, 3x2 center bridge zooms, cross-sheet continuity, nozzle size verification, arrowhead flow direction, and relief valve vs RO distinction."""
+    from extracter_agent.pdf.processor import (
+        _build_multimodal_prompt,
+        _compute_multimodal_cache_digest,
+    )
+
+    prompt = _build_multimodal_prompt()
+    assert "exact verbatim tag printed inside or beside each equipment symbol" in prompt
+    assert "General Note" in prompt
+    assert "6 overlapping high-resolution 3x2 regional zooms" in prompt
+    assert "Top-Center Bridge" in prompt
+    assert "Spanner-Graph-ready connectivity breakdown" in prompt
+    assert "Cross-Sheet Line Continuity & Zero False Proximity Attachment" in prompt
+    assert "Nozzle Line-Size Verification, Unique Valve Per Branch & Bypass Tee Tracing" in prompt
+    assert "True Flow Direction via Arrowheads & Check Valves" in prompt
+    assert "Relief Valves + Open Drains vs. Restriction Orifices" in prompt
+    assert "physical leader line or impulse tap" in prompt
+    assert "NEVER double-prefix it" in prompt
+    digest = _compute_multimodal_cache_digest(b"%PDF-1.4 test", prompt)
+    assert len(digest) == 24
+
+
+def test_multiscale_2x2_quadrant_tiling_and_mixed_pdf_adaptive_windows():
+    """Verify Step 31 (multimodal_v7): non-blank landscape drawings produce 7 PNG Parts (1 full + 6 overlapping 3x2 bridge tiles), portrait/blank pages produce 1 Part, and mixed PDFs isolate drawing pages into 1-page windows."""
+    from extracter_agent.pdf.processor import (
+        _build_multiscale_png_parts_from_raw,
+        _group_adaptive_page_windows,
+    )
+
+    # 1. Non-blank landscape drawing (1800 x 1200) -> 7 PNG Parts (1 overview + 6 overlapping 3x2 tiles)
+    w_land, h_land = 1800, 1200
+    raw_non_blank = (b"\x00\xff\x80" * ((w_land * h_land) // 3 + 1))[: w_land * h_land]
+    land_parts = _build_multiscale_png_parts_from_raw(
+        raw_non_blank, w_land, h_land, bpp=1, color_type=0
+    )
+    assert len(land_parts) == 7
+    for p in land_parts:
+        assert p.inline_data.mime_type == "image/png"
+        assert p.inline_data.data.startswith(b"\x89PNG\r\n\x1a\n")
+
+    # 2. Portrait page (1200 x 1800) -> 1 PNG Part (no tile split)
+    w_port, h_port = 1200, 1800
+    raw_port = (b"\x10\xe0" * ((w_port * h_port) // 2))[: w_port * h_port]
+    port_parts = _build_multiscale_png_parts_from_raw(
+        raw_port, w_port, h_port, bpp=1, color_type=0
+    )
+    assert len(port_parts) == 1
+
+    # 3. Mixed PDF adaptive windowing: pages 0,1,2 are portrait text; page 3 is landscape high-res drawing; pages 4,5 are portrait text
+    class FakeBox:
+        def __init__(self, width: float, height: float):
+            self.width = width
+            self.height = height
+
+    class FakePage:
+        def __init__(self, width: float, height: float, has_xobj: bool):
+            self.mediabox = FakeBox(width, height)
+            self._has_xobj = has_xobj
+
+        def get(self, key: str):
+            if key == "/Resources" and self._has_xobj:
+                return {
+                    "/XObject": {
+                        "/Im0": {
+                            "/Subtype": "/Image",
+                            "/Width": 4970,
+                            "/Height": 3234,
+                        }
+                    }
+                }
+            return {}
+
+    class FakeReader:
+        def __init__(self):
+            self.pages = [
+                FakePage(612, 792, False),  # p0: portrait text
+                FakePage(612, 792, False),  # p1: portrait text
+                FakePage(612, 792, False),  # p2: portrait text
+                FakePage(1224, 792, True),  # p3: landscape P&ID drawing
+                FakePage(612, 792, False),  # p4: portrait text
+                FakePage(612, 792, False),  # p5: portrait text
+            ]
+
+    windows = _group_adaptive_page_windows(
+        reader=FakeReader(),  # type: ignore[arg-type]
+        target_indices=[0, 1, 2, 3, 4, 5],
+        effective_window=4,
+    )
+    assert windows == [[0, 1, 2], [3], [4, 5]]
+
+
+

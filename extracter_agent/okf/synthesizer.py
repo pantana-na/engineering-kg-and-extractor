@@ -222,6 +222,24 @@ def synthesize_equipment_concept(
             for inst in entity.instruments
         ]
 
+    if entity.connections:
+        frontmatter["entity_metadata"]["connections"] = [
+            {
+                "stream_id": conn.stream_id,
+                "direction": conn.direction,
+                "source_tag": conn.source_tag,
+                "target_tag": conn.target_tag,
+                "line_size": conn.line_size,
+                "inline_components": list(conn.inline_components or []),
+                "temperature": conn.temperature,
+                "pressure": conn.pressure,
+                "flow_rate": conn.flow_rate,
+                "description": conn.description,
+                "source": conn.source,
+            }
+            for conn in entity.connections
+        ]
+
     body_lines: list[str] = [
         f"# {entity.tag} — {entity.name}",
         "",
@@ -302,16 +320,25 @@ def synthesize_equipment_concept(
             [
                 "## Connections & Stream Summary",
                 "",
-                "| Stream | Temp | Pressure | Flow Rate | Description |",
-                "| :--- | :--- | :--- | :--- | :--- |",
+                "| Stream | Direction | From (Source) | To (Target) | Line Size | Inline Valves / Components | Temp | Pressure | Flow Rate | Description |",
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
             ]
         )
         for conn in entity.connections:
+            direction_val = conn.direction or "—"
+            src_val = conn.source_tag or "—"
+            tgt_val = conn.target_tag or "—"
+            lsize_val = conn.line_size or "—"
+            inline_val = (
+                ", ".join(conn.inline_components) if conn.inline_components else "—"
+            )
             t = conn.temperature or "—"
             p = conn.pressure or "—"
             f = conn.flow_rate or "—"
             d = conn.description or "—"
-            body_lines.append(f"| {conn.stream_id} | {t} | {p} | {f} | {d} |")
+            body_lines.append(
+                f"| {conn.stream_id} | {direction_val} | {src_val} | {tgt_val} | {lsize_val} | {inline_val} | {t} | {p} | {f} | {d} |"
+            )
         body_lines.append("")
 
     # Hazards & Safeguards
@@ -820,24 +847,73 @@ def merge_equipment_entity_with_existing(
                     )
                 )
 
-    # 4. Extract existing connections
+    # 4. Extract existing connections (union of structured entity_metadata AND Markdown table rows)
     existing_conns: list[ConnectionStream] = []
-    for cells in _parse_section_table_rows(body, "Connections & Stream Summary"):
-        if len(cells) >= 5:
-            existing_conns.append(
-                ConnectionStream(
-                    stream_id=cells[0],
-                    temperature=None if cells[1] == "—" else cells[1],
-                    pressure=None if cells[2] == "—" else cells[2],
-                    flow_rate=None if cells[3] == "—" else cells[3],
-                    description=None if cells[4] == "—" else cells[4],
-                    source=(
-                        cells[5]
-                        if len(cells) >= 6 and cells[5] and cells[5] != "—"
-                        else "Engineering Reference Document"
-                    ),
+    existing_conn_by_key: dict[str, int] = {}
+    meta_conns = (fm.get("entity_metadata") or {}).get("connections") or []
+    if isinstance(meta_conns, list):
+        for item in meta_conns:
+            if isinstance(item, dict) and item.get("stream_id"):
+                conn_obj = ConnectionStream(
+                    stream_id=str(item.get("stream_id", "")),
+                    direction=item.get("direction"),
+                    source_tag=item.get("source_tag"),
+                    target_tag=item.get("target_tag"),
+                    line_size=item.get("line_size"),
+                    inline_components=item.get("inline_components") or [],
+                    temperature=item.get("temperature"),
+                    pressure=item.get("pressure"),
+                    flow_rate=item.get("flow_rate"),
+                    description=item.get("description"),
+                    source=str(item.get("source") or "Engineering Reference Document"),
                 )
-            )
+                ckey = conn_obj.stream_id.strip().upper()
+                if ckey and ckey not in existing_conn_by_key:
+                    existing_conn_by_key[ckey] = len(existing_conns)
+                    existing_conns.append(conn_obj)
+
+    for cells in _parse_section_table_rows(body, "Connections & Stream Summary"):
+        if len(cells) >= 10:
+            ckey = cells[0].strip().upper()
+            if ckey and ckey not in existing_conn_by_key:
+                existing_conn_by_key[ckey] = len(existing_conns)
+                existing_conns.append(
+                    ConnectionStream(
+                        stream_id=cells[0],
+                        direction=None if cells[1] == "—" else cells[1],
+                        source_tag=None if cells[2] == "—" else cells[2],
+                        target_tag=None if cells[3] == "—" else cells[3],
+                        line_size=None if cells[4] == "—" else cells[4],
+                        inline_components=[] if cells[5] == "—" else cells[5],
+                        temperature=None if cells[6] == "—" else cells[6],
+                        pressure=None if cells[7] == "—" else cells[7],
+                        flow_rate=None if cells[8] == "—" else cells[8],
+                        description=None if cells[9] == "—" else cells[9],
+                        source=(
+                            cells[10]
+                            if len(cells) >= 11 and cells[10] and cells[10] != "—"
+                            else "Engineering Reference Document"
+                        ),
+                    )
+                )
+        elif len(cells) >= 5:
+            ckey = cells[0].strip().upper()
+            if ckey and ckey not in existing_conn_by_key:
+                existing_conn_by_key[ckey] = len(existing_conns)
+                existing_conns.append(
+                    ConnectionStream(
+                        stream_id=cells[0],
+                        temperature=None if cells[1] == "—" else cells[1],
+                        pressure=None if cells[2] == "—" else cells[2],
+                        flow_rate=None if cells[3] == "—" else cells[3],
+                        description=None if cells[4] == "—" else cells[4],
+                        source=(
+                            cells[5]
+                            if len(cells) >= 6 and cells[5] and cells[5] != "—"
+                            else "Engineering Reference Document"
+                        ),
+                    )
+                )
 
     # 5. Extract existing hazards & sources
     existing_hazards = _parse_section_bullets(body, "Hazards & Safeguards")
@@ -899,8 +975,20 @@ def merge_equipment_entity_with_existing(
             old_c = merged_conns[conn_idx[ckey]]
             old_src = (old_c.source or "").strip()
             new_src = (new_c.source or "").strip()
+            combined_inline: list[str] = []
+            seen_inline: set[str] = set()
+            for comp in list(old_c.inline_components or []) + list(new_c.inline_components or []):
+                comp_clean = comp.strip()
+                if comp_clean and comp_clean.upper() not in seen_inline:
+                    seen_inline.add(comp_clean.upper())
+                    combined_inline.append(comp_clean)
             merged_conns[conn_idx[ckey]] = ConnectionStream(
                 stream_id=new_c.stream_id or old_c.stream_id,
+                direction=_merge_non_destructive_field(old_c.direction, new_c.direction, old_src, new_src),
+                source_tag=_merge_non_destructive_field(old_c.source_tag, new_c.source_tag, old_src, new_src),
+                target_tag=_merge_non_destructive_field(old_c.target_tag, new_c.target_tag, old_src, new_src),
+                line_size=_merge_non_destructive_field(old_c.line_size, new_c.line_size, old_src, new_src),
+                inline_components=combined_inline,
                 temperature=_merge_non_destructive_field(old_c.temperature, new_c.temperature, old_src, new_src),
                 pressure=_merge_non_destructive_field(old_c.pressure, new_c.pressure, old_src, new_src),
                 flow_rate=_merge_non_destructive_field(old_c.flow_rate, new_c.flow_rate, old_src, new_src),

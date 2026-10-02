@@ -49,7 +49,7 @@ SPANNER_PU="${SPANNER_PROCESSING_UNITS:-100}"
 
 # Ensure gcloud uses fresh Application Default Credentials token when available
 if command -v gcloud >/dev/null 2>&1; then
-  ADC_TOKEN="$(gcloud auth application-default print-access-token 2>/dev/null || true)"
+  ADC_TOKEN="$(timeout 3 gcloud auth application-default print-access-token 2>/dev/null || true)"
   if [[ -n "${ADC_TOKEN}" ]]; then
     export CLOUDSDK_AUTH_ACCESS_TOKEN="${ADC_TOKEN}"
   fi
@@ -170,12 +170,14 @@ deploy_agent_runtime() {
       --region="${REGION}" \
       --agent_engine_id="${agent_engine_id}" \
       --display_name="${AGENT_DISPLAY_NAME}" \
+      --temp_folder="/tmp/adk_deploy_${AGENT_DIR}" \
       "${AGENT_DIR}"
   else
     "${adk_bin}" deploy agent_engine \
       --project="${PROJECT_ID}" \
       --region="${REGION}" \
       --display_name="${AGENT_DISPLAY_NAME}" \
+      --temp_folder="/tmp/adk_deploy_${AGENT_DIR}" \
       "${AGENT_DIR}"
   fi
 }
@@ -202,12 +204,14 @@ deploy_query_agent_runtime() {
       --region="${REGION}" \
       --agent_engine_id="${agent_engine_id}" \
       --display_name="${QUERY_AGENT_DISPLAY_NAME}" \
+      --temp_folder="/tmp/adk_deploy_query_agent" \
       "query_agent"
   else
     "${adk_bin}" deploy agent_engine \
       --project="${PROJECT_ID}" \
       --region="${REGION}" \
       --display_name="${QUERY_AGENT_DISPLAY_NAME}" \
+      --temp_folder="/tmp/adk_deploy_query_agent" \
       "query_agent"
   fi
 }

@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def sanitize_tag_filename(tag: str) -> str:
@@ -130,7 +130,7 @@ def derive_canonical_equipment_tag(
     if any(c["stem"].upper() == safe.upper() for c in catalog):
         return next(c["stem"] for c in catalog if c["stem"].upper() == safe.upper())
 
-    # 3. Match existing catalog file only if it shares the same equipment class letter prefix
+    # 3. Match existing catalog file only if it shares the exact same base equipment ID
     #    and explicitly declares this exact equipment tag in its frontmatter or dedicated PS-<TAG>
     ps_code_match = re.match(r"^([A-Z]{1,4})-(\d{3,4})$", req_base)
     dedicated_ps_token = (
@@ -138,21 +138,21 @@ def derive_canonical_equipment_tag(
         if ps_code_match
         else ""
     )
-    req_prefix = ps_code_match.group(1).upper() if ps_code_match else ""
     raw_tag_lower = tag.strip().lower()
     for c in catalog:
         c_base = _extract_equipment_base_id(str(c["stem"]))
-        if req_prefix and not c_base.startswith(f"{req_prefix}-"):
+        if c_base != req_base:
             continue
         head = c["head_lower"]
         if raw_tag_lower and (
-            f"tag: {raw_tag_lower}\n" in head
-            or f"tag: '{raw_tag_lower}'" in head
-            or f'tag: "{raw_tag_lower}"' in head
+            re.search(
+                rf"(?:^|\n)\s*tag:\s*['\"]?{re.escape(raw_tag_lower)}['\"]?\s*(?:\n|$)",
+                head,
+            )
             or f"title: {raw_tag_lower} " in head
         ):
             return str(c["stem"])
-        if dedicated_ps_token and dedicated_ps_token in head and c_base == req_base:
+        if dedicated_ps_token and dedicated_ps_token in head:
             return str(c["stem"])
 
     # 4. When no catalog entry exists yet, only use PS-<TAG> candidate over a 2-unit paired tag
@@ -417,19 +417,131 @@ class EngineeringParameter(BaseModel):
     source: str = Field(default="Engineering Reference Document")
     note: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_parameter_dict(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        param = out.get("parameter") or out.get("name") or out.get("property") or "Parameter"
+        val = out.get("value")
+        if val is None:
+            val = out.get("val")
+        if val is None:
+            val = "—"
+        out["parameter"] = str(param).strip() or "Parameter"
+        out["value"] = str(val).strip() or "—"
+        if out.get("unit") is not None:
+            out["unit"] = str(out["unit"]).strip()
+        out["source"] = str(out.get("source") or "Engineering Reference Document").strip()
+        if out.get("note") is not None:
+            out["note"] = str(out["note"]).strip()
+        return out
+
 
 class ConnectionStream(BaseModel):
-    stream_id: str
+    stream_id: str = Field(default="Process Connection")
+    direction: str | None = Field(
+        default=None,
+        description="Topological edge direction relative to this equipment (e.g. INLET, OUTLET, BYPASS, VENT, DRAIN, RELIEF, RECIRC, UTILITY)",
+    )
+    source_tag: str | None = Field(
+        default=None,
+        description="Canonical upstream equipment tag or boundary source node ID for Spanner Graph edge (e.g. P-12, F-33, RWST)",
+    )
+    target_tag: str | None = Field(
+        default=None,
+        description="Canonical downstream equipment tag or boundary target node ID for Spanner Graph edge (e.g. F-33, DM-8, WLD DR 218)",
+    )
+    line_size: str | None = Field(
+        default=None,
+        description="Printed pipe diameter or reducer/expander transition (e.g. 4\", 1\"x4\", 3/4\")",
+    )
+    inline_components: list[str] = Field(
+        default_factory=list,
+        description="Ordered inline valves, check valves, control valves, restriction orifices, or flow elements along this connection edge",
+    )
     temperature: str | None = None
     pressure: str | None = None
     flow_rate: str | None = None
     description: str | None = None
     source: str = Field(default="Engineering Reference Document")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_connection_dict(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        raw_sid = (
+            out.get("stream_id")
+            or out.get("stream")
+            or out.get("nozzle")
+            or out.get("line_id")
+            or out.get("id")
+            or out.get("name")
+        )
+        direction = str(out.get("direction") or "").strip().upper() or None
+        source_tag = str(out.get("source_tag") or out.get("from_tag") or out.get("from") or "").strip() or None
+        target_tag = str(out.get("target_tag") or out.get("to_tag") or out.get("to") or "").strip() or None
+        line_size = str(out.get("line_size") or out.get("size") or "").strip() or None
+        desc = str(out.get("description") or "").strip() or None
+
+        if not raw_sid or not str(raw_sid).strip():
+            size_prefix = f"{line_size} " if line_size and line_size not in ("—", "-") else ""
+            if direction == "INLET" and source_tag:
+                raw_sid = f"{size_prefix}Inlet from {source_tag}".strip()
+            elif direction and target_tag and direction != "INLET":
+                raw_sid = f"{size_prefix}{direction.title()} to {target_tag}".strip()
+            elif source_tag and target_tag:
+                dir_prefix = f"{direction}: " if direction else ""
+                raw_sid = f"{dir_prefix}{source_tag} -> {target_tag}".strip()
+            elif direction and desc:
+                raw_sid = f"{direction}: {desc[:48]}".strip()
+            elif desc:
+                raw_sid = desc[:60]
+            else:
+                raw_sid = "Process Connection"
+
+        out["stream_id"] = str(raw_sid).strip() or "Process Connection"
+        out["direction"] = direction
+        out["source_tag"] = source_tag
+        out["target_tag"] = target_tag
+        out["line_size"] = line_size
+        out["description"] = desc
+        for k in ("temperature", "pressure", "flow_rate"):
+            if out.get(k) is not None:
+                out[k] = str(out[k]).strip()
+        out["source"] = str(out.get("source") or "Engineering Reference Document").strip()
+        return out
+
+    @field_validator("inline_components", mode="before")
+    @classmethod
+    def _normalize_inline_components(cls, val: Any) -> list[str]:
+        if val is None:
+            return []
+        if isinstance(val, str):
+            cleaned = val.strip()
+            if not cleaned or cleaned in ("—", "-", "None", "N/A"):
+                return []
+            return [
+                tok.strip()
+                for tok in re.split(r"[,;]+|\s*->\s*|\s*→\s*", cleaned)
+                if tok.strip() and tok.strip() not in ("—", "-")
+            ]
+        if isinstance(val, (list, tuple, set)):
+            out: list[str] = []
+            for item in val:
+                s = str(item).strip()
+                if s and s not in ("—", "-", "None"):
+                    out.append(s)
+            return out
+        return [str(val).strip()]
+
 
 class InstrumentLoop(BaseModel):
     tag: str = Field(
-        ..., description="Unique instrument loop tag from P&ID or datasheet"
+        default="INST", description="Unique instrument loop tag from P&ID or datasheet"
     )
     service: str = Field(
         default="Process Instrumentation",
@@ -452,6 +564,26 @@ class InstrumentLoop(BaseModel):
         default="Engineering Reference Document",
         description="Engineering drawing or datasheet citation",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_instrument_dict(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        tag = out.get("tag") or out.get("instrument_tag") or out.get("loop_id") or out.get("id") or "INST"
+        out["tag"] = str(tag).strip() or "INST"
+        out["service"] = str(
+            out.get("service") or out.get("description") or out.get("function") or "Process Instrumentation"
+        ).strip()
+        out["instrument_type"] = str(
+            out.get("instrument_type") or out.get("type") or "Process Instrument"
+        ).strip()
+        for k in ("location", "setpoint_or_range", "interlock_or_alarm"):
+            if out.get(k) is not None:
+                out[k] = str(out[k]).strip()
+        out["source"] = str(out.get("source") or "Engineering Reference Document").strip()
+        return out
 
 
 class EquipmentEntity(BaseModel):

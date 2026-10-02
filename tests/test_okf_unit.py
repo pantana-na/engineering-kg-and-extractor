@@ -1559,3 +1559,67 @@ def test_parameter_value_equivalence_and_conflict_topic_deduplication() -> None:
     assert len(conflict_bullets) == 1
     assert "INTERNAL DESIGN PRESSURE" in conflict_bullets[0].upper()
 
+
+def test_spanner_graph_connection_stream_frontmatter_and_merge():
+    """Verify ConnectionStream serializes deterministic Spanner Graph edges (direction, source_tag, target_tag, line_size, inline_components) in frontmatter and 10-column Markdown table and merges non-destructively."""
+    from extracter_agent.okf.synthesizer import merge_equipment_entity_with_existing
+
+    p1 = EquipmentEntity(
+        tag="P-12",
+        name="Spent Fuel Pool Skimmer Pump",
+        equipment_class="Pump",
+        unit="SF",
+        function_summary="Skimmer pump feeding purification train.",
+        connections=[
+            ConnectionStream(
+                stream_id='1-SF-1"x4"-Discharge',
+                direction="OUTLET",
+                source_tag="P-12",
+                target_tag="F-33",
+                line_size='1"x4"',
+                inline_components="V18, V204, V20, V27",
+                pressure="< 150 psig",
+                description="Pump discharge expanding to 4\" cleanup header feeding prefilter F-33",
+                source="pid/ML101620329-part-1.pdf",
+            )
+        ],
+        sources=["pid/ML101620329-part-1.pdf"],
+    )
+    doc1 = OKFDocument.parse(synthesize_equipment_concept(p1).serialize())
+    meta_conns = doc1.frontmatter["entity_metadata"]["connections"]
+    assert len(meta_conns) == 1
+    assert meta_conns[0]["direction"] == "OUTLET"
+    assert meta_conns[0]["source_tag"] == "P-12"
+    assert meta_conns[0]["target_tag"] == "F-33"
+    assert meta_conns[0]["line_size"] == '1"x4"'
+    assert meta_conns[0]["inline_components"] == ["V18", "V204", "V20", "V27"]
+    assert "| Stream | Direction | From (Source) | To (Target) | Line Size | Inline Valves / Components |" in doc1.body
+    assert '| 1-SF-1"x4"-Discharge | OUTLET | P-12 | F-33 | 1"x4" | V18, V204, V20, V27 |' in doc1.body
+
+    p2 = EquipmentEntity(
+        tag="P-12",
+        name="Spent Fuel Pool Skimmer Pump",
+        equipment_class="Pump",
+        unit="SF",
+        function_summary="Skimmer pump feeding purification train.",
+        connections=[
+            ConnectionStream(
+                stream_id='1-SF-1"x4"-Discharge',
+                temperature="Pool Water Temp",
+                inline_components=["V18", "V27", "FE-2626"],
+                source="pid/ML101620329-part-1.pdf",
+            )
+        ],
+        sources=["pid/ML101620329-part-1.pdf"],
+    )
+    merged = merge_equipment_entity_with_existing(p2, doc1)
+    assert len(merged.connections) == 1
+    c = merged.connections[0]
+    assert c.direction == "OUTLET"
+    assert c.source_tag == "P-12"
+    assert c.target_tag == "F-33"
+    assert c.line_size == '1"x4"'
+    assert c.temperature == "Pool Water Temp"
+    assert c.inline_components == ["V18", "V204", "V20", "V27", "FE-2626"]
+
+

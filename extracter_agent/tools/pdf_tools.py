@@ -438,7 +438,7 @@ def process_raw_pdf_tool(
                 "prompt_hint": f"Extract complete engineering data for drawing {target_path.stem}",
             }
             if is_vector:
-                mm_kwargs["window_size"] = 2
+                mm_kwargs["window_size"] = 1
             if page_query:
                 mm_kwargs["page_query"] = page_query
             if start_page > 1 or max_pages < 150:

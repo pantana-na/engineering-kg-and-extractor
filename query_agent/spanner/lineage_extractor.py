@@ -39,8 +39,8 @@ from query_agent.models.schemas import (
     compute_deterministic_id,
 )
 
-_EQUIP_TAG_RE = re.compile(r"\b([A-Z]{1,3}-\d{4}[A-Z0-9/]*)\b")
-_INST_TAG_RE = re.compile(r"\b([A-Z]{2,5}-(?:\d{2}-)?\d{4}[A-Z0-9/]*)\b")
+_EQUIP_TAG_RE = re.compile(r"\b((?:(?:1-)?[A-Z]{2,3}-)?[A-Z]{1,3}-\d{1,4}[A-Z0-9/]*)\b")
+_INST_TAG_RE = re.compile(r"\b((?:(?:1-)?[A-Z]{2,3}-)?[A-Z]{2,5}[- ](?:\d{2}-)?\d{3,4}[A-Z0-9/\-]*)\b")
 _LINE_ID_RE = re.compile(r"\b([A-Z]{1,4}-\d{2}-\d{6}[A-Z0-9-]*)\b")
 _WIKILINK_RE = re.compile(r"\[\[([^\[\]|#]+)(?:#[^\[\]|]+)?(?:\|[^\[\]]+)?\]\]")
 _BRACKET_CIT_RE = re.compile(r"\[([^\[\]]{3,120})\]")
@@ -645,6 +645,117 @@ def extract_bundle_graph_and_lineage(
                         section_heading=current_sec,
                     )
 
+        def _resolve_graph_equip_slug(raw_tag_str: str) -> str:
+            t_clean = re.sub(r"^\[([^\]]+)\]\([^)]+\)$", r"\1", (raw_tag_str or "").strip()).strip("*_` ")
+            if not t_clean or t_clean in ("—", "-", "N/A", "None"):
+                return ""
+            cand_slug = t_clean.replace("/", "")
+            if cand_slug in equipment_meta_by_slug:
+                return cand_slug
+            for known_slug in sorted(equipment_meta_by_slug, key=len, reverse=True):
+                if (
+                    cand_slug.upper().endswith(f"-{known_slug.upper()}")
+                    or cand_slug.upper() == known_slug.upper()
+                    or re.search(rf"(?<![A-Z0-9]){re.escape(known_slug)}(?![A-Z0-9])", t_clean, re.IGNORECASE)
+                ):
+                    return known_slug
+            return re.sub(r"[^\w\-]+", "_", cand_slug).strip("_")[:120]
+
+        def _ensure_equip_entity(eq_slug: str) -> str:
+            ent_id = f"EQ:{eq_slug}"[:256]
+            eq_meta = equipment_meta_by_slug.get(eq_slug)
+            entities_by_id.setdefault(
+                ent_id,
+                EngineeringEntityNode(
+                    entity_id=ent_id,
+                    entity_type="EQUIPMENT",
+                    canonical_tag=eq_slug[:128],
+                    name=(eq_meta[0] if eq_meta else eq_slug)[:512],
+                    equipment_class=(eq_meta[1] if eq_meta else "Equipment")[:128],
+                    unit=((eq_meta[2] if eq_meta and eq_meta[2] else unit) or "")[:64],
+                    concept_id=(eq_meta[3] if eq_meta else f"equipment/{eq_slug}")[:256],
+                ),
+            )
+            return ent_id
+
+        # Extract deterministic Spanner Graph edges from YAML frontmatter entity_metadata.connections & entity_metadata.instruments
+        default_src_id = concept_source_nodes[0].source_id if concept_source_nodes else ""
+        fm_conns = em.get("connections") if isinstance(em.get("connections"), list) else []
+        for c_item in fm_conns:
+            if not isinstance(c_item, dict):
+                continue
+            s_id = str(c_item.get("stream_id") or "").strip()
+            if not s_id:
+                continue
+            c_dir = str(c_item.get("direction") or "").strip().upper()
+            src_slug = _resolve_graph_equip_slug(str(c_item.get("source_tag") or ""))
+            tgt_slug = _resolve_graph_equip_slug(str(c_item.get("target_tag") or ""))
+            if not src_slug and not tgt_slug:
+                continue
+            if not src_slug:
+                src_slug = slug_tail if c_dir not in ("INLET", "SUPPLY", "SUCTION") else tgt_slug
+            if not tgt_slug:
+                tgt_slug = slug_tail if c_dir in ("INLET", "SUPPLY", "SUCTION") else src_slug
+            if src_slug and tgt_slug and src_slug != tgt_slug:
+                src_ent = _ensure_equip_entity(src_slug)
+                dst_ent = _ensure_equip_entity(tgt_slug)
+                inline_list = c_item.get("inline_components") or []
+                inline_str = ", ".join(str(x) for x in inline_list) if isinstance(inline_list, list) else str(inline_list)
+                l_size = str(c_item.get("line_size") or "").strip()
+                desc_str = str(c_item.get("description") or "").strip()
+                svc_parts = [p for p in [c_dir, f"Size: {l_size}" if l_size else "", f"Inline: {inline_str}" if inline_str else "", desc_str] if p]
+                pe_id = compute_deterministic_id(
+                    src_ent, dst_ent, s_id, concept_id, prefix="CONN"
+                )
+                process_edges_by_id[pe_id] = ProcessConnectionEdge(
+                    edge_id=pe_id,
+                    from_entity_id=src_ent,
+                    to_entity_id=dst_ent,
+                    stream_or_line_id=s_id[:256],
+                    fluid_service=(" | ".join(svc_parts) or s_id)[:512],
+                    temperature=str(c_item.get("temperature") or "")[:128],
+                    pressure=str(c_item.get("pressure") or "")[:128],
+                    flow_rate=str(c_item.get("flow_rate") or "")[:128],
+                    source_concept_id=concept_id,
+                    source_id=default_src_id,
+                )
+
+        fm_insts = em.get("instruments") if isinstance(em.get("instruments"), list) else []
+        for i_item in fm_insts:
+            if not isinstance(i_item, dict) or not i_item.get("tag"):
+                continue
+            i_tag = str(i_item.get("tag")).strip()
+            inst_ent_id = f"INST:{re.sub(r'[^A-Za-z0-9_-]+', '-', i_tag).strip('-')}"[:256]
+            i_svc = str(i_item.get("service") or "Process Instrumentation").strip()
+            i_type = str(i_item.get("type") or i_item.get("instrument_type") or "Instrument").strip()
+            entities_by_id.setdefault(
+                inst_ent_id,
+                EngineeringEntityNode(
+                    entity_id=inst_ent_id,
+                    entity_type="INSTRUMENT",
+                    canonical_tag=i_tag[:128],
+                    name=f"{i_tag} ({i_svc[:80]})"[:512],
+                    equipment_class=i_type[:128],
+                    unit=unit[:64],
+                    concept_id=concept_id,
+                ),
+            )
+            if category == "equipment":
+                ie_id = compute_deterministic_id(
+                    inst_ent_id, primary_entity_id, i_tag, concept_id, prefix="INSTEDGE"
+                )
+                instrument_edges_by_id[ie_id] = InstrumentControlEdge(
+                    edge_id=ie_id,
+                    instrument_entity_id=inst_ent_id,
+                    target_entity_id=primary_entity_id,
+                    loop_id=i_tag[:128],
+                    instrument_type=i_type[:256],
+                    setpoint_or_range=str(i_item.get("setpoint_or_range") or "")[:256],
+                    interlock_or_alarm=str(i_item.get("interlock_or_alarm") or i_svc)[:512],
+                    source_concept_id=concept_id,
+                    source_id=default_src_id,
+                )
+
         # Parse all Markdown tables in the concept body into FactAssertions, LineageEdges, and Connectivity Edges
         parsed_tables = _parse_markdown_tables_by_section(body_md or raw_text)
         for sec_heading, headers, rows in parsed_tables:
@@ -653,7 +764,7 @@ def extract_bundle_graph_and_lineage(
                 (
                     idx
                     for idx, h in enumerate(norm_headers)
-                    if any(k in h for k in ("source", "document", "drawing", "ref"))
+                    if h in ("source", "sources", "document", "drawing", "ref")
                 ),
                 -1,
             )
@@ -804,6 +915,34 @@ def extract_bundle_graph_and_lineage(
                             ),
                         )
 
+                    primary_src_id = primary_src_nodes[0].source_id if primary_src_nodes else ""
+
+                    # Direct 10-column Spanner Graph table edge extraction (Stream | Direction | From (Source) | To (Target) | ...)
+                    if len(row) >= 10:
+                        t_src_slug = _resolve_graph_equip_slug(row[2])
+                        t_dst_slug = _resolve_graph_equip_slug(row[3])
+                        if t_src_slug and t_dst_slug and t_src_slug != t_dst_slug:
+                            s_ent = _ensure_equip_entity(t_src_slug)
+                            d_ent = _ensure_equip_entity(t_dst_slug)
+                            pe_id = compute_deterministic_id(
+                                s_ent, d_ent, stream_or_line, concept_id, prefix="CONN"
+                            )
+                            process_edges_by_id.setdefault(
+                                pe_id,
+                                ProcessConnectionEdge(
+                                    edge_id=pe_id,
+                                    from_entity_id=s_ent,
+                                    to_entity_id=d_ent,
+                                    stream_or_line_id=stream_or_line[:256],
+                                    fluid_service=param_val[:512],
+                                    temperature=( "" if row[6] == "—" else row[6])[:128],
+                                    pressure=("" if row[7] == "—" else row[7])[:128],
+                                    flow_rate=("" if row[8] == "—" else row[8])[:128],
+                                    source_concept_id=concept_id,
+                                    source_id=primary_src_id,
+                                ),
+                            )
+
                     # Find connected equipment tags mentioned in the row
                     eq_mentions: list[str] = []
                     for w_m in _WIKILINK_RE.finditer(full_row_str):
@@ -811,26 +950,12 @@ def extract_bundle_graph_and_lineage(
                         if w_target.startswith("equipment/"):
                             eq_mentions.append(w_target.split("/")[-1])
                     for eq_m in _EQUIP_TAG_RE.finditer(full_row_str):
-                        cand_eq = eq_m.group(1).replace("/", "")
-                        if cand_eq != slug_tail and cand_eq not in eq_mentions:
+                        cand_eq = _resolve_graph_equip_slug(eq_m.group(1))
+                        if cand_eq and cand_eq != slug_tail and cand_eq not in eq_mentions:
                             eq_mentions.append(cand_eq)
 
-                    primary_src_id = primary_src_nodes[0].source_id if primary_src_nodes else ""
                     for target_eq_slug in eq_mentions:
-                        target_ent_id = f"EQ:{target_eq_slug}"
-                        eq_meta = equipment_meta_by_slug.get(target_eq_slug)
-                        entities_by_id.setdefault(
-                            target_ent_id,
-                            EngineeringEntityNode(
-                                entity_id=target_ent_id,
-                                entity_type="EQUIPMENT",
-                                canonical_tag=target_eq_slug,
-                                name=eq_meta[0] if eq_meta else target_eq_slug,
-                                equipment_class=eq_meta[1] if eq_meta else "Equipment",
-                                unit=(eq_meta[2] if eq_meta and eq_meta[2] else unit),
-                                concept_id=eq_meta[3] if eq_meta else f"equipment/{target_eq_slug}",
-                            ),
-                        )
+                        target_ent_id = _ensure_equip_entity(target_eq_slug)
                         is_inbound = bool(
                             re.search(r"\b(from|inlet|feed|suction|supply)\b", full_row_str, re.IGNORECASE)
                             and not re.search(r"\b(to|outlet|discharge|return)\b", full_row_str, re.IGNORECASE)
@@ -840,17 +965,20 @@ def extract_bundle_graph_and_lineage(
                         pe_id = compute_deterministic_id(
                             src_ent, dst_ent, stream_or_line, concept_id, prefix="CONN"
                         )
-                        process_edges_by_id[pe_id] = ProcessConnectionEdge(
-                            edge_id=pe_id,
-                            from_entity_id=src_ent,
-                            to_entity_id=dst_ent,
-                            stream_or_line_id=stream_or_line[:256],
-                            fluid_service=param_val[:512],
-                            temperature="",
-                            pressure="",
-                            flow_rate="",
-                            source_concept_id=concept_id,
-                            source_id=primary_src_id,
+                        process_edges_by_id.setdefault(
+                            pe_id,
+                            ProcessConnectionEdge(
+                                edge_id=pe_id,
+                                from_entity_id=src_ent,
+                                to_entity_id=dst_ent,
+                                stream_or_line_id=stream_or_line[:256],
+                                fluid_service=param_val[:512],
+                                temperature="",
+                                pressure="",
+                                flow_rate="",
+                                source_concept_id=concept_id,
+                                source_id=primary_src_id,
+                            ),
                         )
 
                 # Extract Instrument Control & SIS Interlock Edges from Instrumentation tables

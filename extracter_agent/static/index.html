@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/app.css?v=20261002v2" />
 </head>
 <body>
   <!-- TOP WORKBENCH HEADER -->
@@ -23,7 +23,7 @@
       <div>
         <div class="wb-title-row">
           <h1 class="wb-title">OKF v0.2 Engineering Workbench</h1>
-          <span class="wb-badge wb-badge-primary">Unit 2300</span>
+          <span class="wb-badge wb-badge-primary">Multi-Modal ADK</span>
         </div>
         <div class="wb-subtitle" id="gcs-bucket-banner">
           <span id="stat-gcs-bucket">gs://your-gcp-project-id-okf-knowledge</span> • <span id="stat-raw-count">0</span> Raw PDFs • <span id="stat-okf-count">0</span> OKF Files • <span id="stat-conflict-count">0</span> Conflicts
@@ -77,7 +77,7 @@
           <input
             type="search"
             id="file-search-input"
-            placeholder="Filter tag (D-2304, V-2301) or PDF..."
+            placeholder="Filter equipment tag, concept, or PDF..."
             autocomplete="off"
           />
         </div>
@@ -105,9 +105,8 @@
             <span class="viewer-file-path" id="active-pdf-title">Select a Raw Engineering PDF...</span>
           </div>
           <div class="viewer-toolbar-actions">
-            <select id="pdf-quick-select" class="wb-select" title="Switch Raw PDF Document"></select>
-            <button type="button" class="wb-btn wb-btn-accent" id="btn-extract-current-pdf" title="Run ADK Extraction on this Raw PDF">
-              ⚡ Extract PDF
+            <button type="button" class="wb-btn wb-btn-accent" id="btn-extract-current-pdf" title="Run ADK Extraction on the currently open Raw PDF">
+              ⚡ Extract This PDF
             </button>
             <a id="link-open-pdf-tab" href="#" target="_blank" rel="noopener" class="wb-btn wb-btn-outline" title="Open Raw PDF in new browser tab">
               ↗
@@ -138,8 +137,8 @@
             <button type="button" class="wb-btn wb-btn-outline" id="btn-toggle-md-raw" title="Toggle Rendered GFM vs Raw Markdown Source">
               Raw MD
             </button>
-            <button type="button" class="wb-btn wb-btn-accent" id="btn-extract-current-md" title="Re-run ADK Extraction for this Equipment / Concept">
-              ⚡ Extract Concept
+            <button type="button" class="wb-btn wb-btn-accent" id="btn-extract-current-md" title="Re-run ADK Extraction for the currently open OKF Concept" disabled>
+              ↻ Re-Extract Concept
             </button>
           </div>
         </div>
@@ -176,42 +175,12 @@
       <div class="pane-header">
         <div>
           <span class="pane-title">ADK Extraction Agent Chat</span>
-          <span class="agent-subtitle">By-PDF &amp; By-Equipment OKF v0.2 Compiler</span>
+          <span class="agent-subtitle">Conversational Q&amp;A, Bundle Audit &amp; Custom Extraction</span>
         </div>
         <label class="llm-toggle-label" title="When enabled, invokes live Vertex AI Gemini LLM in addition to ADK deterministic tools">
           <input type="checkbox" id="toggle-live-llm" checked />
           <span>Live Gemini LLM</span>
         </label>
-      </div>
-
-      <!-- TARGETED EXTRACTION CONTROLS -->
-      <div class="chat-target-bar">
-        <div class="target-row">
-          <select id="chat-extract-mode" class="wb-select" title="Extraction Routing Mode">
-            <option value="auto">Mode: Auto-Detect</option>
-            <option value="by_equipment">Mode: Extract Equipment Tag</option>
-            <option value="by_pdf">Mode: Extract Raw PDF</option>
-          </select>
-          <select id="chat-select-equipment" class="wb-select" title="Pick Equipment Tag to Extract">
-            <option value="">Select Equipment...</option>
-          </select>
-        </div>
-        <div class="target-row">
-          <select id="chat-select-pdf" class="wb-select" title="Pick Raw PDF to Extract">
-            <option value="">Select Raw PDF...</option>
-          </select>
-        </div>
-        <div class="quick-action-pills">
-          <button type="button" class="chip-btn" id="btn-chat-extract-open-eq" title="Extract currently open equipment concept">
-            ⚡ Extract Open Equipment
-          </button>
-          <button type="button" class="chip-btn" id="btn-chat-extract-open-pdf" title="Extract currently open Raw PDF">
-            📄 Extract Open PDF
-          </button>
-          <button type="button" class="chip-btn chip-btn-warn" id="btn-chat-test-guardrail" title="Verify Model Armor Pre-Flight Prompt Injection Block">
-            🛡️ Test Guardrail
-          </button>
-        </div>
       </div>
 
       <!-- CHAT MESSAGE STREAM -->
@@ -222,11 +191,11 @@
             <span class="msg-meta">Ready • GCS Auto-Refresh Active</span>
           </div>
           <div class="msg-body">
-            Welcome to the <strong>OKF v0.2 Engineering Workbench</strong>. You can:
+            Welcome to the <strong>OKF v0.2 Engineering Workbench</strong>:
             <ul>
-              <li>Browse <strong>Raw Engineering PDFs</strong> and <strong>Extracted OKF Markdown files</strong> in the left explorer.</li>
-              <li>Inspect any Markdown file side-by-side with its cited <strong>Raw Engineering PDF</strong>.</li>
-              <li>Click <strong>⚡ Extract</strong> on any PDF or equipment tag—or message me below—to run ADK extraction and automatically sync updated files from GCS.</li>
+              <li><strong>Extract a Raw PDF:</strong> Select any PDF in the left explorer to view it, then click <strong>⚡ Extract This PDF</strong> in the PDF toolbar.</li>
+              <li><strong>Inspect or Refresh an OKF Concept:</strong> Select any extracted Markdown file in the left explorer to view it, or click <strong>↻ Re-Extract Concept</strong> in the Markdown toolbar.</li>
+              <li><strong>Chat &amp; Custom Prompts:</strong> Message me below to ask questions, audit the bundle, or run custom extractions.</li>
             </ul>
           </div>
         </div>
@@ -237,18 +206,20 @@
         <textarea
           id="chat-input"
           rows="2"
-          placeholder="Ask to extract a specific PDF or equipment tag (e.g., 'Extract D-2304 from its process data sheet' or 'Extract C-2201')..."
+          placeholder="Ask a question, audit the OKF bundle, or request a custom extraction..."
         ></textarea>
         <div class="chat-send-row">
-          <span class="chat-hint" id="chat-status-hint">Model Armor Guardrail Active</span>
+          <button type="button" class="chip-btn chip-btn-warn" id="btn-chat-test-guardrail" title="Verify Model Armor Pre-Flight Prompt Injection Block">
+            🛡️ Test Guardrail
+          </button>
           <button type="submit" class="wb-btn wb-btn-primary" id="btn-chat-send">
-            Run Extraction ↵
+            Send ↵
           </button>
         </div>
       </form>
     </aside>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20261002v2"></script>
 </body>
 </html>

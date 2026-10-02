@@ -690,6 +690,86 @@ def test_pbt_equivalent_numeric_and_annotated_parameters_never_conflict(
     assert conflicts == []
 
 
+@given(
+    stream_id=st.from_regex(r"1-[A-Z]{2}-[0-9]{1,2}in-[A-Za-z0-9\-]{2,12}", fullmatch=True),
+    direction=st.sampled_from(["INLET", "OUTLET", "BYPASS", "VENT", "DRAIN", "RELIEF"]),
+    src_tag=st.from_regex(r"[A-Z]{1,3}-[0-9]{1,3}[A-B]?", fullmatch=True),
+    tgt_tag=st.from_regex(r"[A-Z]{1,3}-[0-9]{1,3}[A-B]?", fullmatch=True),
+    valves=st.lists(
+        st.from_regex(r"V[0-9]{1,3}", fullmatch=True),
+        min_size=1,
+        max_size=5,
+        unique=True,
+    ),
+)
+def test_pbt_spanner_graph_connection_edge_roundtrip(
+    stream_id: str,
+    direction: str,
+    src_tag: str,
+    tgt_tag: str,
+    valves: list[str],
+) -> None:
+    """Property: Every ConnectionStream with Spanner Graph edge attributes round-trips identically through YAML frontmatter and Markdown table parsing."""
+    from extracter_agent.models.domain import ConnectionStream, EquipmentEntity
+    from extracter_agent.okf.synthesizer import (
+        merge_equipment_entity_with_existing,
+        synthesize_equipment_concept,
+    )
+
+    entity = EquipmentEntity(
+        tag=src_tag,
+        name="Test Equipment",
+        equipment_class="Filter",
+        unit="SF",
+        function_summary="Test equipment connectivity.",
+        connections=[
+            ConnectionStream(
+                stream_id=stream_id,
+                direction=direction,
+                source_tag=src_tag,
+                target_tag=tgt_tag,
+                line_size='4"',
+                inline_components=valves,
+                description="Test graph edge",
+                source="P&ID-001",
+            )
+        ],
+        sources=["pid/PID-001.pdf"],
+    )
+    doc = OKFDocument.parse(synthesize_equipment_concept(entity).serialize())
+    meta_conns = doc.frontmatter["entity_metadata"]["connections"]
+    assert len(meta_conns) == 1
+    assert meta_conns[0]["stream_id"] == stream_id
+    assert meta_conns[0]["direction"] == direction
+    assert meta_conns[0]["source_tag"] == src_tag
+    assert meta_conns[0]["target_tag"] == tgt_tag
+    assert meta_conns[0]["inline_components"] == valves
+
+    # Also verify table fallback round-trip when entity_metadata.connections is absent
+    doc_table_only = OKFDocument(
+        frontmatter={"type": "Equipment Concept", "title": f"{src_tag} — Test"},
+        body=doc.body,
+    )
+    reconstructed = merge_equipment_entity_with_existing(
+        EquipmentEntity(
+            tag=src_tag,
+            name="Test Equipment",
+            equipment_class="Filter",
+            unit="SF",
+            function_summary="Test equipment connectivity.",
+        ),
+        doc_table_only,
+    )
+    assert len(reconstructed.connections) == 1
+    rc = reconstructed.connections[0]
+    assert rc.stream_id == stream_id
+    assert rc.direction == direction
+    assert rc.source_tag == src_tag
+    assert rc.target_tag == tgt_tag
+    assert rc.inline_components == valves
+
+
+
 
 
 

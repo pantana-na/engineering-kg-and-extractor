@@ -63,7 +63,7 @@ def generate_equipment_okf_tool(
     function_summary: str,
     design_data: list[dict[str, str]],
     operating_conditions: list[dict[str, str]],
-    connections: list[dict[str, str]],
+    connections: list[dict[str, Any]],
     hazards: list[str],
     source_files: list[str],
     instruments: list[dict[str, str]] | None = None,
@@ -91,7 +91,7 @@ def generate_equipment_okf_tool(
         function_summary: Engineering description of the equipment function.
         design_data: List of design parameters with parameter, value, unit, and source.
         operating_conditions: List of operating conditions with parameter, value, unit, and source.
-        connections: List of stream connections with stream_id, temperature, pressure, flow_rate.
+        connections: List of Spanner-Graph-ready stream connections with stream_id, direction (INLET|OUTLET|BYPASS|VENT|DRAIN|RELIEF|RECIRC|UTILITY), source_tag, target_tag, line_size, inline_components (list of inline valves/orifices/elements), temperature, pressure, flow_rate, description, and source.
         hazards: List of process safety hazard notes and precautions.
         source_files: List of reference source PDF paths.
         instruments: Optional list of P&ID instruments and control loops (tag, service, instrument_type, location, setpoint_or_range, interlock_or_alarm, source).

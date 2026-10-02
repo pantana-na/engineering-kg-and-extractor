@@ -468,11 +468,9 @@ class LiveExtractRequest(BaseModel):
     mode: str = Field(default="auto")
     target_equipment: str | None = Field(default=None)
     target_pdf: str | None = Field(default=None)
-    concept_id: str = Field(default="equipment/D-2304")
+    concept_id: str = Field(default="")
     subfolder: str = Field(default="data_sheets")
-    pdf_filename: str = Field(
-        default="DS-D2304_Decomposer_Reactor_Z1.pdf"
-    )
+    pdf_filename: str = Field(default="")
     invoke_vertex_llm: bool = Field(default=False)
     async_job: bool = Field(default=False)
 
@@ -486,6 +484,16 @@ def create_web_app() -> FastAPI:
         version="2.0.0",
         description="3-Pane Split Engineering Workbench with Live GCS Sync, PDF/Markdown Split Viewer, and ADK Extraction Chat.",
     )
+
+    @app.middleware("http")
+    async def disable_static_and_html_caching(request: Any, call_next: Any) -> Any:
+        response = await call_next(request)
+        path = request.url.path
+        if path in ("/", "/demo") or path.startswith("/static/") or path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
 
     if STATIC_DIR.exists():
         app.mount(
@@ -512,7 +520,10 @@ def create_web_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="Workbench index.html not found"
             )
-        return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            content=index_file.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
 
     @app.get("/favicon.ico", include_in_schema=False)
     async def serve_favicon() -> Response:
@@ -984,7 +995,11 @@ def create_web_app() -> FastAPI:
                 "duration_ms": int((time.monotonic() - t0) * 1000),
             }
 
-        tag_query = clean_concept_id.split("/")[-1]
+        tag_query = (
+            clean_concept_id.split("/")[-1]
+            if clean_concept_id
+            else (Path(pdf_name).stem if pdf_name else "document")
+        )
         if job_state is not None:
             job_state["current_step"] = f"STEP 1 // DISCOVERY (find_raw_documents_tool: {tag_query})"
 
@@ -1104,7 +1119,8 @@ def create_web_app() -> FastAPI:
                 and not f["concept_id"].endswith("index")
             ]
             if llm_touched and (
-                not (bundle_dir / f"{clean_concept_id}.md").exists()
+                not clean_concept_id
+                or not (bundle_dir / f"{clean_concept_id}.md").exists()
                 or req.mode == "by_pdf"
             ):
                 domain_touched = [
@@ -1279,7 +1295,7 @@ def create_web_app() -> FastAPI:
                     "extract all specifications, nozzles, and operating parameters, and update its OKF v0.2 Markdown file."
                 )
             else:
-                effective_prompt = f"Extract and inspect OKF concept {req.concept_id}."
+                effective_prompt = f"Extract and inspect OKF concept {req.concept_id or 'bundle'}."
 
         try:
             before_agent_callback(effective_prompt)
@@ -1291,33 +1307,12 @@ def create_web_app() -> FastAPI:
                 "duration_ms": int((time.monotonic() - t0) * 1000),
             }
 
-        ensure_bundle_seeded()
-
-        # Determine target concept & target PDF from request or prompt (compatible with fresh & partial bundles)
-        clean_concept_id = (req.concept_id or "equipment/D-2304").removesuffix(".md")
-        if req.target_equipment:
-            eq_clean = req.target_equipment.strip().removesuffix(".md")
-            clean_concept_id = eq_clean if "/" in eq_clean else f"equipment/{eq_clean}"
-        elif not req.concept_id or req.concept_id == "equipment/D-2304":
-            tag_match = re.search(r"\b([A-Z]{1,4}-\d{3,4}[A-Z]?)\b", effective_prompt)
-            if tag_match:
-                clean_concept_id = f"equipment/{tag_match.group(1)}"
-            elif req.target_pdf:
-                ps_match = re.search(
-                    r"(?:PS|DS)-([A-Z]{1,3})[-_]?(\d{3,4}[A-Z]?)",
-                    req.target_pdf,
-                    flags=re.IGNORECASE,
-                )
-                if ps_match:
-                    clean_concept_id = f"equipment/{ps_match.group(1).upper()}-{ps_match.group(2).upper()}"
-
-        if ".." in clean_concept_id or clean_concept_id.startswith("/"):
-            raise HTTPException(status_code=400, detail="Invalid concept_id")
+        bundle_dir = ensure_bundle_seeded()
 
         pdf_sub = (
             req.subfolder if req.subfolder in ALLOWED_RAW_SUBFOLDERS else "data_sheets"
         )
-        pdf_name = req.pdf_filename
+        pdf_name = req.pdf_filename.strip()
         if req.target_pdf:
             clean_pdf = req.target_pdf.replace("reference/raw/", "").strip("/")
             if "/" in clean_pdf:
@@ -1327,9 +1322,54 @@ def create_web_app() -> FastAPI:
                     pdf_name = name_part
             else:
                 pdf_name = clean_pdf
+        elif not pdf_name and req.mode != "chat":
+            raw_list = list_all_raw_pdfs()
+            if raw_list:
+                pdf_sub = raw_list[0]["subfolder"]
+                pdf_name = raw_list[0]["file_name"]
 
         if ".." in pdf_name or pdf_name.startswith("/"):
             raise HTTPException(status_code=400, detail="Invalid pdf_filename")
+
+        # Determine target concept & target PDF from request or prompt (compatible with fresh & partial bundles)
+        clean_concept_id = (req.concept_id or "").strip().removesuffix(".md")
+        if req.target_equipment:
+            eq_clean = req.target_equipment.strip().removesuffix(".md")
+            clean_concept_id = eq_clean if "/" in eq_clean else f"equipment/{eq_clean}"
+        elif not clean_concept_id:
+            tag_match = re.search(r"\b([A-Z]{1,4}-\d{1,4}[A-Z]?)\b", effective_prompt)
+            if tag_match and tag_match.group(1).split("-")[0] not in {
+                "PART", "PID", "PFD", "STD", "SDS", "LR", "REV", "ML",
+            }:
+                clean_concept_id = f"equipment/{tag_match.group(1)}"
+            elif req.target_pdf:
+                ps_match = re.search(
+                    r"(?:PS|DS)-([A-Z]{1,3})[-_]?(\d{1,4}[A-Z]?)",
+                    req.target_pdf,
+                    flags=re.IGNORECASE,
+                )
+                if ps_match:
+                    clean_concept_id = f"equipment/{ps_match.group(1).upper()}-{ps_match.group(2).upper()}"
+            if not clean_concept_id and req.mode != "chat":
+                existing_okf = [
+                    f["concept_id"]
+                    for f in list_all_okf_files(bundle_dir)
+                    if not f.get("is_index") and f["concept_id"] != "log"
+                ]
+                if existing_okf and not req.target_pdf:
+                    clean_concept_id = existing_okf[0]
+                elif pdf_name:
+                    stem_slug = re.sub(
+                        r"[^a-z0-9]+", "-", Path(pdf_name).stem.lower()
+                    ).strip("-")
+                    clean_concept_id = (
+                        f"sources/{stem_slug}" if stem_slug else "sources/document"
+                    )
+                else:
+                    clean_concept_id = "sources/document"
+
+        if ".." in clean_concept_id or clean_concept_id.startswith("/"):
+            raise HTTPException(status_code=400, detail="Invalid concept_id")
 
         if req.async_job:
             job_id = uuid.uuid4().hex[:12]

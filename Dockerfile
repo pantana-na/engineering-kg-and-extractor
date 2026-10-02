@@ -22,8 +22,11 @@ COPY extracter_agent ./extracter_agent
 COPY query_agent ./query_agent
 COPY docs ./docs
 
-# Install runtime dependencies and create empty runtime bundle directory
-RUN pip install --upgrade pip && \
+# Install poppler-utils (pdftoppm for 300-DPI P&ID rasterization) and runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends poppler-utils && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --upgrade pip && \
     pip install --no-cache-dir . uvicorn fastapi && \
     mkdir -p /tmp/okf_bundle
 

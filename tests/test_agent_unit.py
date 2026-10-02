@@ -84,6 +84,7 @@ def _ensure_raw_fixtures_if_empty(tmp_path: Path, monkeypatch) -> None:
     raw_dir = tmp_path / "reference" / "raw"
     generate_synthetic_raw_pdfs(raw_dir)
     monkeypatch.setenv("REFERENCE_RAW_DIR", str(raw_dir))
+    monkeypatch.setenv("USE_GCS_STORAGE", "false")
 
 
 def test_find_raw_documents_tool(tmp_path: Path, monkeypatch):

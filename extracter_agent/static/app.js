@@ -34,6 +34,7 @@
     themeToggle: document.getElementById("theme-toggle"),
     themeLabel: document.getElementById("theme-toggle-label"),
     gcsBucketBanner: document.getElementById("gcs-bucket-banner"),
+    statGcsBucket: document.getElementById("stat-gcs-bucket"),
     statRawCount: document.getElementById("stat-raw-count"),
     statOkfCount: document.getElementById("stat-okf-count"),
     statConflictCount: document.getElementById("stat-conflict-count"),
@@ -261,17 +262,20 @@
   // =========================================================================
   function discoverRawEquipmentCandidates() {
     const validPrefixes = new Set([
-      "C", "D", "E", "EA", "F", "G", "H", "K", "M", "P", "R", "S", "T", "TK", "U", "V", "W", "X", "Y", "Z",
+      "C", "D", "DM", "E", "EA", "F", "G", "H", "K", "M", "P", "R", "S", "T", "TK", "U", "V", "W", "X", "Y", "Z",
+    ]);
+    const excludedTokens = new Set([
+      "PART", "PID", "PFD", "STD", "SDS", "LR", "REV", "ML",
     ]);
     const candidates = new Set();
-    const tagRegex = /\b([A-Z]{1,3})-?(\d{4}[A-Z]?)\b/g;
+    const tagRegex = /\b([A-Z]{1,3})-?(\d{1,4}[A-Z]?)\b/g;
     state.rawPdfs.forEach((p) => {
       const upperName = String(p.file_name || "").toUpperCase();
       let m;
       while ((m = tagRegex.exec(upperName)) !== null) {
         const prefix = m[1];
         const num = m[2];
-        if (validPrefixes.has(prefix)) {
+        if (validPrefixes.has(prefix) && !excludedTokens.has(prefix)) {
           candidates.add(`${prefix}-${num}`);
         }
       }
@@ -364,7 +368,7 @@
         </div>`;
 
       if (filteredOkf.length === 0) {
-        html += `<div class="loading-state">No OKF Markdown files extracted yet. Click ⚡ on any Raw PDF below or use Chat to start extracting.</div>`;
+        html += `<div class="loading-state">No OKF Markdown files extracted yet. Select a Raw PDF below and click <strong>⚡ Extract This PDF</strong> in the PDF viewer toolbar.</div>`;
       } else {
         Object.keys(byCat)
           .sort()
@@ -384,9 +388,6 @@
                 <span class="tree-item-label" title="${escapeHtml(item.title)} (${escapeHtml(item.relative_path)})">
                   ${item.has_conflict ? "⚠️ " : "📄 "}${escapeHtml(shortName)}
                 </span>
-                <div class="tree-item-actions">
-                  <button type="button" class="tree-extract-btn" data-extract-concept="${escapeHtml(item.concept_id)}" title="Run ADK Extraction for ${escapeHtml(item.concept_id)}">⚡</button>
-                </div>
               </div>`;
             });
             html += `</div>`;
@@ -431,9 +432,6 @@
               <span class="tree-item-label" title="${escapeHtml(pdf.file_name)}">
                 📕 ${escapeHtml(pdf.file_name)}
               </span>
-              <div class="tree-item-actions">
-                <button type="button" class="tree-extract-btn" data-extract-pdf="${escapeHtml(pdf.relative_path)}" title="Extract Raw PDF ${escapeHtml(pdf.file_name)}">⚡</button>
-              </div>
             </div>`;
           });
           html += `</div>`;
@@ -484,33 +482,21 @@
     }
 
     if (cleanId) {
+      if (el.btnExtractCurrentMd) el.btnExtractCurrentMd.disabled = false;
       if (el.activeMdTitle) el.activeMdTitle.textContent = `${cleanId}.md (Not Yet Extracted)`;
       el.mdRenderedBody.innerHTML = `
         <div class="empty-okf-card">
           <h2>📄 <code>${escapeHtml(cleanId)}.md</code> is not extracted yet</h2>
           <p>This project currently has <strong>${state.okfFiles.length}</strong> extracted OKF Markdown file(s) and <strong>${state.rawPdfs.length}</strong> Raw Engineering PDF(s) in GCS.</p>
-          <p>Click below to run the ADK Extraction Agent on the matching Raw PDFs and generate <code>${escapeHtml(cleanId)}.md</code>:</p>
-          <p>
-            <button type="button" class="wb-btn wb-btn-accent" data-extract-concept="${escapeHtml(cleanId)}">
-              ⚡ Extract ${escapeHtml(cleanId)} Now
-            </button>
-          </p>
         </div>
       `;
     } else {
-      if (el.activeMdTitle) el.activeMdTitle.textContent = "Fresh Project — 0 OKF Markdown Files";
-      const currentPdfBtn = state.activePdfPath
-        ? `<button type="button" class="wb-btn wb-btn-accent" data-extract-pdf="${escapeHtml(state.activePdfPath)}">⚡ Extract Open PDF (${escapeHtml(state.activePdfPath.split("/").pop())})</button>`
-        : "";
+      if (el.btnExtractCurrentMd) el.btnExtractCurrentMd.disabled = true;
+      if (el.activeMdTitle) el.activeMdTitle.textContent = "No OKF Markdown Selected";
       el.mdRenderedBody.innerHTML = `
         <div class="empty-okf-card">
-          <h2>🚀 Fresh Engineering Project Ready for Extraction</h2>
-          <p>Found <strong>${state.rawPdfs.length} Raw Engineering PDF(s)</strong> in GCS and <strong>0 Extracted OKF Markdown files</strong>.</p>
-          <ul>
-            <li>Select any Raw PDF on the left or click <strong>⚡ Extract PDF</strong> in the PDF toolbar to compile OKF v0.2 Markdown.</li>
-            <li>Pick any equipment tag in the <strong>ADK Extraction Agent Chat</strong> dropdown on the right or ask the agent in natural language.</li>
-          </ul>
-          <p>${currentPdfBtn}</p>
+          <h2>📄 No OKF Markdown File Selected</h2>
+          <p>Found <strong>${state.rawPdfs.length} Raw Engineering PDF(s)</strong> and <strong>${state.okfFiles.length} Extracted OKF Markdown file(s)</strong> in GCS.</p>
         </div>
       `;
     }
@@ -523,6 +509,7 @@
     }
     const cleanId = conceptId.replace(/\.md$/, "");
     state.activeConceptId = cleanId;
+    if (el.btnExtractCurrentMd) el.btnExtractCurrentMd.disabled = false;
     if (el.activeMdTitle) el.activeMdTitle.textContent = `${cleanId}.md`;
     renderExplorerTree();
 
@@ -601,6 +588,9 @@
       if (!resp.ok) return;
       const data = await resp.json();
 
+      if (el.statGcsBucket && data.gcs_bucket) {
+        el.statGcsBucket.textContent = data.gcs_bucket;
+      }
       if (el.statRawCount) el.statRawCount.textContent = data.raw_pdf_count;
       if (el.statOkfCount) el.statOkfCount.textContent = data.okf_file_count;
       if (el.statConflictCount) el.statConflictCount.textContent = data.conflict_count;
@@ -918,25 +908,9 @@
       });
     });
 
-    // Explorer Tree Delegation (Open file or click ⚡ Extract)
+    // Explorer Tree Delegation (Open file in viewer)
     if (el.explorerTree) {
       el.explorerTree.addEventListener("click", (e) => {
-        const extractConceptBtn = e.target.closest("[data-extract-concept]");
-        if (extractConceptBtn) {
-          e.stopPropagation();
-          const cid = extractConceptBtn.getAttribute("data-extract-concept");
-          triggerExtraction({ mode: "by_equipment", targetEquipment: cid });
-          return;
-        }
-
-        const extractPdfBtn = e.target.closest("[data-extract-pdf]");
-        if (extractPdfBtn) {
-          e.stopPropagation();
-          const pdfPath = extractPdfBtn.getAttribute("data-extract-pdf");
-          triggerExtraction({ mode: "by_pdf", targetPdf: pdfPath });
-          return;
-        }
-
         const row = e.target.closest(".tree-item");
         if (!row) return;
         const type = row.getAttribute("data-type");
@@ -953,19 +927,15 @@
       });
     }
 
-    // PDF Toolbar Controls
-    if (el.pdfQuickSelect) {
-      el.pdfQuickSelect.addEventListener("change", (e) => {
-        openRawPdf(e.target.value);
-      });
-    }
+    // PDF Toolbar Controls (Single primary button to extract open PDF)
     if (el.btnExtractCurrentPdf) {
       el.btnExtractCurrentPdf.addEventListener("click", () => {
+        if (!state.activePdfPath) return;
         triggerExtraction({ mode: "by_pdf", targetPdf: state.activePdfPath });
       });
     }
 
-    // Markdown Toolbar Controls
+    // Markdown Toolbar Controls (Single primary button to re-extract open OKF concept)
     if (el.btnToggleFrontmatter) {
       el.btnToggleFrontmatter.addEventListener("click", () => {
         state.showFrontmatter = !state.showFrontmatter;
@@ -982,20 +952,11 @@
     }
     if (el.btnExtractCurrentMd) {
       el.btnExtractCurrentMd.addEventListener("click", () => {
-        const eqTarget =
-          state.activeConceptId ||
-          (el.chatSelectEquipment ? el.chatSelectEquipment.value : "");
-        if (eqTarget) {
-          triggerExtraction({
-            mode: "by_equipment",
-            targetEquipment: eqTarget,
-          });
-        } else if (state.activePdfPath) {
-          triggerExtraction({
-            mode: "by_pdf",
-            targetPdf: state.activePdfPath,
-          });
-        }
+        if (!state.activeConceptId) return;
+        triggerExtraction({
+          mode: "by_equipment",
+          targetEquipment: state.activeConceptId,
+        });
       });
     }
 
@@ -1012,27 +973,9 @@
       });
     }
 
-    // Clickable [[wikilinks]] & Empty-State Extract buttons inside Rendered Markdown
+    // Clickable [[wikilinks]] inside Rendered Markdown
     if (el.mdRenderedBody) {
       el.mdRenderedBody.addEventListener("click", (e) => {
-        const extractConceptBtn = e.target.closest("[data-extract-concept]");
-        if (extractConceptBtn) {
-          e.preventDefault();
-          triggerExtraction({
-            mode: "by_equipment",
-            targetEquipment: extractConceptBtn.getAttribute("data-extract-concept"),
-          });
-          return;
-        }
-        const extractPdfBtn = e.target.closest("[data-extract-pdf]");
-        if (extractPdfBtn) {
-          e.preventDefault();
-          triggerExtraction({
-            mode: "by_pdf",
-            targetPdf: extractPdfBtn.getAttribute("data-extract-pdf"),
-          });
-          return;
-        }
         const link = e.target.closest(".wikilink-chip");
         if (!link) return;
         e.preventDefault();
@@ -1043,51 +986,7 @@
       });
     }
 
-    // Chat Target Selectors & Quick Actions
-    if (el.chatSelectEquipment) {
-      el.chatSelectEquipment.addEventListener("change", (e) => {
-        const val = e.target.value;
-        if (val) {
-          openOkfConcept(val, true);
-          el.chatExtractMode.value = "by_equipment";
-        }
-      });
-    }
-    if (el.chatSelectPdf) {
-      el.chatSelectPdf.addEventListener("change", (e) => {
-        const val = e.target.value;
-        if (val) {
-          openRawPdf(val);
-          el.chatExtractMode.value = "by_pdf";
-        }
-      });
-    }
-    if (el.btnChatExtractOpenEq) {
-      el.btnChatExtractOpenEq.addEventListener("click", () => {
-        const eqTarget =
-          state.activeConceptId ||
-          (el.chatSelectEquipment ? el.chatSelectEquipment.value : "");
-        if (eqTarget) {
-          triggerExtraction({
-            mode: "by_equipment",
-            targetEquipment: eqTarget,
-          });
-        } else if (state.activePdfPath) {
-          triggerExtraction({
-            mode: "by_pdf",
-            targetPdf: state.activePdfPath,
-          });
-        }
-      });
-    }
-    if (el.btnChatExtractOpenPdf) {
-      el.btnChatExtractOpenPdf.addEventListener("click", () => {
-        triggerExtraction({
-          mode: "by_pdf",
-          targetPdf: state.activePdfPath,
-        });
-      });
-    }
+    // Guardrail Test Action
     if (el.btnChatTestGuardrail) {
       el.btnChatTestGuardrail.addEventListener("click", () => {
         triggerExtraction({
@@ -1116,31 +1015,18 @@
       });
     }
 
-    // Chat Form Submit & Enter key
+    // Chat Form Submit & Enter key (Pure conversational / custom prompt submit)
     if (el.chatForm) {
       el.chatForm.addEventListener("submit", (e) => {
         e.preventDefault();
         const text = (el.chatInput.value || "").trim();
-        const mode = el.chatExtractMode ? el.chatExtractMode.value : "auto";
-        const selectedEq = el.chatSelectEquipment ? el.chatSelectEquipment.value : "";
-        const selectedPdf = el.chatSelectPdf ? el.chatSelectPdf.value : "";
-
-        if (!text && !selectedEq && !selectedPdf) return;
+        if (!text) return;
         el.chatInput.value = "";
-        if (text) {
-          triggerExtraction({
-            prompt: text,
-            mode: "chat",
-            targetEquipment: null,
-            targetPdf: null,
-          });
-          return;
-        }
         triggerExtraction({
-          prompt: "",
-          mode,
-          targetEquipment: mode === "by_equipment" ? selectedEq || state.activeConceptId : null,
-          targetPdf: mode === "by_pdf" ? selectedPdf || state.activePdfPath : null,
+          prompt: text,
+          mode: "chat",
+          targetEquipment: null,
+          targetPdf: null,
         });
       });
     }
