@@ -69,8 +69,23 @@ def test_orchestrator_instruction_contract():
     assert "UNIT FIDELITY" in prompt
 
 
-def test_find_raw_documents_tool():
+def _ensure_raw_fixtures_if_empty(tmp_path: Path, monkeypatch) -> None:
+    """Seed minimal raw PDFs in tmp_path and point REFERENCE_RAW_DIR to it if reference/raw is empty."""
+    from extracter_agent.config import get_config
+
+    cfg = get_config()
+    if (cfg.reference_raw_dir / "pid" / "PID-23-0004_Preflash_Column_Z1.pdf").exists():
+        return
+    from scripts.generate_synthetic_reference import generate_synthetic_raw_pdfs
+
+    raw_dir = tmp_path / "reference" / "raw"
+    generate_synthetic_raw_pdfs(raw_dir)
+    monkeypatch.setenv("REFERENCE_RAW_DIR", str(raw_dir))
+
+
+def test_find_raw_documents_tool(tmp_path: Path, monkeypatch):
     """Test find_raw_documents_tool document discovery in reference/raw."""
+    _ensure_raw_fixtures_if_empty(tmp_path, monkeypatch)
     res = find_raw_documents_tool(query="V-2301")
     assert res["status"] == "success"
     assert res["match_count"] >= 1
@@ -81,8 +96,9 @@ def test_find_raw_documents_tool():
     assert res_sub["match_count"] >= 1
 
 
-def test_process_raw_pdf_vector_drawing_detection():
+def test_process_raw_pdf_vector_drawing_detection(tmp_path: Path, monkeypatch):
     """Test vector drawing detection on AutoCAD P&ID with empty text stream."""
+    _ensure_raw_fixtures_if_empty(tmp_path, monkeypatch)
     res = process_raw_pdf_tool(
         pdf_filename="PID-23-0004_Preflash_Column_Z1.pdf",
         subfolder="pid",
@@ -124,8 +140,9 @@ def test_generate_okf_concept_and_validate_tools():
 
 
 
-def test_process_raw_pdf_tool_real_file():
+def test_process_raw_pdf_tool_real_file(tmp_path: Path, monkeypatch):
     """Test process_raw_pdf_tool callable on real reference PDF."""
+    _ensure_raw_fixtures_if_empty(tmp_path, monkeypatch)
     res = process_raw_pdf_tool(
         pdf_filename="DS-V2301_Preflash_Column_Z1.pdf",
         subfolder="data_sheets",

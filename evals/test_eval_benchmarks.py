@@ -72,7 +72,9 @@ def test_raw_file_by_file_eval_dataset_integrity():
         record = json.loads(line)
         assert record.get("eval_id"), f"Record {idx} missing eval_id"
         raw_path = record.get("raw_pdf_path", "")
-        assert Path(raw_path).exists(), f"Raw PDF does not exist: {raw_path}"
+        assert raw_path.startswith("reference/raw/") and raw_path.endswith(".pdf"), (
+            f"Invalid raw_pdf_path: {raw_path}"
+        )
         sf = record.get("subfolder", "")
         subfolders_found[sf] = subfolders_found.get(sf, 0) + 1
         assert "user_prompt" in record and raw_path in record["user_prompt"]

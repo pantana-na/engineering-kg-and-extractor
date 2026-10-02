@@ -427,6 +427,9 @@ def process_raw_pdf_tool(
                 mm_kwargs["window_size"] = 2
             if page_query:
                 mm_kwargs["page_query"] = page_query
+            if start_page > 1 or max_pages < 150:
+                mm_kwargs["start_page"] = start_page
+                mm_kwargs["max_pages"] = max_pages
             try:
                 multimodal_text = extract_pdf_multimodal_summary(target_path, **mm_kwargs)
             except TypeError:
@@ -449,6 +452,9 @@ def process_raw_pdf_tool(
             }
             if page_query:
                 mm_kwargs["page_query"] = page_query
+            if start_page > 1 or max_pages < 150:
+                mm_kwargs["start_page"] = start_page
+                mm_kwargs["max_pages"] = max_pages
             try:
                 multimodal_text = extract_pdf_multimodal_summary(target_path, **mm_kwargs)
             except TypeError:
@@ -485,6 +491,14 @@ def process_raw_pdf_tool(
             else f"{cfg.source_gcs_raw_prefix}/{target_path.parent.name}/{target_path.name}"
         )
 
+        multimodal_analysis_out = (
+            f"[Multimodal extraction completed ({len(multimodal_text)} chars); "
+            f"full transcription is populated in `pages` above to prevent payload duplication.]\n\n"
+            f"{multimodal_text[:4000]}..."
+            if multimodal_text and len(multimodal_text) > 16000
+            else multimodal_text
+        )
+
         return {
             "status": "success",
             "source_storage": "gcs" if source_gcs_uri else "local",
@@ -497,7 +511,7 @@ def process_raw_pdf_tool(
             "is_vector_drawing": is_vector,
             "has_text_stream": has_native_text,
             "multimodal_ready": True,
-            "multimodal_analysis": multimodal_text,
+            "multimodal_analysis": multimodal_analysis_out,
             "pages_processed": len(limited_pages),
             "total_pages": meta["page_count"],
             "tag_candidates": tag_candidates,

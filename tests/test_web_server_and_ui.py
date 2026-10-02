@@ -75,8 +75,17 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> TestClient:
 
     prev_gcs = os.environ.get("USE_GCS_STORAGE")
     prev_out = os.environ.get("OUTPUT_BUNDLE_DIR")
+    prev_raw = os.environ.get("REFERENCE_RAW_DIR")
     os.environ["USE_GCS_STORAGE"] = "false"
     os.environ["OUTPUT_BUNDLE_DIR"] = str(tmp_bundle)
+
+    if not list(Path("reference/raw").rglob("*.pdf")):
+        from scripts.generate_synthetic_reference import generate_synthetic_raw_pdfs
+
+        tmp_raw = tmp_path_factory.mktemp("workbench_test_raw") / "raw"
+        generate_synthetic_raw_pdfs(tmp_raw)
+        os.environ["REFERENCE_RAW_DIR"] = str(tmp_raw)
+
     try:
         app = create_web_app()
         yield TestClient(app)
@@ -89,6 +98,10 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> TestClient:
             os.environ.pop("OUTPUT_BUNDLE_DIR", None)
         else:
             os.environ["OUTPUT_BUNDLE_DIR"] = prev_out
+        if prev_raw is None:
+            os.environ.pop("REFERENCE_RAW_DIR", None)
+        else:
+            os.environ["REFERENCE_RAW_DIR"] = prev_raw
 
 
 def test_workbench_root_healthz_and_architecture_html(client: TestClient) -> None:
@@ -115,7 +128,9 @@ def test_workbench_root_healthz_and_architecture_html(client: TestClient) -> Non
 
 def test_workbench_status_and_files_tree_endpoints(client: TestClient) -> None:
     """Verify /api/status and /api/files return live telemetry, Raw PDFs, OKF files, and sync_version."""
-    expected_pdf_count = len(list(Path("reference/raw").rglob("*.pdf")))
+    from extracter_agent.config import get_config
+
+    expected_pdf_count = len(list(get_config().reference_raw_dir.rglob("*.pdf")))
     resp = client.get("/api/status")
     assert resp.status_code == 200
     data = resp.json()

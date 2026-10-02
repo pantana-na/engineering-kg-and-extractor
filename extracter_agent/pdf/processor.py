@@ -147,10 +147,11 @@ def chunk_document_text(
 def extract_equipment_tag_candidates(text: str) -> list[str]:
     """Extract likely equipment tag candidates matching standard plant tag patterns.
 
-    Identifies alphanumeric plant equipment tags matching <PREFIX>-<NUMBER><SUFFIX>.
+    Identifies alphanumeric plant equipment tags matching <PREFIX>-<NUMBER><SUFFIX>
+    or multi-segment unit-prefixed tags (<UNIT>-<SYSTEM>-<TYPE>-<NUMBER><SUFFIX>).
     Used as candidate hints for model reasoning; does NOT replace cognitive routing.
     """
-    pattern = r"\b([A-Z]{1,3}-\d{4}[A-Z]{0,6})\b"
+    pattern = r"\b((?:\d+-[A-Z]{1,4}-)?[A-Z]{1,4}-\d{1,5}[A-Z]{0,6})\b"
     matches = re.findall(pattern, text)
     # Preserve order, deduplicate
     seen: set[str] = set()
@@ -368,12 +369,14 @@ def extract_pdf_multimodal_summary(
     prompt_hint: str | None = None,
     window_size: int = 4,
     page_query: str | None = None,
+    start_page: int = 1,
+    max_pages: int = 150,
 ) -> str:
     """Extract chemical engineering technical content using Gemini multimodal vision.
 
     Eliminates the single-call multimodal output bottleneck on multi-sheet packages:
     - Automatically adapts to 1-2 page windowing (`window_size=2`) on landscape vector CAD drawings (`is_vector_drawing(path)`) while keeping `window_size=4` for portrait text/table PDFs.
-    - Supports `page_query` filtering across multi-page documents.
+    - Supports `start_page`, `max_pages`, and `page_query` filtering across multi-page documents.
     - For single-sheet or <= effective_window PDFs, executes a single cached call keyed by `(pdf_bytes, prompt)` SHA-256.
     - For multi-sheet PDFs (> effective_window pages, up to 150 pages), slices pages into effective_window batches via
       pypdf.PdfWriter, executes windows concurrently (up to 4 parallel workers) with max_output_tokens=65536,
@@ -406,7 +409,12 @@ def extract_pdf_multimodal_summary(
         if is_landscape and is_vector_drawing(path):
             effective_window = 2
 
-    if reader is None or (total_pages <= effective_window and not (page_query and page_query.strip())):
+    has_page_slice = start_page > 1 or max_pages < total_pages
+    if reader is None or (
+        total_pages <= effective_window
+        and not (page_query and page_query.strip())
+        and not has_page_slice
+    ):
         return _extract_single_pdf_window_multimodal(
             pdf_bytes=pdf_bytes,
             cache_key_name=path.stem,
@@ -427,6 +435,11 @@ def extract_pdf_multimodal_summary(
             if txt_len < 1300:
                 target_indices.append(idx)
         target_indices = target_indices[: effective_window * 8]
+
+    if has_page_slice:
+        start_idx = max(0, start_page - 1)
+        end_idx = start_idx + max(1, max_pages)
+        target_indices = [idx for idx in target_indices if start_idx <= idx < end_idx]
 
     if page_query and page_query.strip() and reader is not None:
         q_tokens = [

@@ -70,3 +70,18 @@ All isolated demo cloud resources were provisioned, deployed, seeded from live `
    - **Cloud Spanner Graph Seeding (`okf-demo-spanner / okf_demo_graph`):** Synchronized `23` source documents, `71` OKF concepts, `518` section chunks (with 768-dim `text-embedding-005` vectors), `151` engineering entities, `1,391` parameter assertions (`32` cross-document conflicts), `286` process connections, `56` instrument control edges, and `6,350` lineage edges (`catalog_sync_status: SYNCED_LIVE`).
    - **Live Spanner Query Agent Evaluation (`evals/run_live_query_agent_eval.py`):** **`16 / 16 (100.0% PASS)`** across all 8 query archetypes (`A_ENTITY_PARAMETER_LOOKUP` through `H_CATALOG_AND_GOVERNANCE`), achieving **`1.0000` Mean Tool Trajectory Precision** (Target $\ge 0.9500$) and **`1.0000` Mean Groundedness Score** (Target $\ge 0.9500$).
    - **Live Cloud Run Workbench Smoke Tests:** Verified `extracter-agent-demo-web` (`/api/status`: `status="online"`, `raw_pdf_count=23`, `is_valid_okf=true`, `broken_links_count=0`) and `okf-query-agent-demo-web` (`/api/status`: `status="online"`, `/api/spanner/graph?center_tag=D-2304`: `node_count=55`, `edge_count=114`).
+
+---
+
+## 6. Multi-Page P&ID Extraction Quality Hardening & Clean-Slate Environment Purge (`COMPLETED`)
+
+1. **Root-Cause Fixes Applied (`extracter_agent`):**
+   - **Multimodal Payload Deduplication & Window Slicing ([`extracter_agent/tools/pdf_tools.py`](../../extracter_agent/tools/pdf_tools.py), [`extracter_agent/pdf/processor.py`](../../extracter_agent/pdf/processor.py)):** Eliminated the 2x duplication of `multimodal_text` in `process_raw_pdf_tool` (bounding `multimodal_analysis` when `len(multimodal_text) > 16000` while retaining the full transcription in `pages`), and wired `start_page` and `max_pages` into `extract_pdf_multimodal_summary` so page-range extraction slices reuse per-window SHA-256 cache entries (`_p{start}-{end}_*.md`).
+   - **Multi-Segment Unit-Prefixed Equipment Tag Discovery ([`extracter_agent/pdf/processor.py`](../../extracter_agent/pdf/processor.py)):** Expanded `extract_equipment_tag_candidates` to match multi-segment unit-prefixed tags (e.g., `1-SF-P-11`, `1-SF-DM-11`, `1-SI-P-6A`) alongside standard ISA tags (`V-2301`, `D-2304`).
+   - **Cross-Unit Instrument Link Isolation ([`extracter_agent/okf/synthesizer.py`](../../extracter_agent/okf/synthesizer.py)):** Made direct instrument file lookup case-insensitive in `resolve_bundle_instrument_link` and restricted fuzzy token-overlap fallback strictly to multi-instrument register files (preventing unmatched tags like `1-SF-PI-2517` from fuzzy-matching onto another unit's single-tag instrument file, instead falling back cleanly to `/instruments/index.md`).
+2. **Test Suite Verification:**
+   - **`145 / 145` (`100.0%` PASS)** across `tests/` and `evals/`, including empty-directory resilience when `reference/raw/` and `build/okf_bundle/` are purged.
+3. **Environment Purge for New Sample Files:**
+   - Redeployed updated `extracter-agent-demo-web`, `okf-query-agent-demo-web`, and `extracter-agent-demo` Reasoning Engine.
+   - Purged all extracted `.md` files (`build/okf_bundle/` and GCS `okf-bundles/acme-plant/`), all sample `.pdf` files (`reference/raw/` and GCS `reference/raw/`), and all rows in Cloud Spanner (`okf-demo-spanner / okf_demo_graph` + Dataplex Catalog `okf_demo_assets`), leaving a 100% clean slate ready for new sample PDFs.
+

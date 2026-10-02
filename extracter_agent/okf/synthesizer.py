@@ -56,13 +56,22 @@ def resolve_bundle_instrument_link(
 
     direct_file = inst_dir / f"{safe_inst_tag}.md"
     if direct_file.exists():
-        return f"/instruments/{safe_inst_tag}.md"
+        return f"/instruments/{direct_file.name}"
+    direct_lower = inst_dir / f"{safe_inst_tag.lower()}.md"
+    if direct_lower.exists():
+        return f"/instruments/{direct_lower.name}"
 
     reg_files = [
         p for p in sorted(inst_dir.glob("*.md")) if p.name not in ("index.md", "log.md")
     ]
     if not reg_files:
-        return f"/instruments/{safe_inst_tag}.md"
+        if (inst_dir / "index.md").exists():
+            return "/instruments/index.md"
+        return f"/instruments/{safe_inst_tag.lower()}.md"
+
+    for p in reg_files:
+        if p.stem.lower() == safe_inst_tag.lower():
+            return f"/instruments/{p.name}"
 
     latest_reg_mtime_ns = max((p.stat().st_mtime_ns for p in reg_files), default=0)
     cache_key = (
@@ -93,33 +102,45 @@ def resolve_bundle_instrument_link(
         if clean_probe and len(clean_probe) >= 4 and clean_probe in content_lower:
             return f"/instruments/{reg.name}"
 
-    prefix_match = re.match(r"^([a-z]{1,4})", clean_probe)
-    p_code = prefix_match.group(1) if prefix_match else ""
-    inferred_terms: set[str] = set(
-        re.findall(r"[a-z]{2,}", f"{p_code} {instrument_type} {service}".lower())
-    )
+    # Only allow fuzzy category fallback onto multi-instrument register files
+    # (never onto an unrelated single-instrument tag file like lt-0401.md, 1-re-2524.md, or pt-0401.md)
+    single_tag_stem_re = re.compile(r"^(?:\d+-)?(?:[a-z]{1,4}-)?[a-z]{1,6}-\d+[a-z0-9]*$")
+    register_candidates = [
+        item for item in cached_regs if not single_tag_stem_re.match(item[0].stem.lower())
+    ]
 
-    best_reg: Path | None = None
-    best_score = 0.0
-    for reg, content_lower, reg_tokens in cached_regs:
-        overlap = len(inferred_terms & reg_tokens)
-        exact_prefix_hits = (
-            len(re.findall(rf"\b{re.escape(p_code)}[-_0-9]", content_lower))
-            if p_code
-            else 0
+    if register_candidates:
+        prefix_match = re.match(r"^([a-z]{1,4})", clean_probe)
+        p_code = prefix_match.group(1) if prefix_match else ""
+        inferred_terms: set[str] = set(
+            re.findall(r"[a-z]{2,}", f"{p_code} {instrument_type} {service}".lower())
         )
-        family_prefix_hits = (
-            len(re.findall(rf"\b{re.escape(p_code[:2])}[a-z]{{0,2}}[-_0-9]", content_lower))
-            if len(p_code) >= 2
-            else 0
-        )
-        score = (overlap * 5.0) + (exact_prefix_hits * 3.0) + (family_prefix_hits * 0.5)
-        if score > best_score:
-            best_score = score
-            best_reg = reg
 
-    if best_reg is not None:
-        return f"/instruments/{best_reg.name}"
+        best_reg: Path | None = None
+        best_score = 0.0
+        for reg, content_lower, reg_tokens in register_candidates:
+            overlap = len(inferred_terms & reg_tokens)
+            exact_prefix_hits = (
+                len(re.findall(rf"\b{re.escape(p_code)}[-_0-9]", content_lower))
+                if p_code
+                else 0
+            )
+            family_prefix_hits = (
+                len(re.findall(rf"\b{re.escape(p_code[:2])}[a-z]{{0,2}}[-_0-9]", content_lower))
+                if len(p_code) >= 2
+                else 0
+            )
+            score = (overlap * 5.0) + (exact_prefix_hits * 3.0) + (family_prefix_hits * 0.5)
+            if score > best_score:
+                best_score = score
+                best_reg = reg
+
+        if best_reg is not None:
+            return f"/instruments/{best_reg.name}"
+        return f"/instruments/{register_candidates[0][0].name}"
+
+    if (inst_dir / "index.md").exists():
+        return "/instruments/index.md"
     return f"/instruments/{cached_regs[0][0].name}"
 
 
