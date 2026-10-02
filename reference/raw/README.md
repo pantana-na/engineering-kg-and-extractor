@@ -33,11 +33,6 @@ cp /path/to/your_manual.pdf reference/raw/operating_manuals/
 cp /path/to/your_standard.pdf reference/raw/standards/
 ```
 
-*(Optional)* To generate the 20 synthetic chemical plant PDFs across all 5 folders for local testing:
-```bash
-PYTHONPATH=. .venv/bin/python scripts/generate_synthetic_reference.py
-```
-
 ### 2. Google Cloud Storage (`gs://<DESTINATION_GCS_BUCKET>/reference/raw/<subfolder>/`)
 When running on **Vertex AI Agent Runtime (`agent_runtime`)** and **Google Cloud Run (`cloud_run`)**, `extracter_agent` discovers and reads PDFs from `gs://${DESTINATION_GCS_BUCKET}/${SOURCE_GCS_RAW_PREFIX}/` (default prefix: `reference/raw`).
 

@@ -118,10 +118,11 @@ provision_infra() {
   fi
 
   if [[ -d "reference/raw" ]]; then
-    echo "Uploading synthetic raw engineering PDFs from reference/raw/ to gs://${GCS_BUCKET}/${RAW_PREFIX}/..."
+    echo "Syncing raw engineering PDFs from reference/raw/ to gs://${GCS_BUCKET}/${RAW_PREFIX}/..."
     gcloud storage rsync "reference/raw" "gs://${GCS_BUCKET}/${RAW_PREFIX}" \
       --project="${PROJECT_ID}" \
       --recursive \
+      --exclude='(^|.*/)README\.md$' \
       --quiet
   fi
 
@@ -157,13 +158,22 @@ deploy_agent_runtime() {
   fi
 
   echo "=============================================================================="
-  echo "[1/2] Deploying ADK Agent to Gemini Enterprise Agent Platform (agent_runtime)"
+  echo "[Agent 1] Deploying OKF Extracter Agent to Vertex AI Agent Runtime"
   echo "  Project:          ${PROJECT_ID}"
   echo "  Region:           ${REGION}"
   echo "  Model Location:   ${MODEL_LOCATION}"
   echo "  Display Name:     ${AGENT_DISPLAY_NAME}"
   echo "=============================================================================="
 
+  local staged_env="${AGENT_DIR}/.env"
+  local had_agent_env=0
+  if [[ -f "${staged_env}" ]]; then
+    had_agent_env=1
+  elif [[ -f ".env" ]]; then
+    cp ".env" "${staged_env}"
+  fi
+
+  local rc=0
   if [[ -n "${agent_engine_id}" && "${agent_engine_id}" =~ ^[0-9]+$ ]]; then
     "${adk_bin}" deploy agent_engine \
       --project="${PROJECT_ID}" \
@@ -171,15 +181,20 @@ deploy_agent_runtime() {
       --agent_engine_id="${agent_engine_id}" \
       --display_name="${AGENT_DISPLAY_NAME}" \
       --temp_folder="/tmp/adk_deploy_${AGENT_DIR}" \
-      "${AGENT_DIR}"
+      "${AGENT_DIR}" || rc=$?
   else
     "${adk_bin}" deploy agent_engine \
       --project="${PROJECT_ID}" \
       --region="${REGION}" \
       --display_name="${AGENT_DISPLAY_NAME}" \
       --temp_folder="/tmp/adk_deploy_${AGENT_DIR}" \
-      "${AGENT_DIR}"
+      "${AGENT_DIR}" || rc=$?
   fi
+
+  if [[ "${had_agent_env}" -eq 0 && -f "${staged_env}" ]]; then
+    rm -f "${staged_env}"
+  fi
+  return "${rc}"
 }
 
 deploy_query_agent_runtime() {
@@ -191,13 +206,22 @@ deploy_query_agent_runtime() {
   fi
 
   echo "=============================================================================="
-  echo "[Query Agent] Deploying Separate OKF Spanner Query Agent to agent_runtime"
+  echo "[Agent 2] Deploying OKF Spanner Query Agent to Vertex AI Agent Runtime"
   echo "  Project:          ${PROJECT_ID}"
   echo "  Region:           ${REGION}"
   echo "  Model Location:   ${MODEL_LOCATION}"
   echo "  Display Name:     ${QUERY_AGENT_DISPLAY_NAME}"
   echo "=============================================================================="
 
+  local staged_env="query_agent/.env"
+  local had_agent_env=0
+  if [[ -f "${staged_env}" ]]; then
+    had_agent_env=1
+  elif [[ -f ".env" ]]; then
+    cp ".env" "${staged_env}"
+  fi
+
+  local rc=0
   if [[ -n "${agent_engine_id}" && "${agent_engine_id}" =~ ^[0-9]+$ ]]; then
     "${adk_bin}" deploy agent_engine \
       --project="${PROJECT_ID}" \
@@ -205,20 +229,26 @@ deploy_query_agent_runtime() {
       --agent_engine_id="${agent_engine_id}" \
       --display_name="${QUERY_AGENT_DISPLAY_NAME}" \
       --temp_folder="/tmp/adk_deploy_query_agent" \
-      "query_agent"
+      "query_agent" || rc=$?
   else
     "${adk_bin}" deploy agent_engine \
       --project="${PROJECT_ID}" \
       --region="${REGION}" \
       --display_name="${QUERY_AGENT_DISPLAY_NAME}" \
       --temp_folder="/tmp/adk_deploy_query_agent" \
-      "query_agent"
+      "query_agent" || rc=$?
   fi
+
+  if [[ "${had_agent_env}" -eq 0 && -f "${staged_env}" ]]; then
+    rm -f "${staged_env}"
+  fi
+  return "${rc}"
 }
 
 deploy_adk_web_cloud_run() {
+  local extracter_runtime_id="${NONPROD_AGENT_RUNTIME_ID:-}"
   echo "=============================================================================="
-  echo "[Cloud Run] Deploying OKF v0.2 Engineering Extraction Workbench"
+  echo "[Cloud Run 1] Deploying OKF v0.2 Engineering Extraction Workbench"
   echo "  Project:          ${PROJECT_ID}"
   echo "  Region:           ${REGION}"
   echo "  Model Location:   ${MODEL_LOCATION}"
@@ -238,7 +268,7 @@ deploy_adk_web_cloud_run() {
     --timeout=600 \
     --min-instances="${NONPROD_MIN_INSTANCES:-0}" \
     --max-instances="${NONPROD_MAX_INSTANCES:-3}" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},NONPROD_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,GEMINI_LOCATION=${MODEL_LOCATION},GEMINI_MODEL=${MODEL_NAME},USE_GCS_STORAGE=true,SOURCE_GCS_RAW_PREFIX=${RAW_PREFIX},DESTINATION_GCS_BUCKET=${GCS_BUCKET},DESTINATION_GCS_PREFIX=${GCS_PREFIX},SPANNER_INSTANCE_ID=${SPANNER_INST},SPANNER_DATABASE_ID=${SPANNER_DB},OUTPUT_BUNDLE_DIR=/tmp/okf_bundle,APP_MODULE=extracter_agent.web_server:app" \
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},NONPROD_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,GEMINI_LOCATION=${MODEL_LOCATION},GEMINI_MODEL=${MODEL_NAME},EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-005},USE_GCS_STORAGE=true,SOURCE_GCS_RAW_PREFIX=${RAW_PREFIX},DESTINATION_GCS_BUCKET=${GCS_BUCKET},DESTINATION_GCS_PREFIX=${GCS_PREFIX},SPANNER_INSTANCE_ID=${SPANNER_INST},SPANNER_DATABASE_ID=${SPANNER_DB},NONPROD_AGENT_RUNTIME_ID=${extracter_runtime_id},OUTPUT_BUNDLE_DIR=/tmp/okf_bundle,APP_MODULE=extracter_agent.web_server:app" \
     --quiet
 
   local web_url
@@ -262,7 +292,7 @@ deploy_query_web_cloud_run() {
   local query_runtime_id="${NONPROD_QUERY_AGENT_RUNTIME_ID:-}"
 
   echo "=============================================================================="
-  echo "[Cloud Run] Deploying Separate OKF Spanner Graph & Retrieval Workbench UI"
+  echo "[Cloud Run 2] Deploying OKF Spanner Graph & Retrieval Workbench UI"
   echo "  Project:          ${PROJECT_ID}"
   echo "  Region:           ${REGION}"
   echo "  Model Location:   ${MODEL_LOCATION}"
@@ -282,7 +312,7 @@ deploy_query_web_cloud_run() {
     --timeout=600 \
     --min-instances="${NONPROD_MIN_INSTANCES:-0}" \
     --max-instances="${NONPROD_MAX_INSTANCES:-3}" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},NONPROD_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,GEMINI_LOCATION=${MODEL_LOCATION},GEMINI_MODEL=${MODEL_NAME},SPANNER_INSTANCE_ID=${SPANNER_INST},SPANNER_DATABASE_ID=${SPANNER_DB},QUERY_AGENT_RUNTIME_ID=${query_runtime_id##*/},DESTINATION_GCS_BUCKET=${GCS_BUCKET},DESTINATION_GCS_PREFIX=${GCS_PREFIX},APP_MODULE=query_agent.web_server:app" \
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},NONPROD_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,GEMINI_LOCATION=${MODEL_LOCATION},GEMINI_MODEL=${MODEL_NAME},EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-005},SPANNER_INSTANCE_ID=${SPANNER_INST},SPANNER_DATABASE_ID=${SPANNER_DB},DATAPLEX_ENTRY_GROUP_ID=${DATAPLEX_ENTRY_GROUP_ID:-okf-knowledge-assets},DATAPLEX_TAG_TEMPLATE_ID=${DATAPLEX_TAG_TEMPLATE_ID:-okf-governance-template},NONPROD_QUERY_AGENT_RUNTIME_ID=${query_runtime_id},QUERY_AGENT_RUNTIME_ID=${query_runtime_id##*/},DESTINATION_GCS_BUCKET=${GCS_BUCKET},DESTINATION_GCS_PREFIX=${GCS_PREFIX},APP_MODULE=query_agent.web_server:app" \
     --quiet
 
   local query_web_url
@@ -296,7 +326,7 @@ deploy_query_web_cloud_run() {
     echo "OKF Spanner Retrieval Workbench Live:   ${query_web_url}"
     echo "Liveness Health Probe (/healthz):       ${query_web_url}/healthz"
     echo "Spanner Hierarchy API:                  ${query_web_url}/api/spanner/hierarchy"
-    echo "Spanner Interactive Graph API:          ${query_web_url}/api/spanner/graph?center_tag=D-2304"
+    echo "Spanner Interactive Graph API:          ${query_web_url}/api/spanner/graph?center_tag=F-33"
     echo "Dataplex Universal Catalog API:         ${query_web_url}/api/catalog"
     echo "=============================================================================="
   fi
