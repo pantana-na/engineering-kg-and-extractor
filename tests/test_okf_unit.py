@@ -1446,3 +1446,116 @@ def test_repository_zero_confidential_leakage() -> None:
             violations.append(f"{p.relative_to(repo_root)}: matched '{m.group(0)}'")
 
     assert not violations, f"Confidential identifiers found in repository files: {violations}"
+
+
+def test_parameter_value_equivalence_and_conflict_topic_deduplication() -> None:
+    """Verify numeric formatting, parenthetical notes, and multi-pass conflict citations do not inflate conflict counts."""
+    from extracter_agent.okf.synthesizer import (
+        _are_parameter_values_equivalent,
+        merge_equipment_entity_with_existing,
+        synthesize_equipment_concept,
+    )
+
+    assert _are_parameter_values_equivalent("55", "55.0")
+    assert _are_parameter_values_equivalent("115", "115.0")
+    assert _are_parameter_values_equivalent("14,500", "14500")
+    assert _are_parameter_values_equivalent(
+        "11.0", "11.0 (API 526 orifice 4J6, relief rate 12,400 kg/hr)"
+    )
+    assert _are_parameter_values_equivalent(
+        "12:1", "12:1 (Circulation rate 145,000 kg/hr via P-2304A/B)"
+    )
+    assert _are_parameter_values_equivalent("25,000", "25,000 (Trip) / 0 (Standby)")
+    assert _are_parameter_values_equivalent(
+        "11.0 [DS-D2304] / 12.2 [PID-23-0013]",
+        "11.0 [DS-D2304 / DS-PS-0018] / 12.2 [PID-23-0013]",
+    )
+    assert not _are_parameter_values_equivalent("11.0", "12.2")
+    assert not _are_parameter_values_equivalent("12:1", "12.7:1")
+
+    pass1 = EquipmentEntity(
+        tag="D-2304",
+        name="Decomposer Reactor Drum",
+        equipment_class="Reactor",
+        unit="U2300",
+        function_summary="Primary decomposer drum.",
+        design_data=[
+            EngineeringParameter(
+                parameter="Internal Design Pressure",
+                value="11.0",
+                unit="kg/cm2g",
+                source="DS-D2304",
+            ),
+            EngineeringParameter(
+                parameter="Mechanical Design Temperature",
+                value="115",
+                unit="°C",
+                source="DS-D2304",
+            ),
+        ],
+        operating_conditions=[
+            EngineeringParameter(
+                parameter="Normal Operating Temperature",
+                value="55",
+                unit="°C",
+                source="DS-D2304",
+            ),
+            EngineeringParameter(
+                parameter="Emergency Water Quench Flow",
+                value="25,000",
+                unit="kg/hr",
+                source="DS-D2304",
+            ),
+        ],
+        hazards=[
+            "⚠️ CONFLICT — INTERNAL DESIGN PRESSURE: Process Data Sheet DS-D2304 specifies 11.0 kg/cm2g, whereas P&ID PID-23-0013 specifies 12.2 kg/cm2g."
+        ],
+        sources=["data_sheets/DS-D2304_Z1.pdf"],
+    )
+    doc1 = OKFDocument.parse(synthesize_equipment_concept(pass1).serialize())
+
+    pass2 = EquipmentEntity(
+        tag="D-2304",
+        name="Decomposer Reactor Drum",
+        equipment_class="Reactor",
+        unit="U2300",
+        function_summary="Primary decomposer drum.",
+        design_data=[
+            EngineeringParameter(
+                parameter="Internal Design Pressure",
+                value="12.2",
+                unit="kg/cm2g",
+                source="PID-23-0013",
+            ),
+            EngineeringParameter(
+                parameter="Mechanical Design Temperature",
+                value="115.0",
+                unit="°C",
+                source="PID-23-0013",
+            ),
+        ],
+        operating_conditions=[
+            EngineeringParameter(
+                parameter="Normal Operating Temperature",
+                value="55.0",
+                unit="°C",
+                source="PID-23-0013",
+            ),
+            EngineeringParameter(
+                parameter="Emergency Water Quench Flow",
+                value="25,000 (Trip) / 0 (Standby)",
+                unit="kg/hr",
+                source="PID-23-0013",
+            ),
+        ],
+        hazards=[
+            "⚠️ CONFLICT — Internal Design Pressure: DS-D2304 specifies 11.0 kg/cm2g, whereas PID-23-0013 specifies 12.2 kg/cm2g."
+        ],
+        sources=["pid/PID-23-0013_Z1.pdf"],
+    )
+
+    merged = merge_equipment_entity_with_existing(pass2, doc1)
+    conflict_bullets = [h for h in merged.hazards if "CONFLICT" in h.upper()]
+    assert len(conflict_bullets) == 1
+    assert "INTERNAL DESIGN PRESSURE" in conflict_bullets[0].upper()
+

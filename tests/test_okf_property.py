@@ -651,6 +651,46 @@ def test_pbt_zero_confidential_tokens(file_idx: int, case_variant: str) -> None:
         assert probe not in norm_text, f"Confidential token '{tok}' found in {target_pdf}"
 
 
+@given(
+    int_val=st.integers(min_value=1, max_value=9999),
+    note_suffix=st.sampled_from(
+        [
+            "",
+            " (Normal)",
+            " (API 526 orifice 4J6)",
+            " (Circulation rate via P-2304A/B)",
+        ]
+    ),
+)
+def test_pbt_equivalent_numeric_and_annotated_parameters_never_conflict(
+    int_val: int, note_suffix: str
+) -> None:
+    """Property: Equivalent integer vs. decimal-zero formatting and parenthetical notes across distinct documents must never emit false-positive conflicts."""
+    from extracter_agent.models.domain import EngineeringParameter
+    from extracter_agent.okf.synthesizer import _merge_parameter_lists
+
+    p1 = [
+        EngineeringParameter(
+            parameter="Design Temperature",
+            value=str(int_val),
+            unit="°C",
+            source="DS-2304",
+        )
+    ]
+    p2 = [
+        EngineeringParameter(
+            parameter="Design Temperature",
+            value=f"{int_val}.0{note_suffix}",
+            unit="°C",
+            source="PID-23-0013",
+        )
+    ]
+    merged, conflicts = _merge_parameter_lists(p1, p2)
+    assert len(merged) == 1
+    assert conflicts == []
+
+
+
 
 
 

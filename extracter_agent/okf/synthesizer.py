@@ -509,6 +509,117 @@ def _is_same_source_or_revision_update(old_src: str, new_src: str) -> bool:
     return bool(old_base and new_base and old_base == new_base)
 
 
+def _normalize_single_value_token(raw_seg: str) -> str:
+    """Normalize a single parameter value segment by stripping citations, parenthetical notes, and formatting numbers canonically."""
+    s = re.sub(r"\[[^\]]*\]", "", raw_seg)
+    s = re.sub(r"\([^)]*\)", "", s)
+    s = re.sub(r"⚠️\s*CONFLICT.*$", "", s, flags=re.IGNORECASE)
+    s = s.strip()
+    if not s:
+        return ""
+    # Remove thousand-separator commas between digits (e.g. '14,500' -> '14500')
+    s = re.sub(r"(?<=\d),(?=\d{3}\b)", "", s)
+
+    def _norm_num(m: re.Match[str]) -> str:
+        num_str = m.group(0)
+        try:
+            fval = float(num_str)
+            if fval.is_integer():
+                return str(int(fval))
+            return f"{fval:g}"
+        except ValueError:
+            return num_str
+
+    s = re.sub(r"(?<![A-Za-z0-9_.\-:])-?\d+\.\d+(?![A-Za-z0-9_.\-:])", _norm_num, s)
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _extract_canonical_value_tokens(val: str) -> set[str]:
+    """Extract normalized core value tokens from a single or multi-value parameter string."""
+    cleaned = re.sub(r"⚠️\s*CONFLICT.*$", "", val or "", flags=re.IGNORECASE)
+    cleaned = re.sub(r"\[[^\]]*\]", "", cleaned)
+    cleaned = re.sub(r"\([^)]*\)", "", cleaned).strip()
+    if not cleaned:
+        return set()
+    segments = re.split(r"\s+(?:/|vs\.?)\s+", cleaned)
+    tokens: set[str] = set()
+    for seg in segments:
+        norm = _normalize_single_value_token(seg)
+        if norm:
+            tokens.add(norm)
+    if not tokens:
+        fallback = _normalize_single_value_token(cleaned)
+        if fallback:
+            tokens.add(fallback)
+    return tokens
+
+
+def _are_parameter_values_equivalent(
+    old_val: str,
+    new_val: str,
+    old_note: str | None = None,
+    new_note: str | None = None,
+) -> bool:
+    """Return True if two parameter values represent the same engineering specification (numeric float equality, parenthetical notes, or multi-source citation updates)."""
+    ov = (old_val or "").strip()
+    nv = (new_val or "").strip()
+    if ov == nv:
+        return True
+    if old_note and f"{ov} ({old_note.strip()})" == nv:
+        return True
+    if new_note and f"{nv} ({new_note.strip()})" == ov:
+        return True
+
+    old_tokens = _extract_canonical_value_tokens(ov)
+    new_tokens = _extract_canonical_value_tokens(nv)
+    if not old_tokens or not new_tokens:
+        return ov.lower() == nv.lower()
+
+    if old_tokens == new_tokens:
+        return True
+
+    # Multi-value reconciled conflict string (contains '[') where the other value is already a subset
+    if len(old_tokens) > 1 and "[" in ov and new_tokens.issubset(old_tokens):
+        return True
+    if len(new_tokens) > 1 and "[" in nv and old_tokens.issubset(new_tokens):
+        return True
+
+    # Multi-mode operating specification (e.g. '25,000 (Trip) / 0 (Standby)') without conflict brackets '['
+    if (
+        len(new_tokens) > 1
+        and "[" not in nv
+        and "(" in nv
+        and old_tokens.issubset(new_tokens)
+    ):
+        return True
+    if (
+        len(old_tokens) > 1
+        and "[" not in ov
+        and "(" in ov
+        and new_tokens.issubset(old_tokens)
+    ):
+        return True
+
+    # Check if new_tokens is already recorded inside old_note from a prior conflict pass
+    if old_note:
+        note_tokens = _extract_canonical_value_tokens(old_note)
+        if new_tokens and new_tokens.issubset(old_tokens | note_tokens):
+            return True
+
+    return False
+
+
+def _extract_conflict_topic_key(bullet: str) -> str | None:
+    """Extract a normalized parameter/topic key from a '⚠️ CONFLICT — <Topic>: ...' hazard bullet for deduplication."""
+    if "conflict" not in (bullet or "").lower():
+        return None
+    m = re.search(r"conflict\s*(?:[—–\-:]+\s*)?([^:]+):", bullet, re.IGNORECASE)
+    if not m:
+        return None
+    topic = re.sub(r"[^a-z0-9]+", " ", m.group(1).lower()).strip()
+    return topic or None
+
+
 def _merge_parameter_lists(
     existing_params: list[EngineeringParameter],
     new_params: list[EngineeringParameter],
@@ -534,7 +645,7 @@ def _merge_parameter_lists(
         old_src = (old_p.source or "").strip()
         new_src = (new_p.source or "").strip()
 
-        if old_val == new_val:
+        if _are_parameter_values_equivalent(old_val, new_val, old_p.note, new_p.note):
             if _is_same_source_or_revision_update(old_src, new_src):
                 combined_src = new_src or old_src
             else:
@@ -549,9 +660,14 @@ def _merge_parameter_lists(
                 and old_p.note.strip() not in new_p.note.strip()
             ):
                 combined_note = f"{new_p.note.strip()}; {old_p.note.strip()}"
+            chosen_val = (
+                old_val
+                if (len(old_val) > len(new_val) and ("[" in old_val or "(" in old_val))
+                else new_val
+            )
             merged[idx] = EngineeringParameter(
                 parameter=new_p.parameter or old_p.parameter,
-                value=new_val,
+                value=chosen_val,
                 unit=(new_p.unit if new_p.unit and new_p.unit != "—" else old_p.unit),
                 source=combined_src or "Engineering Reference Document",
                 note=combined_note,
@@ -629,7 +745,7 @@ def merge_equipment_entity_with_existing(
         if len(cells) >= 4:
             p_name, val_cell, unit_cell, src_cell = cells[0], cells[1], cells[2], cells[3]
             note_val: str | None = None
-            m_note = re.match(r"^(.*?)\s+\((.+)\)$", val_cell)
+            m_note = re.match(r"^([^()]+?)\s+\(([^()]+)\)$", val_cell)
             if m_note:
                 val_cell = m_note.group(1).strip()
                 note_val = m_note.group(2).strip()
@@ -649,7 +765,7 @@ def merge_equipment_entity_with_existing(
         if len(cells) >= 4:
             p_name, val_cell, unit_cell, src_cell = cells[0], cells[1], cells[2], cells[3]
             note_val = None
-            m_note = re.match(r"^(.*?)\s+\((.+)\)$", val_cell)
+            m_note = re.match(r"^([^()]+?)\s+\(([^()]+)\)$", val_cell)
             if m_note:
                 val_cell = m_note.group(1).strip()
                 note_val = m_note.group(2).strip()
@@ -792,14 +908,21 @@ def merge_equipment_entity_with_existing(
                 source=new_c.source or old_c.source or "Engineering Reference Document",
             )
 
-    # Merge hazards & conflicts (deduplicated, preserving order)
+    # Merge hazards & conflicts (deduplicated by exact text and by conflict parameter topic, preserving order)
     merged_hazards: list[str] = []
     seen_hazards: set[str] = set()
+    seen_conflict_topics: set[str] = set()
     for h in existing_hazards + new_entity.hazards + design_conflicts + op_conflicts:
         h_clean = h.strip()
-        if h_clean and h_clean.lower() not in seen_hazards:
-            seen_hazards.add(h_clean.lower())
-            merged_hazards.append(h_clean)
+        if not h_clean or h_clean.lower() in seen_hazards:
+            continue
+        topic_key = _extract_conflict_topic_key(h_clean)
+        if topic_key:
+            if topic_key in seen_conflict_topics:
+                continue
+            seen_conflict_topics.add(topic_key)
+        seen_hazards.add(h_clean.lower())
+        merged_hazards.append(h_clean)
 
     # Merge sources (deduplicated by base document ID so newer revisions replace superseded revisions)
     merged_sources: list[str] = []

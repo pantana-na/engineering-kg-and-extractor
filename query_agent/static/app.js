@@ -20,11 +20,11 @@
 
   const state = {
     theme: localStorage.getItem("okf_query_theme") || "light",
-    focusTag: "D-2304",
-    focusConceptId: "equipment/D-2304",
+    focusTag: "",
+    focusConceptId: "",
     focusKind: "equipment",
-    focusTitle: "Decomposer Drum",
-    focusUnit: "Unit 2300 (CDN Section)",
+    focusTitle: "",
+    focusUnit: "",
     focusCategory: "equipment",
     hierarchyData: null,
     hierarchyFilter: "all",
@@ -119,7 +119,17 @@
    * Look up item metadata from cached hierarchyData when pivoting from graph nodes or wiki-links.
    */
   function resolveSelectionMetadata(rawTagOrConceptId, explicitKind, explicitTitle, explicitMeta = {}) {
-    const raw = (rawTagOrConceptId || "D-2304").trim();
+    const raw = (rawTagOrConceptId || "").trim();
+    if (!raw) {
+      return {
+        tag: "",
+        conceptId: "",
+        kind: "equipment",
+        title: "",
+        unit: "",
+        category: "equipment",
+      };
+    }
     let kind = explicitKind || "";
     if (!kind) {
       if (raw.includes("/") && !raw.toLowerCase().startsWith("equipment/")) {
@@ -551,9 +561,16 @@
 
   function renderDynamicStudyChips() {
     if (!el.prebuiltChipsContainer) return;
+    if (!state.focusTag) {
+      if (el.prebuiltTargetLabel) {
+        el.prebuiltTargetLabel.textContent = "⚡ Studies:";
+      }
+      el.prebuiltChipsContainer.innerHTML = `<span style="font-size:11px; color:var(--text-muted); padding:2px 6px;">No active selection — Cloud Spanner knowledge graph is currently empty.</span>`;
+      return;
+    }
     const isEquip = state.focusKind === "equipment";
     const unitShort = formatShortUnit(state.focusUnit);
-    const shortSlug = (state.focusConceptId || state.focusTag || "D-2304").split("/").pop();
+    const shortSlug = (state.focusConceptId || state.focusTag).split("/").pop();
 
     if (el.prebuiltTargetLabel) {
       if (isEquip) {
@@ -596,6 +613,86 @@
   // 2. LEFT PANE: LIVE SPANNER EQUIPMENT & CONCEPT HIERARCHY TREE
   // =========================================================================
 
+  function findDefaultHierarchySelection(data) {
+    if (!data) return null;
+    for (const u of data.units || []) {
+      for (const cls of u.equipment_classes || []) {
+        for (const it of cls.items || []) {
+          if (it && it.canonical_tag) {
+            return {
+              tag: it.canonical_tag,
+              conceptId: it.concept_id || `equipment/${it.canonical_tag}`,
+              kind: "equipment",
+              title: it.entity_name || it.title || it.canonical_tag,
+              unit: it.unit || u.unit_name || "",
+              category: "equipment",
+            };
+          }
+        }
+      }
+    }
+    for (const cat of data.concept_categories || []) {
+      for (const it of cat.items || []) {
+        if (it && it.concept_id) {
+          return {
+            tag: it.concept_id,
+            conceptId: it.concept_id,
+            kind: "concept",
+            title: it.title || it.name || it.concept_id,
+            unit: it.unit || "Plant-Wide",
+            category: it.category || cat.category || "concept",
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  function hierarchyContainsSelection(data, tag, conceptId) {
+    if (!data || !tag) return false;
+    for (const u of data.units || []) {
+      for (const cls of u.equipment_classes || []) {
+        for (const it of cls.items || []) {
+          if (it.canonical_tag === tag || it.concept_id === conceptId) {
+            return true;
+          }
+        }
+      }
+    }
+    for (const cat of data.concept_categories || []) {
+      for (const it of cat.items || []) {
+        if (it.concept_id === conceptId || it.concept_id === tag || it.canonical_tag === tag) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function renderEmptySpannerState() {
+    state.focusTag = "";
+    state.focusConceptId = "";
+    state.focusTitle = "";
+    state.focusUnit = "";
+    state.graphData = null;
+    state.conceptDetail = null;
+    state.selectedGraphItem = null;
+    if (el.graphCenterBadge) el.graphCenterBadge.textContent = "—";
+    if (el.catalogActiveBadge) el.catalogActiveBadge.textContent = "—";
+    if (el.countEdgeConnects) el.countEdgeConnects.textContent = "0";
+    if (el.countEdgeTrips) el.countEdgeTrips.textContent = "0";
+    if (el.countEdgeDerived) el.countEdgeDerived.textContent = "0";
+    if (el.btnInspectorPivot) el.btnInspectorPivot.style.display = "none";
+    if (el.graphViewportGroup) {
+      el.graphViewportGroup.innerHTML = `<text x="380" y="220" text-anchor="middle" fill="#64748b" font-size="13">No equipment or concepts in Cloud Spanner yet.</text>`;
+    }
+    if (el.catalogContentContainer) {
+      el.catalogContentContainer.innerHTML = `<div class="loading-state">Cloud Spanner knowledge graph is currently empty. Upload and extract engineering PDFs to populate the catalog.</div>`;
+    }
+    renderHierarchyTree();
+    renderDynamicStudyChips();
+  }
+
   async function loadSpannerHierarchy(refresh = false) {
     try {
       const res = await fetch(`/api/spanner/hierarchy?refresh=${refresh ? "true" : "false"}`);
@@ -610,6 +707,17 @@
       if (el.statEdgeCount) el.statEdgeCount.textContent = counts.total_graph_edges || 0;
       if (el.hierarchyLatencyBadge) {
         el.hierarchyLatencyBadge.textContent = `${data.execution_time_ms || 0} ms`;
+      }
+
+      const defaultSel = findDefaultHierarchySelection(data);
+      if (!defaultSel) {
+        renderEmptySpannerState();
+        return;
+      }
+
+      if (!state.focusTag || !hierarchyContainsSelection(data, state.focusTag, state.focusConceptId)) {
+        setFocusTag(defaultSel.tag, true, defaultSel.kind, defaultSel.title, defaultSel);
+        return;
       }
 
       // Refresh selection metadata once hierarchy is loaded
@@ -627,6 +735,9 @@
       state.focusUnit = refreshed.unit;
       renderHierarchyTree();
       renderDynamicStudyChips();
+      if (refresh || !state.graphData) {
+        loadSpannerGraph(state.focusTag, state.graphHops, state.selectionRequestSeq, refresh);
+      }
     } catch (err) {
       console.error("Failed to load Spanner hierarchy:", err);
       if (el.hierarchyTreeContainer) {
@@ -803,6 +914,7 @@
   // =========================================================================
 
   async function loadSpannerGraph(centerTag, maxHops = 2, reqSeq = undefined, refresh = false) {
+    if (!centerTag) return;
     const targetSeq = reqSeq !== undefined ? reqSeq : state.selectionRequestSeq;
     if (state.activeGraphAbortController) {
       try {
@@ -1663,7 +1775,6 @@
       el.btnRefreshSpanner.addEventListener("click", () => {
         state.selectionRequestSeq += 1;
         loadSpannerHierarchy(true);
-        loadSpannerGraph(state.focusTag, state.graphHops, state.selectionRequestSeq, true);
       });
     }
 
@@ -1804,7 +1915,6 @@
     initOrResetChatSession(false);
     renderDynamicStudyChips();
     loadSpannerHierarchy(false);
-    loadSpannerGraph(state.focusTag, state.graphHops, state.selectionRequestSeq);
   }
 
   if (document.readyState === "loading") {

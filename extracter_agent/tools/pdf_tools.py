@@ -9,7 +9,9 @@ import base64
 import hashlib
 import logging
 import re
+import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,9 @@ from extracter_agent.pdf.processor import (
 )
 
 _GCS_RAW_BLOBS_CACHE: list[dict[str, Any]] | None = None
+_GCS_RAW_BLOBS_CACHE_ID: int = 0
+_GCS_RAW_BLOBS_CACHE_TS: float = 0.0
+_GCS_RAW_BLOBS_CACHE_TTL_SEC: float = 6.0
 _GCS_RAW_CACHE_DIR = Path(tempfile.gettempdir()) / "extracter_gcs_raw_cache"
 
 
@@ -37,10 +42,16 @@ def _compute_file_md5_b64(path: Path) -> str:
 
 
 def _list_gcs_raw_blobs(force_refresh: bool = False) -> list[dict[str, Any]]:
-    """List and cache raw PDF object metadata from Google Cloud Storage."""
-    global _GCS_RAW_BLOBS_CACHE
+    """List and cache raw PDF object metadata from Google Cloud Storage with a short TTL."""
+    global _GCS_RAW_BLOBS_CACHE, _GCS_RAW_BLOBS_CACHE_ID, _GCS_RAW_BLOBS_CACHE_TS
+    now = time.monotonic()
     if not force_refresh and _GCS_RAW_BLOBS_CACHE is not None:
-        return _GCS_RAW_BLOBS_CACHE
+        if id(_GCS_RAW_BLOBS_CACHE) != _GCS_RAW_BLOBS_CACHE_ID:
+            _GCS_RAW_BLOBS_CACHE_ID = id(_GCS_RAW_BLOBS_CACHE)
+            _GCS_RAW_BLOBS_CACHE_TS = now
+            return _GCS_RAW_BLOBS_CACHE
+        if (now - _GCS_RAW_BLOBS_CACHE_TS) < _GCS_RAW_BLOBS_CACHE_TTL_SEC:
+            return _GCS_RAW_BLOBS_CACHE
 
     cfg = get_config()
     client = storage.Client(project=cfg.google_cloud_project)
@@ -66,8 +77,11 @@ def _list_gcs_raw_blobs(force_refresh: bool = False) -> list[dict[str, Any]]:
                     "updated": str(getattr(blob, "updated", "") or ""),
                 }
             )
-    if items:
-        _GCS_RAW_BLOBS_CACHE = items
+    _GCS_RAW_BLOBS_CACHE = items
+    _GCS_RAW_BLOBS_CACHE_ID = id(items)
+    _GCS_RAW_BLOBS_CACHE_TS = now
+    if not items and _GCS_RAW_CACHE_DIR.exists():
+        shutil.rmtree(_GCS_RAW_CACHE_DIR, ignore_errors=True)
     return items
 
 
