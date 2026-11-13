@@ -2,7 +2,7 @@
 
 **Document ID:** BASELINE-20260922-EXTRACTER-AGENT-SYSTEM  
 **Status:** Approved & Sanitized Open-Share Baseline  
-**Last Updated:** 2026-10-01  
+**Last Updated:** 2026-10-05  
 
 ---
 
@@ -10,9 +10,9 @@
 
 This repository (`https://github.com/pantana-na/engineering-kg-and-extractor.git`) hosts the **Chemical Engineering OKF Multi-Agent Knowledge Platform**, consisting of two autonomous cognitive AI agents built on the official **Google Agent Development Kit (`google-adk`)** and deployed on the **Gemini Enterprise Agent Platform (`agent_runtime`)**, paired with two dedicated 3-pane web workbenches deployed on **Google Cloud Run (`cloud_run`)**:
 
-1. **Agent 1 — Autonomous OKF Extracter Agent (`extracter_agent` / `extracter_orchestrator`):** Ingests complex chemical engineering PDFs (process data sheets, P&IDs, PFDs, operating manuals, and standards) from `reference/raw/` (locally and in GCS), extracts structured domain knowledge via 300 DPI multimodal Gemini vision and native text parsing, and compiles cross-linked **Open Knowledge Format (OKF v0.2)** Markdown (`.md`) bundles stored in **Google Cloud Storage (GCS)**.
+1. **Agent 1 — Autonomous OKF Extracter Agent (`extracter_agent` / `extracter_orchestrator`):** Ingests complex chemical engineering PDFs (process data sheets, P&IDs, PFDs, operating manuals, standards, and Management of Change `MOC`/`ECN` packages) from `reference/raw/` (locally and in GCS), extracts structured domain knowledge via 300 DPI multimodal Gemini vision and native text parsing, and compiles cross-linked **Open Knowledge Format (OKF v0.2)** Markdown (`.md`) bundles stored in **Google Cloud Storage (GCS)**.
 2. **Consolidated `.md`-Only Spanner Ingestion Engine (`sync_markdown_bundle_to_spanner`):** Deterministically synchronizes the OKF `.md` bundle extracted by `extracter_agent` (`ADDED`, `UPDATED`, `REMOVED`, `UNCHANGED`) into **Google Cloud Spanner (`okf-knowledge-spanner / okf_knowledge_graph`)** and **Google Cloud Dataplex Universal Catalog (`dataplex_v1`)** with zero raw PDF reads and zero LLM calls.
-3. **Agent 2 — OKF Spanner Graph-RAG & Data Lineage Query Agent (`query_agent` / `okf_spanner_query_orchestrator`):** Answers engineering parameter lookups, multi-hop P&ID/PFD connectivity traversals (ISO GQL), hybrid 768-d Vector + Full-Text Search (RRF) queries, bidirectional PDF provenance & conflict (`⚠️ CONFLICT`) audits, 5-stage HAZOP & risk assessments, and Dataplex Catalog governance queries **100% from Cloud Spanner and Dataplex**.
+3. **Agent 2 — OKF Spanner Graph-RAG & Data Lineage Query Agent (`query_agent` / `okf_spanner_query_orchestrator`):** Answers engineering parameter lookups, multi-hop P&ID/PFD connectivity traversals (ISO GQL), hybrid 768-d Vector + Full-Text Search (RRF) queries, bidirectional PDF provenance, conflict (`⚠️ CONFLICT`) & MOC pending-redraft (`🔄 MOC PENDING REDRAFT`) audits, 5-stage HAZOP & risk assessments, and Dataplex Catalog governance queries **100% from Cloud Spanner and Dataplex**.
 
 ---
 
@@ -32,10 +32,10 @@ The repository enforces strict separation of concerns across two runtime environ
 
 ## 3. Sanitized Synthetic Raw Reference Materials (`reference/raw/` Only)
 
-To ensure zero confidential or proprietary plant information is stored or shared in the repository while enabling a true end-to-end agentic workflow, `reference/wiki/` is completely removed and `reference/raw/` contains **20 synthetic chemical engineering PDF documents** (`Acme Petrochemical Demo Complex — Unit 2300`) generated deterministically by `scripts/generate_synthetic_reference.py` covering **all engineering document types and subtypes**:
+To ensure zero confidential or proprietary plant information is stored or shared in the repository while enabling a true end-to-end agentic workflow, `reference/wiki/` is completely removed and `reference/raw/` contains **21 synthetic chemical engineering PDF documents** (`Acme Petrochemical Demo Complex — Unit 2300`) generated deterministically by `scripts/generate_synthetic_reference.py` covering **all engineering document types and subtypes**:
 
 ### 3.1 Synthetic Raw Engineering Documents (`reference/raw/`)
-Contains **20 primary synthetic engineering PDF files** across all 5 canonical subdirectories:
+Contains **21 primary synthetic engineering PDF files** across all 6 canonical subdirectories:
 - `data_sheets/` (`8` PDFs): Multi-page equipment and instrument process data sheets covering every subtype:
   - Column/Vessel (`DS-V2301_Preflash_Column_Z1.pdf`)
   - Reactor/Decomposer Drum (`DS-D2304_Decomposer_Reactor_Z1.pdf`)
@@ -60,6 +60,7 @@ Contains **20 primary synthetic engineering PDF files** across all 5 canonical s
   - Safety Data Sheet — Cumene Hydroperoxide (`SDS_80-15-9_cumene-hydroperoxide.pdf`)
   - Safety Data Sheet — Phenol & Acetone (`SDS_108-95-2_phenol.pdf`)
 - `operating_manuals/` (`1` PDF): Plant Operating Manual covering Normal Operation, Startup/Shutdown & Emergency Trip Response (`OM-2300_Operating_Manual_Z1.pdf`).
+- `moc/` (`1` PDF): Approved Management of Change / Engineering Change Notice package (`MOC-2026-042_D2304_Quench_and_Setpoint_Upgrade_R1.pdf`) authorizing setpoint/parameter overrides and topological updates prior to P&ID/Data Sheet redrafting.
 
 ### 3.2 End-to-End Post-Deployment Extraction & Spanner Seeding Pipeline
 Instead of shipping pre-baked Markdown files in `reference/wiki/`, all OKF v0.2 `.md` files are produced dynamically by **`extracter_agent`** from `reference/raw/` after deployment and then ingested into **Cloud Spanner** via `scripts/ingest_okf_bundle_to_spanner.py`.
@@ -69,11 +70,11 @@ Instead of shipping pre-baked Markdown files in `reference/wiki/`, all OKF v0.2 
 ## 4. Open Knowledge Format (OKF v0.2) & Spanner Graph-RAG Baseline Contracts
 
 1. **OKF v0.2 Markdown Document Structure (`extracter_agent` output & `sync_markdown_bundle_to_spanner` input):**
-   - UTF-8 Markdown file with `---` delimited YAML frontmatter (`type`, `title`, `description`, `resource`, `tags`, `sources: [{id, resource, title}]`, `generated`, `verified`, `status`).
-   - Structured Markdown body sections (`## Design Data`, `## Operating Conditions`, `## Instrumentation & Control Loops (P&ID)`, `## Connections & Stream Summary`, `## Hazards & Safeguards`) with inline `Source` columns and `⚠️ CONFLICT` callouts.
+   - UTF-8 Markdown file with `---` delimited YAML frontmatter (`type`, `title`, `description`, `resource`, `tags`, `sources: [{id, resource, title}]`, `generated`, `verified`, `status`, and `entity_metadata` including `moc_history`).
+   - Structured Markdown body sections (`## Design Data`, `## Operating Conditions`, `## Instrumentation & Control Loops (P&ID)`, `## Connections & Stream Summary`, `## Management of Change (MOC) & Revision History`, `## Hazards & Safeguards`) with inline `Source` columns, `⚠️ CONFLICT` callouts for unauthorized discrepancies, and `🔄 MOC PENDING REDRAFT` callouts for authorized MOC overrides.
 2. **Cloud Spanner Graph-RAG & Lineage Schema (`query_agent/spanner/schema.sql`):**
    - 9 relational tables (`OkfConcepts`, `OkfSectionChunks`, `EngineeringEntities`, `FactAssertions`, `RawSourceDocuments`, `ProcessConnections`, `InstrumentControlEdges`, `ConceptWikiLinks`, `FactLineageEdges`) and ISO GQL Property Graph `OkfKnowledgeGraph`.
-   - 100% `.md`-only deterministic lifecycle sync (`sync_markdown_bundle_to_spanner`) supporting `ADDED`, `UPDATED`, `REMOVED`, and `UNCHANGED` `.md` states.
+   - 100% `.md`-only deterministic lifecycle sync (`sync_markdown_bundle_to_spanner`) supporting `ADDED`, `UPDATED`, `REMOVED`, and `UNCHANGED` `.md` states, and `FactLineageEdges.source_role` values `PRIMARY`, `CONFLICTING`, `MOC_AUTHORITY`, `PENDING_REDRAFT`, and `CONCEPT_CITATION`.
 
 ---
 
@@ -83,4 +84,4 @@ Instead of shipping pre-baked Markdown files in `reference/wiki/`, all OKF v0.2 
 2. **Zero Regex / Keyword Routing Invariant (Rule 11):** Intent classification, tool routing, and entity resolution in both `extracter_agent` and `query_agent` use cognitive model-driven reasoning (`gemini-3.8-flash`) with structured schemas; hardcoded keyword heuristics are prohibited.
 3. **100% `.md`-Only Spanner Ingestion Invariant:** `sync_markdown_bundle_to_spanner()` derives all Spanner nodes, edges, chunks, and PDF source provenance strictly from `.md` files extracted by `extracter_agent` without scanning `reference/raw/`.
 4. **100% Spanner-Only Query Execution Invariant:** `query_agent` executes all engineering, graph, lineage, and HAZOP queries against Cloud Spanner and Dataplex Universal Catalog with zero GCS or PDF reads at query time.
-5. **Dual-Value Conflict Preservation Invariant:** Whenever cross-document conflicts (`has_conflict = TRUE` / `⚠️ CONFLICT`) exist, both `extracter_agent` and `query_agent` preserve and surface both competing values alongside their respective source PDF citations.
+5. **Dual-Value Conflict & MOC Lineage Preservation Invariant:** Whenever unauthorized cross-document conflicts (`has_conflict = TRUE` / `⚠️ CONFLICT`) or authorized MOC overrides (`🔄 MOC PENDING REDRAFT`) exist, both `extracter_agent` and `query_agent` preserve and surface both competing values alongside their respective source PDF citations and lineage roles (`PRIMARY`/`CONFLICTING` vs `MOC_AUTHORITY`/`PENDING_REDRAFT`).

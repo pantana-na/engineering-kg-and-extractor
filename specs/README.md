@@ -50,11 +50,13 @@ All work in this repository is governed by the rules codified in [`_agents/rules
 - [`SPEC-20260929-OKF-SPANNER-GRAPH-RAG-AGENT`](./features/SPEC-20260929-OKF-SPANNER-GRAPH-RAG-AGENT.md): Separate ADK OKF Spanner Graph-RAG & Automated Data Lineage Query Agent (`query_agent`) on Gemini Enterprise Agent Platform (`agent_runtime`) backed by Cloud Spanner (`Spanner Graph` ISO GQL + Vector Search + Full-Text Keyword Search).
 - [`SPEC-20260929-QUERY-AGENT-RETRIEVAL-WORKBENCH-UI`](./features/SPEC-20260929-QUERY-AGENT-RETRIEVAL-WORKBENCH-UI.md): 3-Pane Interactive Spanner Graph & Retrieval Workbench UI deployed as a separate Cloud Run service (`okf-query-agent-web`).
 - [`SPEC-20261001-REPOSITORY-SANITIZATION-AND-SYNTHETIC-DATASET`](./features/SPEC-20261001-REPOSITORY-SANITIZATION-AND-SYNTHETIC-DATASET.md): Complete repository confidentiality sanitization, 20-document synthetic engineering PDF suite (`reference/raw/`), and isolated environment deployment verification.
+- [`SPEC-20261005-MOC-AND-DOCUMENT-UPDATE-LIFECYCLE`](./features/SPEC-20261005-MOC-AND-DOCUMENT-UPDATE-LIFECYCLE.md): Management of Change (MOC) authority (`MOC_AUTHORITY` / `PENDING_REDRAFT`), topological removals/reroutes (`removed_instruments`, `removed_connections`), cross-filename supersession (`superseded_sources`), deterministic revision rank comparator (`compare_revision_tokens`), auto-clearing resolved conflicts, and `reference/raw/moc/` synthetic MOC fixture.
 
 ### 3. Plan Progress Reports ([`specs/plan/`](./plan/))
 - [`PROGRESS_REPORT_20260922`](./plan/PROGRESS_REPORT_20260922.md): Implementation milestone tracking, unit & property-based test verification, and CodeMender security audit.
 - [`PROGRESS_REPORT_20260929`](./plan/PROGRESS_REPORT_20260929.md): OKF Spanner Graph-RAG Query Agent (`100%` live eval pass rate on `gemini-3.8-flash`), Dataplex Universal Catalog (`dataplex_v1`) migration, 3-Pane Retrieval Workbench UI (`okf-query-agent-web`) Cloud Run deployment, and consolidated 100% `.md`-only Spanner ingestion & lifecycle sync (`Step 7` completed).
 - [`PROGRESS_REPORT_20261001`](./plan/PROGRESS_REPORT_20261001.md): Repository sanitization, 20 synthetic engineering PDFs (`reference/raw/`), zero application logic changes (`143/143` tests passing), and Phase 3 isolated deployment runbook.
+- [`PROGRESS_REPORT_20261005`](./plan/PROGRESS_REPORT_20261005.md): MOC authority (`PENDING_REDRAFT`), topological removals/reroutes, and document revision hardening progress tracker.
 - [`QUERY_AGENT_EVAL_REPORT`](./plan/QUERY_AGENT_EVAL_REPORT.md): Live OKF Spanner Query Agent Evaluation Report (`100.00%` pass rate, `1.0000` trajectory precision, `1.0000` groundedness).
 
 ---
