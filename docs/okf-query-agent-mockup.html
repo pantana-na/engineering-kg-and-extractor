@@ -1,0 +1,4452 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OKF Query Agent — Engineering Knowledge Graph, Vector RRF &amp; HAZOP Workbench</title>
+  <meta name="description" content="Interactive executive demo workbench for the Engineering Open Knowledge Format (OKF) Spanner Graph-RAG Query Agent featuring Knowledge Catalog, ISO GQL Graph, 768-d Vector RRF Search, HAZOP Risk Assessment, Blast Radius, and PDF Data Lineage." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ==========================================================================
+       DESIGN SYSTEM TOKENS — CRISP ENTERPRISE LIGHT & DARK INDUSTRIAL BLUEPRINT
+       Zero purple-on-dark, curated HSL/hex engineering palette, tabular numerals
+       ========================================================================== */
+    :root,
+    [data-theme="light"] {
+      --bg-canvas: #f4f6f9;
+      --bg-surface: #ffffff;
+      --bg-elevated: #f8fafc;
+      --bg-subtle: #eef2f6;
+      --bg-hover: #f1f5f9;
+      --bg-graph: #f8fafc;
+      --bg-graph-dots: #cbd5e1;
+
+      --text-primary: #0f172a;
+      --text-secondary: #334155;
+      --text-muted: #64748b;
+      --text-faint: #94a3b8;
+
+      --border-subtle: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --border-focus: #1d4ed8;
+
+      --brand-primary: #1d4ed8;
+      --brand-primary-hover: #1e40af;
+      --brand-primary-soft: #eff6ff;
+      --brand-primary-border: #bfdbfe;
+
+      --accent-teal: #0f766e;
+      --accent-teal-soft: #f0fdfa;
+      --accent-teal-border: #99f6e4;
+
+      --accent-amber: #b45309;
+      --accent-amber-soft: #fffbeb;
+      --accent-amber-border: #fde68a;
+
+      --accent-slate: #334155;
+      --accent-slate-soft: #f1f5f9;
+
+      /* Semantic HAZOP RAC 1–4 & Safety Colors */
+      --rac1-bg: #fef2f2;
+      --rac1-text: #b91c1c;
+      --rac1-border: #fecaca;
+      --rac1-solid: #dc2626;
+
+      --rac2-bg: #fff7ed;
+      --rac2-text: #c2410c;
+      --rac2-border: #fed7aa;
+      --rac2-solid: #ea580c;
+
+      --rac3-bg: #fefce8;
+      --rac3-text: #a16207;
+      --rac3-border: #fef08a;
+      --rac3-solid: #ca8a04;
+
+      --rac4-bg: #f0fdf4;
+      --rac4-text: #15803d;
+      --rac4-border: #bbf7d0;
+      --rac4-solid: #16a34a;
+
+      --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+      --shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+
+      --font-display: "Plus Jakarta Sans", "Inter", -apple-system, sans-serif;
+      --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+      --radius-xs: 5px;
+      --radius-sm: 8px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+    }
+
+    [data-theme="dark"] {
+      --bg-canvas: #090d16;
+      --bg-surface: #0f1623;
+      --bg-elevated: #162032;
+      --bg-subtle: #1e293b;
+      --bg-hover: #1c283c;
+      --bg-graph: #0b111d;
+      --bg-graph-dots: #1e293b;
+
+      --text-primary: #f1f5f9;
+      --text-secondary: #cbd5e1;
+      --text-muted: #94a3b8;
+      --text-faint: #64748b;
+
+      --border-subtle: #1e293b;
+      --border-strong: #334155;
+      --border-focus: #38bdf8;
+
+      --brand-primary: #0284c7;
+      --brand-primary-hover: #0369a1;
+      --brand-primary-soft: rgba(56, 189, 248, 0.13);
+      --brand-primary-border: rgba(56, 189, 248, 0.32);
+
+      --accent-teal: #2dd4bf;
+      --accent-teal-soft: rgba(45, 212, 191, 0.12);
+      --accent-teal-border: rgba(45, 212, 191, 0.3);
+
+      --accent-amber: #fbbf24;
+      --accent-amber-soft: rgba(245, 158, 11, 0.14);
+      --accent-amber-border: rgba(245, 158, 11, 0.35);
+
+      --accent-slate: #cbd5e1;
+      --accent-slate-soft: #1e293b;
+
+      --rac1-bg: rgba(220, 38, 38, 0.16);
+      --rac1-text: #fca5a5;
+      --rac1-border: rgba(248, 113, 113, 0.38);
+      --rac1-solid: #ef4444;
+
+      --rac2-bg: rgba(234, 88, 12, 0.16);
+      --rac2-text: #fdba74;
+      --rac2-border: rgba(251, 146, 60, 0.38);
+      --rac2-solid: #f97316;
+
+      --rac3-bg: rgba(202, 138, 4, 0.16);
+      --rac3-text: #fde047;
+      --rac3-border: rgba(250, 204, 21, 0.36);
+      --rac3-solid: #eab308;
+
+      --rac4-bg: rgba(22, 163, 74, 0.16);
+      --rac4-text: #86efac;
+      --rac4-border: rgba(74, 222, 128, 0.35);
+      --rac4-solid: #22c55e;
+
+      --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.38);
+      --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.5);
+    }
+
+    [data-theme="dark"] .brand-text-accent {
+      color: #38bdf8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      font-family: var(--font-sans);
+      font-size: 13.5px;
+      line-height: 1.5;
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    code,
+    pre,
+    kbd,
+    .mono {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    button,
+    input,
+    textarea {
+      font-family: inherit;
+    }
+
+    /* Custom subtle scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-strong);
+      border-radius: 999px;
+    }
+
+    /* ==========================================================================
+       TOP EXECUTIVE HEADER (56px)
+       ========================================================================== */
+    .app-header {
+      height: 56px;
+      padding: 0 18px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      z-index: 30;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .btn-icon-toggle {
+      width: 34px;
+      height: 34px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+    .btn-icon-toggle:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-strong);
+      color: var(--text-primary);
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: var(--radius-sm);
+      background: var(--brand-primary);
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: var(--shadow-xs);
+    }
+
+    .brand-block {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .brand-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-title-row h1 {
+      font-family: var(--font-display);
+      font-size: 15.5px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      color: var(--text-primary);
+      white-space: nowrap;
+    }
+
+    .arch-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      background: var(--brand-primary-soft);
+      color: var(--brand-primary);
+      border: 1px solid var(--brand-primary-border);
+      white-space: nowrap;
+    }
+    [data-theme="dark"] .arch-pill {
+      color: #38bdf8;
+    }
+
+    .brand-sub {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .context-focus-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 11px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .status-dot-live {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--rac4-solid);
+    }
+
+    .hdr-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-surface);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .hdr-btn:hover {
+      background: var(--bg-elevated);
+      border-color: var(--border-strong);
+      color: var(--text-primary);
+    }
+
+    /* ==========================================================================
+       MAIN SPLIT STUDIO WORKSPACE
+       ========================================================================== */
+    .studio-shell {
+      height: calc(100vh - 56px);
+      display: flex;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    /* 1. COLLAPSIBLE LEFT ASSET & CONCEPT RAIL */
+    .asset-rail {
+      width: 262px;
+      min-width: 262px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                  min-width 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                  opacity 0.18s ease;
+      overflow: hidden;
+    }
+
+    .asset-rail.collapsed {
+      width: 0;
+      min-width: 0;
+      border-right-color: transparent;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .rail-top {
+      padding: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .rail-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .rail-heading {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .rail-search {
+      width: 100%;
+      padding: 7px 10px;
+      border-radius: var(--radius-xs);
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .rail-search:focus {
+      border-color: var(--border-focus);
+      background: var(--bg-surface);
+    }
+
+    .rail-mode-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 3px;
+      background: var(--bg-subtle);
+      border-radius: var(--radius-xs);
+    }
+
+    .rail-mode-btn {
+      padding: 5px 8px;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .rail-mode-btn.active {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      box-shadow: var(--shadow-xs);
+    }
+
+    .rail-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .unit-section-title {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      padding: 0 4px 5px 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .asset-item {
+      width: 100%;
+      text-align: left;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      transition: all 0.14s ease;
+      margin-bottom: 3px;
+    }
+    .asset-item:hover {
+      background: var(--bg-hover);
+    }
+    .asset-item.active {
+      background: var(--brand-primary-soft);
+      border-color: var(--brand-primary-border);
+    }
+
+    .asset-item-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .asset-tag {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .asset-item.active .asset-tag {
+      color: var(--brand-primary);
+    }
+    [data-theme="dark"] .asset-item.active .asset-tag {
+      color: #38bdf8;
+    }
+
+    .asset-name {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .badge-xs {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+    }
+    .badge-conflict {
+      background: var(--accent-amber-soft);
+      color: var(--accent-amber);
+      border: 1px solid var(--accent-amber-border);
+    }
+    .badge-neutral {
+      background: var(--bg-subtle);
+      color: var(--text-muted);
+    }
+
+    /* ==========================================================================
+       2. CENTER CONVERSATIONAL AGENT PANE
+       ========================================================================== */
+    .chat-pane {
+      flex: 1.08;
+      min-width: 420px;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-canvas);
+      border-right: 1px solid var(--border-subtle);
+      overflow: hidden;
+    }
+
+    /* Quick Demo Scenarios Strip (Always accessible) */
+    .scenario-strip {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 9px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+      flex-shrink: 0;
+    }
+
+    .scenario-strip-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      white-space: nowrap;
+      margin-right: 2px;
+    }
+
+    .scenario-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .scenario-pill:hover:not(:disabled) {
+      border-color: var(--brand-primary);
+      background: var(--brand-primary-soft);
+      color: var(--brand-primary);
+    }
+    [data-theme="dark"] .scenario-pill:hover:not(:disabled) {
+      color: #38bdf8;
+      border-color: #38bdf8;
+    }
+    .scenario-pill.active-scenario {
+      background: var(--brand-primary);
+      border-color: var(--brand-primary);
+      color: #ffffff;
+    }
+    .scenario-pill:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .scenario-num {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      opacity: 0.8;
+    }
+
+    /* Scrollable Chat Stream */
+    .chat-stream {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Welcome Demo Deck */
+    .welcome-hero {
+      max-width: 760px;
+      margin: auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .welcome-header-box {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 20px 22px;
+      box-shadow: var(--shadow-xs);
+    }
+
+    .welcome-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent-teal);
+      margin-bottom: 6px;
+    }
+
+    .welcome-title {
+      font-family: var(--font-display);
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+
+    .welcome-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    @media (max-width: 1180px) {
+      .demo-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .demo-card {
+      text-align: left;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 13px 15px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      box-shadow: var(--shadow-xs);
+    }
+    .demo-card:hover {
+      transform: translateY(-1px);
+      border-color: var(--brand-primary);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .demo-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .demo-card-cat {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--brand-primary);
+      background: var(--brand-primary-soft);
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+    [data-theme="dark"] .demo-card-cat {
+      color: #38bdf8;
+    }
+
+    .demo-card-target {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+
+    .demo-card-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .demo-card-prompt {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.45;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    /* User & Agent Messages */
+    .msg-user {
+      align-self: flex-end;
+      max-width: 86%;
+      background: var(--brand-primary);
+      color: #ffffff;
+      padding: 11px 15px;
+      border-radius: 14px 14px 3px 14px;
+      box-shadow: var(--shadow-xs);
+    }
+
+    .msg-user-meta {
+      font-size: 10.5px;
+      opacity: 0.85;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-family: var(--font-mono);
+    }
+
+    .msg-user-text {
+      font-size: 13.5px;
+      font-weight: 500;
+      line-height: 1.45;
+    }
+
+    .msg-agent-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+    }
+
+    /* ==========================================================================
+       SIMULATED 4–5s THINKING & LIVE TOOL CALL TIMELINE CARD
+       ========================================================================== */
+    .thinking-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      box-shadow: var(--shadow-xs);
+    }
+
+    .thinking-progress-track {
+      height: 3px;
+      width: 100%;
+      background: var(--bg-subtle);
+      overflow: hidden;
+    }
+
+    .thinking-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--brand-primary);
+      transition: width 0.15s linear;
+    }
+    .thinking-card.completed .thinking-progress-fill {
+      background: var(--accent-teal);
+    }
+
+    .thinking-header {
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+      background: var(--bg-elevated);
+    }
+    .thinking-header:hover {
+      background: var(--bg-hover);
+    }
+
+    .thinking-header-left {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .spinner-ring {
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      border: 2px solid var(--brand-primary-border);
+      border-top-color: var(--brand-primary);
+      animation: spin 0.75s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .done-check-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--rac4-bg);
+      color: var(--rac4-text);
+      border: 1px solid var(--rac4-border);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .thinking-status-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .thinking-header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .thinking-timer {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--brand-primary);
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: var(--brand-primary-soft);
+    }
+    [data-theme="dark"] .thinking-timer {
+      color: #38bdf8;
+    }
+    .thinking-card.completed .thinking-timer {
+      background: var(--bg-subtle);
+      color: var(--text-secondary);
+    }
+
+    .thinking-chevron {
+      font-size: 11px;
+      color: var(--text-muted);
+      transition: transform 0.18s ease;
+    }
+    .thinking-card.collapsed-trace .thinking-chevron {
+      transform: rotate(-90deg);
+    }
+
+    .thinking-body {
+      padding: 12px 14px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .thinking-card.collapsed-trace .thinking-body {
+      display: none;
+    }
+
+    .thought-bubble {
+      padding: 9px 12px;
+      border-radius: var(--radius-xs);
+      background: var(--bg-elevated);
+      border-left: 3px solid var(--brand-primary);
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+    .thought-bubble strong {
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .tool-call-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .tool-call-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--radius-xs);
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-surface);
+      font-size: 12px;
+      transition: all 0.2s ease;
+    }
+    .tool-call-row.running {
+      border-color: var(--brand-primary-border);
+      background: var(--brand-primary-soft);
+    }
+    .tool-call-row.pending {
+      opacity: 0.45;
+    }
+
+    .tool-call-main {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .tool-call-title-line {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    .tool-fn-name {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .tool-engine-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--accent-teal-soft);
+      color: var(--accent-teal);
+      border: 1px solid var(--accent-teal-border);
+    }
+
+    .tool-args-code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      word-break: break-word;
+    }
+
+    .tool-call-status {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+    .tool-call-row.done .tool-call-status {
+      color: var(--rac4-text);
+    }
+
+    /* ==========================================================================
+       STRUCTURED ENGINEERING ANSWER CARD
+       ========================================================================== */
+    .answer-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 18px 20px;
+      box-shadow: var(--shadow-xs);
+      animation: fadeSlideUp 0.28s ease-out;
+    }
+
+    @keyframes fadeSlideUp {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .answer-top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      flex-wrap: wrap;
+    }
+
+    .answer-title-cluster {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .answer-badge {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--rac4-bg);
+      color: var(--rac4-text);
+      border: 1px solid var(--rac4-border);
+    }
+
+    .studio-jump-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: var(--radius-xs);
+      border: 1px solid var(--brand-primary-border);
+      background: var(--brand-primary-soft);
+      color: var(--brand-primary);
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    [data-theme="dark"] .studio-jump-btn {
+      color: #38bdf8;
+    }
+    .studio-jump-btn:hover {
+      background: var(--brand-primary);
+      color: #ffffff;
+    }
+
+    .ans-body h3 {
+      font-family: var(--font-display);
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 14px 0 8px 0;
+    }
+    .ans-body h3:first-child {
+      margin-top: 0;
+    }
+
+    .ans-body p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      line-height: 1.55;
+    }
+
+    .ans-body ul {
+      padding-left: 18px;
+      margin-bottom: 12px;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+    .ans-body li {
+      margin-bottom: 5px;
+    }
+
+    /* Engineering Data Tables inside Answers & Studio */
+    .eng-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      margin: 10px 0 14px 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+    }
+
+    .eng-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    .eng-table th {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-weight: 700;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      white-space: nowrap;
+    }
+
+    .eng-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      vertical-align: top;
+    }
+
+    .eng-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .eng-table tr:hover td {
+      background: var(--bg-hover);
+    }
+
+    /* RAC 1–4 Risk Badges */
+    .rac-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 5px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .rac-1 {
+      background: var(--rac1-bg);
+      color: var(--rac1-text);
+      border: 1px solid var(--rac1-border);
+    }
+    .rac-2 {
+      background: var(--rac2-bg);
+      color: var(--rac2-text);
+      border: 1px solid var(--rac2-border);
+    }
+    .rac-3 {
+      background: var(--rac3-bg);
+      color: var(--rac3-text);
+      border: 1px solid var(--rac3-border);
+    }
+    .rac-4 {
+      background: var(--rac4-bg);
+      color: var(--rac4-text);
+      border: 1px solid var(--rac4-border);
+    }
+
+    /* Callout Banners */
+    .callout-box {
+      padding: 11px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      line-height: 1.5;
+      margin: 10px 0;
+    }
+    .callout-conflict {
+      background: var(--accent-amber-soft);
+      border: 1px solid var(--accent-amber-border);
+      border-left: 4px solid var(--accent-amber);
+      color: var(--text-primary);
+    }
+    .callout-critical {
+      background: var(--rac1-bg);
+      border: 1px solid var(--rac1-border);
+      border-left: 4px solid var(--rac1-solid);
+      color: var(--text-primary);
+    }
+    .callout-info {
+      background: var(--brand-primary-soft);
+      border: 1px solid var(--brand-primary-border);
+      border-left: 4px solid var(--brand-primary);
+      color: var(--text-primary);
+    }
+
+    /* Chat Input Footer */
+    .chat-composer {
+      padding: 12px 18px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .composer-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 6px 8px 6px 14px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .composer-box:focus-within {
+      border-color: var(--border-focus);
+      background: var(--bg-surface);
+      box-shadow: 0 0 0 3px var(--brand-primary-soft);
+    }
+
+    .composer-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 13px;
+      resize: none;
+      outline: none;
+      min-height: 22px;
+      max-height: 80px;
+    }
+
+    .btn-send {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: var(--radius-sm);
+      border: none;
+      background: var(--brand-primary);
+      color: #ffffff;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+      flex-shrink: 0;
+    }
+    .btn-send:hover:not(:disabled) {
+      background: var(--brand-primary-hover);
+    }
+    .btn-send:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    /* ==========================================================================
+       3. RIGHT TABBED CONTEXT STUDIO (GRAPH | CATALOG | VECTOR RRF | LINEAGE)
+       ========================================================================== */
+    .context-studio {
+      flex: 1;
+      min-width: 440px;
+      background: var(--bg-surface);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .studio-tabs-bar {
+      height: 46px;
+      padding: 0 14px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .studio-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      height: 100%;
+    }
+
+    .studio-tab {
+      height: 100%;
+      padding: 0 12px;
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .studio-tab:hover {
+      color: var(--text-primary);
+    }
+    .studio-tab.active {
+      color: var(--brand-primary);
+      border-bottom-color: var(--brand-primary);
+    }
+    [data-theme="dark"] .studio-tab.active {
+      color: #38bdf8;
+      border-bottom-color: #38bdf8;
+    }
+
+    .tab-count {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 999px;
+      background: var(--bg-subtle);
+      color: var(--text-muted);
+    }
+    .studio-tab.active .tab-count {
+      background: var(--brand-primary-soft);
+      color: inherit;
+    }
+
+    .studio-panel {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .studio-panel.active {
+      display: flex;
+    }
+
+    /* --------------------------------------------------------------------------
+       TAB 1: KNOWLEDGE GRAPH (OkfKnowledgeGraph ISO GQL)
+       -------------------------------------------------------------------------- */
+    .graph-toolbar {
+      padding: 9px 14px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .seg-group {
+      display: inline-flex;
+      background: var(--bg-subtle);
+      padding: 2px;
+      border-radius: var(--radius-xs);
+      gap: 2px;
+    }
+
+    .seg-btn {
+      padding: 4px 9px;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.14s ease;
+    }
+    .seg-btn.active {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      box-shadow: var(--shadow-xs);
+    }
+
+    .graph-legend-strip {
+      padding: 7px 14px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .legend-filters {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .legend-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      user-select: none;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+    }
+
+    .dot-swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .graph-stage {
+      flex: 1;
+      position: relative;
+      background-color: var(--bg-graph);
+      background-image: radial-gradient(var(--bg-graph-dots) 1px, transparent 1px);
+      background-size: 20px 20px;
+      overflow: hidden;
+      cursor: grab;
+    }
+    .graph-stage:active {
+      cursor: grabbing;
+    }
+
+    #okf-graph-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .graph-zoom-controls {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      z-index: 10;
+    }
+
+    .zoom-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: var(--radius-xs);
+      border: 1px solid var(--border-strong);
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: var(--shadow-xs);
+    }
+    .zoom-btn:hover {
+      background: var(--bg-elevated);
+    }
+
+    .graph-inspector-dock {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      box-shadow: var(--shadow-md);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      z-index: 10;
+    }
+
+    @keyframes dashFlow {
+      to {
+        stroke-dashoffset: -24;
+      }
+    }
+    .edge-animated-flow {
+      stroke-dasharray: 7 5;
+      animation: dashFlow 0.9s linear infinite;
+    }
+
+    @keyframes pulseImpact {
+      0% {
+        r: 22;
+        opacity: 0.65;
+      }
+      100% {
+        r: 38;
+        opacity: 0;
+      }
+    }
+    .blast-pulse-ring {
+      fill: none;
+      stroke: var(--rac1-solid);
+      stroke-width: 2.5;
+      animation: pulseImpact 1.6s ease-out infinite;
+    }
+
+    /* --------------------------------------------------------------------------
+       TAB 2, 3, 4 SCROLLABLE CONTENT CONTAINERS
+       -------------------------------------------------------------------------- */
+    .studio-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .studio-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      box-shadow: var(--shadow-xs);
+    }
+
+    .studio-card-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .studio-card-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gov-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .gov-cell {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xs);
+      padding: 8px 10px;
+    }
+
+    .gov-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+
+    .gov-value {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    /* Vector & Hybrid RRF Chunk Cards */
+    .vector-search-bar {
+      display: flex;
+      gap: 8px;
+    }
+
+    .chunk-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color 0.15s ease;
+    }
+    .chunk-card:hover {
+      border-color: var(--border-strong);
+    }
+
+    .score-bars-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      background: var(--bg-elevated);
+      padding: 7px 10px;
+      border-radius: var(--radius-xs);
+    }
+
+    .score-metric {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .score-metric-top {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+
+    .score-track {
+      height: 5px;
+      border-radius: 999px;
+      background: var(--bg-subtle);
+      overflow: hidden;
+    }
+
+    .score-fill-vec {
+      height: 100%;
+      background: var(--brand-primary);
+      border-radius: 999px;
+    }
+    .score-fill-fts {
+      height: 100%;
+      background: var(--accent-teal);
+      border-radius: 999px;
+    }
+    .score-fill-rrf {
+      height: 100%;
+      background: var(--rac4-solid);
+      border-radius: 999px;
+    }
+
+    /* Lineage 4-Stage Pipeline */
+    .lineage-pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .pipeline-step {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      position: relative;
+    }
+
+    .pipeline-step-num {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--brand-primary);
+      margin-bottom: 3px;
+    }
+    [data-theme="dark"] .pipeline-step-num {
+      color: #38bdf8;
+    }
+
+    .pipeline-step-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 3px;
+    }
+
+    .pipeline-step-meta {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      line-height: 1.35;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 1024px) {
+      .studio-shell {
+        flex-direction: column;
+        overflow-y: auto;
+      }
+      .chat-pane,
+      .context-studio {
+        min-width: 100%;
+        min-height: 540px;
+      }
+      .asset-rail {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- ========================================================================
+       TOP EXECUTIVE HEADER
+       ======================================================================== -->
+  <header class="app-header">
+    <div class="header-left">
+      <button
+        type="button"
+        class="btn-icon-toggle"
+        id="btn-toggle-sidebar"
+        title="Toggle Plant Equipment &amp; Standards Explorer"
+        aria-label="Toggle Asset Explorer"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M9 3v18" />
+        </svg>
+      </button>
+
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="6" cy="6" r="2.8" />
+          <circle cx="18" cy="6" r="2.8" />
+          <circle cx="12" cy="18" r="2.8" />
+          <path d="M8.6 6.8h6.8M7.4 8.5l3.3 6.8M16.6 8.5l-3.3 6.8" />
+        </svg>
+      </div>
+
+      <div class="brand-block">
+        <div class="brand-title-row">
+          <h1>OKF Query Agent</h1>
+          <span class="arch-pill">Spanner Graph-RAG • Vector RRF • Dataplex</span>
+        </div>
+        <div class="brand-sub">
+          Seabrook Station Engineering Knowledge Base (OKF v0.2) • Model: <code class="brand-text-accent">gemini-3.8-flash</code>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="context-focus-pill" title="Active Equipment or OKF Concept in Context Studio">
+        <span class="status-dot-live"></span>
+        <span>Active Focus:</span>
+        <code id="header-focus-badge" style="font-weight: 700;">RH-E-9A</code>
+      </div>
+
+      <button type="button" class="hdr-btn" id="btn-reset-demo" title="Clear conversation and return to Demo Scenario Overview">
+        ↺ Reset Demo
+      </button>
+
+      <button type="button" class="hdr-btn" id="btn-theme-toggle" aria-label="Switch Theme">
+        <span id="theme-toggle-text">🌙 Dark Blueprint</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       MAIN SPLIT WORKSPACE
+       ======================================================================== -->
+  <main class="studio-shell">
+    <!-- 1. COLLAPSIBLE LEFT EQUIPMENT & CONCEPT EXPLORER -->
+    <aside class="asset-rail" id="asset-rail" aria-label="Plant Equipment and OKF Standards">
+      <div class="rail-top">
+        <div class="rail-label-row">
+          <span class="rail-heading">OKF Plant Registry</span>
+          <span class="badge-xs badge-neutral" id="rail-count-badge">9 Items</span>
+        </div>
+        <input
+          type="search"
+          id="rail-search-input"
+          class="rail-search"
+          placeholder="Search tag (RH-E-9A, F-33)..."
+          autocomplete="off"
+        />
+        <div class="rail-mode-tabs" role="tablist">
+          <button type="button" class="rail-mode-btn active" id="rail-tab-equipment" data-rail-mode="equipment">
+            Equipment (6)
+          </button>
+          <button type="button" class="rail-mode-btn" id="rail-tab-concepts" data-rail-mode="concepts">
+            Standards (3)
+          </button>
+        </div>
+      </div>
+
+      <div class="rail-list" id="rail-list-container"></div>
+    </aside>
+
+    <!-- 2. CENTER AGENT CONVERSATION & LIVE TOOL TRACE PANE -->
+    <section class="chat-pane" aria-label="OKF Query Agent Conversation">
+      <!-- Pinned Predefined Demo Queries Strip -->
+      <nav class="scenario-strip" id="scenario-strip" aria-label="Predefined Demo Queries">
+        <span class="scenario-strip-label">Demo Queries:</span>
+        <div id="scenario-pills-wrap" style="display: flex; gap: 6px;"></div>
+      </nav>
+
+      <!-- Scrollable Conversation Stream -->
+      <div class="chat-stream" id="chat-stream"></div>
+
+      <!-- Custom Question Input Composer -->
+      <form class="chat-composer" id="chat-form">
+        <div class="composer-box">
+          <textarea
+            id="chat-input"
+            class="composer-input"
+            rows="1"
+            placeholder="Click a predefined demo query above, or ask about specs, P&amp;ID connectivity, HAZOP risk, blast radius, or PDF lineage..."
+          ></textarea>
+          <button type="submit" class="btn-send" id="btn-send-query">
+            <span>Ask Agent</span>
+            <kbd style="font-size: 10.5px; opacity: 0.85;">↵</kbd>
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- 3. RIGHT TABBED CONTEXT STUDIO -->
+    <section class="context-studio" aria-label="Synchronized Engineering Context Studio">
+      <div class="studio-tabs-bar">
+        <div class="studio-tabs" role="tablist">
+          <button type="button" class="studio-tab active" id="tab-btn-graph" data-studio-tab="graph">
+            <span>🕸️ Knowledge Graph</span>
+            <span class="tab-count" id="badge-graph-count">12N</span>
+          </button>
+          <button type="button" class="studio-tab" id="tab-btn-catalog" data-studio-tab="catalog">
+            <span>🏛️ Knowledge Catalog</span>
+            <span class="tab-count" id="badge-catalog-count">12P</span>
+          </button>
+          <button type="button" class="studio-tab" id="tab-btn-vector" data-studio-tab="vector">
+            <span>🧬 Vector &amp; RRF</span>
+            <span class="tab-count" id="badge-vector-count">768d</span>
+          </button>
+          <button type="button" class="studio-tab" id="tab-btn-lineage" data-studio-tab="lineage">
+            <span>📄 Lineage &amp; Docs</span>
+            <span class="tab-count" id="badge-lineage-count">5 PDFs</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ====================================================================
+           STUDIO PANEL 1: INTERACTIVE SPANNER PROPERTY GRAPH
+           ==================================================================== -->
+      <div class="studio-panel active" id="panel-graph">
+        <div class="graph-toolbar">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span class="mono" style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">
+              Center: <strong id="graph-center-label" style="color: var(--text-primary);">RH-E-9A</strong>
+            </span>
+            <div class="seg-group" role="group" aria-label="Hop Depth">
+              <button type="button" class="seg-btn" data-hop="1">1 Hop</button>
+              <button type="button" class="seg-btn active" data-hop="2">2 Hops</button>
+              <button type="button" class="seg-btn" data-hop="3">3 Hops</button>
+            </div>
+          </div>
+
+          <div class="seg-group" role="group" aria-label="Graph Visualization Overlay">
+            <button type="button" class="seg-btn active" data-gmode="topology" id="gmode-topology">Topology</button>
+            <button type="button" class="seg-btn" data-gmode="flow" id="gmode-flow">Flow Trace</button>
+            <button type="button" class="seg-btn" data-gmode="blast" id="gmode-blast">Blast Radius</button>
+          </div>
+        </div>
+
+        <div class="graph-legend-strip">
+          <div class="legend-filters">
+            <label class="legend-toggle">
+              <input type="checkbox" class="edge-filter-cb" value="CONNECTS_TO" checked />
+              <span class="dot-swatch" style="background: #2563eb;"></span>
+              <span>CONNECTS_TO</span>
+            </label>
+            <label class="legend-toggle">
+              <input type="checkbox" class="edge-filter-cb" value="MONITORS_OR_TRIPS" checked />
+              <span class="dot-swatch" style="background: #0d9488;"></span>
+              <span>MONITORS_OR_TRIPS</span>
+            </label>
+            <label class="legend-toggle">
+              <input type="checkbox" class="edge-filter-cb" value="DERIVED_FROM" checked />
+              <span class="dot-swatch" style="background: #d97706;"></span>
+              <span>DERIVED_FROM</span>
+            </label>
+          </div>
+          <span class="mono" style="font-size: 10.5px; color: var(--text-muted);">ISO GQL • Drag to Pan</span>
+        </div>
+
+        <div class="graph-stage" id="graph-stage">
+          <div class="graph-zoom-controls">
+            <button type="button" class="zoom-btn" id="btn-zoom-in" title="Zoom In">+</button>
+            <button type="button" class="zoom-btn" id="btn-zoom-out" title="Zoom Out">−</button>
+            <button type="button" class="zoom-btn" id="btn-zoom-reset" title="Reset View" style="font-size: 11px;">⟲</button>
+          </div>
+
+          <svg id="okf-graph-svg" viewBox="0 0 820 500" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <marker id="arr-connect" viewBox="0 0 10 10" refX="26" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#2563eb" />
+              </marker>
+              <marker id="arr-trip" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#0d9488" />
+              </marker>
+              <marker id="arr-derived" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#d97706" />
+              </marker>
+              <marker id="arr-blast" viewBox="0 0 10 10" refX="26" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#dc2626" />
+              </marker>
+            </defs>
+            <g id="graph-viewport"></g>
+          </svg>
+
+          <div class="graph-inspector-dock" id="graph-inspector-dock"></div>
+        </div>
+      </div>
+
+      <!-- ====================================================================
+           STUDIO PANEL 2: DATAPLEX KNOWLEDGE CATALOG & PARAMETERS
+           ==================================================================== -->
+      <div class="studio-panel" id="panel-catalog">
+        <div class="studio-scroll" id="catalog-scroll-container"></div>
+      </div>
+
+      <!-- ====================================================================
+           STUDIO PANEL 3: 768-D VECTOR + FTS RECIPROCAL RANK FUSION (RRF)
+           ==================================================================== -->
+      <div class="studio-panel" id="panel-vector">
+        <div class="studio-scroll" id="vector-scroll-container"></div>
+      </div>
+
+      <!-- ====================================================================
+           STUDIO PANEL 4: END-TO-END DATA LINEAGE & SOURCE PDF DOCUMENTS
+           ==================================================================== -->
+      <div class="studio-panel" id="panel-lineage">
+        <div class="studio-scroll" id="lineage-scroll-container"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      /* ======================================================================
+         1. AUTHENTIC SEABROOK STATION & OKF v0.2 MOCKUP DATA STORE
+            Grounded in build/okf_bundle/ (RH-E-9A, RH-P-8A, SI-P-6A, CBS-TK-10A,
+            CC-E-17A, F-33, Risk_Assessment_Matrix.pdf, HAZOP_Training_Guide.pdf)
+         ====================================================================== */
+      const ASSETS = {
+        "RH-E-9A": {
+          id: "RH-E-9A",
+          kind: "equipment",
+          conceptId: "equipment/RH-E-9A",
+          name: "RHR Loop A Heat Exchanger",
+          unit: "RH / SI — Residual Heat Removal & Safety Injection",
+          unitShort: "RH / SI",
+          eqClass: "Shell & Tube Heat Exchanger",
+          conflictCount: 1,
+          conflictSummary:
+            "Drawing Number & Relief Cross-Reference Discrepancy: PID-1-SI-LR20448 (Rev 11) specifies sheet continuation at Grid G-12 without inline orifice tag note, whereas PID-1-SI-LR20449 (Rev 0, Ref. B20449 Rev 9) updates penetration X-11 Low-Head SI valve interlock note (Note 8 handjack on HCV-606). Verify revision baseline before PHA sign-off.",
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "Dr. M. Vance (Lead Nuclear Process Safety Engineer)",
+            approvedAt: "2026-10-02 13:18 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "9f4c2e81b70d4a1e",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/equipment-rh-e-9a",
+          },
+          summary:
+            "Residual Heat Removal (RHR) Loop A Heat Exchanger cooling circulating reactor coolant during normal plant shutdown/cooldown and cooling post-LOCA emergency recirculation water from Containment Sump A (CBS-TK-10A) for Low-Head Safety Injection into RCS Cold Legs 1 & 2 via Penetration X-11, plus suction cross-tie supply to Intermediate-Head SI Pump SI-P-6A via MOV RH-V22.",
+          parameters: [
+            { name: "Safety Classification", value: "Safety Class 2 (Tube) / Safety Class 3 (Shell)", unit: "ANS/NRC", source: "PID-1-SI-LR20448" },
+            { name: "License Renewal AMR Scope", value: "In Scope 10 CFR 54.4(a)(1) & (a)(3) [Red]", unit: "—", source: "PID-1-SI-LR20448" },
+            { name: "Physical Location", value: "PAB Shielding Vault No. 1 (Grid H-3 / H-4)", unit: "—", source: "PID-1-SI-LR20448" },
+            { name: "Tube-Side Fluid & Temp Range", value: "Borated Reactor Coolant / Sump Water (Ambient to 350)", unit: "°F", source: "PID-1-SI-LR20448" },
+            { name: "Shell-Side Cooling Utility", value: "Component Cooling Water Loop A (20\" Supply/Return)", unit: "CCW", source: "PID-1-SI-LR20448" },
+            { name: "Tube Inlet / Outlet Nozzle Size", value: "12 × 12 (reducing to 8\" LHSI header)", unit: "in", source: "PID-1-SI-LR20448" },
+            { name: "Thermal Relief Setpoint (RH-V13)", value: "600 (1\"×3/4\" to WLD DR 153)", unit: "PSIG", source: "PID-1-SI-LR20449" },
+            { name: "Cooldown Bypass Header", value: "8\" Bypass with Throttling Valve RH-FCV-610", unit: "in", source: "PID-1-SI-LR20448" },
+            { name: "Containment Boundary", value: "Penetration X-11 (MOV RH-V14 Isolation)", unit: "—", source: "PID-1-SI-LR20449" },
+            { name: "Governing Drawing Package", value: "PID-1-SI-LR20448 (Rev 11) vs PID-1-SI-LR20449 (Rev 0)", unit: "⚠️ CONFLICT", source: "Multi-PDF", conflict: true },
+          ],
+          instruments: [
+            { tag: "TI-608", type: "Temp Indicator", location: "12\" Tube Outlet (Grid H-3)", function: "Cooled RHR effluent temperature readout to Control Room" },
+            { tag: "RH-FCV-610", type: "Flow Control Valve", location: "8\" Bypass Line (Grid E-5)", function: "Cooldown rate regulation interlocked with FIS-610 (Interlock G)" },
+            { tag: "RH-V13 / TE-604", type: "Thermal Relief + RTD", location: "1\" Relief Branch", function: "Tube-side overpressure protection @ 600 PSIG + relief temp alarm" },
+            { tag: "FT-618 / FE-618", type: "Flow Transmitter", location: "8\" LHSI Header", function: "Train A Low-Head Safety Injection header flow control & FCV-618 signal" },
+            { tag: "INTERLOCK-B", type: "SIS Interlock Logic", location: "SI-P-6A Cross-Tie Path", function: "Interlocks RH-V35 with SI-V89/V90/V93 & Sump MOV CBS-V8" },
+          ],
+          sources: ["DOC-PID-20448", "DOC-PID-20449", "DOC-MAN-HX", "DOC-STD-RAM"],
+        },
+
+        "RH-P-8A": {
+          id: "RH-P-8A",
+          kind: "equipment",
+          conceptId: "equipment/RH-P-8A",
+          name: "Residual Heat Removal Pump A",
+          unit: "RH / SI — Residual Heat Removal & Safety Injection",
+          unitShort: "RH / SI",
+          eqClass: "Vertical Centrifugal Safety Pump",
+          conflictCount: 0,
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "Dr. M. Vance (Lead Nuclear Process Safety Engineer)",
+            approvedAt: "2026-10-02 13:23 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "4a81d039c12e77b2",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/equipment-rh-p-8a",
+          },
+          summary:
+            "Dual-function Safety Class 2 centrifugal pump providing normal shutdown decay heat circulation from RCS Loop 1 Hot Leg (Penetration X-9) and post-LOCA Low-Head Safety Injection / Sump Recirculation from Containment Sump A (CBS-TK-10A) into RHR Heat Exchanger RH-E-9A.",
+          parameters: [
+            { name: "Safety Classification", value: "Safety Class 2 (Emergency Core Cooling)", unit: "ANS/NRC", source: "PID-1-SI-LR20448" },
+            { name: "Normal Shutdown Suction", value: "RCS Loop 1 Hot Leg via Penetration X-9 (12\"×16\"×8\")", unit: "in", source: "PID-1-SI-LR20448" },
+            { name: "Emergency LOCA Suction", value: "Containment Sump A (CBS-TK-10A) via 16\" MOV CBS-V8", unit: "in", source: "PID-1-SI-LR20448" },
+            { name: "Main Discharge Header", value: "14\"×16\"×12\" through Check RH-V153 to RH-E-9A", unit: "in", source: "PID-1-SI-LR20448" },
+            { name: "Minimum Flow Protection", value: "3\" Miniflow Recirc Line via FE-2473 & Restriction Orifice RO", unit: "in", source: "PID-1-SI-LR20448" },
+            { name: "Seal & Bearing Cooling", value: "3/4\" Component Cooling Water Loop A Supply/Return", unit: "CCW", source: "PID-1-SI-LR20448" },
+          ],
+          instruments: [
+            { tag: "PT-614 / PI-2425A", type: "Suction Pressure", location: "8\" Suction Header", function: "NPSH & suction pressure monitoring in Control Room" },
+            { tag: "FIS-610 / FISL-2470", type: "Flow Switches", location: "Across Orifice FE-610", function: "Low suction flow alarm + Interlock G to RH-FCV-610" },
+            { tag: "PT-2585 / PI-601", type: "Discharge Pressure", location: "14\" Discharge Header", function: "Pump discharge head verification" },
+            { tag: "TE-2564/2565/2566", type: "Bearing & Seal RTDs", location: "Motor Bearings & Seal Housing", function: "High temperature mechanical protection alarm" },
+          ],
+          sources: ["DOC-PID-20448", "DOC-PID-20449"],
+        },
+
+        "SI-P-6A": {
+          id: "SI-P-6A",
+          kind: "equipment",
+          conceptId: "equipment/SI-P-6A",
+          name: "Safety Injection Pump A (Intermediate Head)",
+          unit: "RH / SI — Residual Heat Removal & Safety Injection",
+          unitShort: "RH / SI",
+          eqClass: "Multi-Stage High-Pressure Pump",
+          conflictCount: 0,
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "J. K. Halvorsen (Principal ECCS Engineer)",
+            approvedAt: "2026-10-02 13:23 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "7c9204f1e88a31d0",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/equipment-si-p-6a",
+          },
+          summary:
+            "Intermediate-Head Safety Injection Pump A delivering high-pressure borated emergency core cooling water from the Refueling Water Storage Tank (CBS-TK-8) or post-LOCA RHR piggyback cross-tie (from RH-E-9A via MOV RH-V22) to RCS Cold Legs 1 & 2.",
+          parameters: [
+            { name: "Safety Classification", value: "Safety Class 2 (ECCS Intermediate Head)", unit: "ANS/NRC", source: "PID-1-SI-LR20446" },
+            { name: "Injection Suction Source", value: "RWST (CBS-TK-8) via 8\"×6\" MOVs CBS-V47 / V49", unit: "in", source: "PID-1-SI-LR20446" },
+            { name: "Piggyback Recirc Suction", value: "8\" Cross-Tie from RH-E-9A Outlet via MOV RH-V22", unit: "in", source: "PID-1-SI-LR20449" },
+            { name: "Discharge Relief Setpoint", value: "2,235 (Relief Valve SI-V107 on 4\" Header)", unit: "PSIG", source: "PID-1-SI-LR20446" },
+            { name: "Miniflow Recirculation", value: "1.5\"×2\"×3\" Common Recirc via FE-968 to RWST", unit: "in", source: "PID-1-SI-LR20446" },
+          ],
+          instruments: [
+            { tag: "FT-918 / FE-918", type: "Flow Transmitter", location: "4\" Discharge Line", function: "ESFAS safety injection flow verification to Control Room" },
+            { tag: "PT-919", type: "Pressure Transmitter", location: "4\" Discharge Header", function: "High-pressure injection header monitoring" },
+            { tag: "FI-968 / FE-968", type: "Miniflow Indicator", location: "3\" RWST Return", function: "Pump deadhead / minimum recirculation protection" },
+          ],
+          sources: ["DOC-PID-20448", "DOC-PID-20449"],
+        },
+
+        "CBS-TK-10A": {
+          id: "CBS-TK-10A",
+          kind: "equipment",
+          conceptId: "equipment/CBS-TK-10A",
+          name: "Containment Recirculation Sump A",
+          unit: "RH / SI — Residual Heat Removal & Safety Injection",
+          unitShort: "SI / CBS",
+          eqClass: "Emergency Recirculation Reservoir",
+          conflictCount: 1,
+          conflictSummary:
+            "Decommissioned Sensor Tag Retention: Level sensor LE-2350 remains depicted at Grid E-12 on PID-1-SI-LR20448 marked 'NON-FUNCTIONAL', superseded by redundant safety transmitters LE-2384-1 and LE-2384-2.",
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "Dr. M. Vance (Lead Nuclear Process Safety Engineer)",
+            approvedAt: "2026-10-02 12:48 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "2f19b83d04c188e5",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/equipment-cbs-tk-10a",
+          },
+          summary:
+            "Qualified post-LOCA emergency containment sump reservoir supplying borated recirculation water through Debris Trash Racks, 16\" Concentric Guard Pipe 1-CBS-S-611-A, Expansion Joint CBS-EP-36A, and Protective Chamber CBS-TK-101A (housing MOV CBS-V8) to RHR Pump RH-P-8A.",
+          parameters: [
+            { name: "Safety Classification", value: "Safety Class 2 (Containment Boundary)", unit: "ANS/NRC", source: "PID-1-SI-LR20448" },
+            { name: "Suction Effluent Line", value: "16\" Stainless Steel inside Guard Pipe 1-CBS-S-611-A", unit: "in", source: "PID-1-SI-LR20448" },
+            { name: "Isolation Valve & Interlock", value: "MOV CBS-V8 (Interlock A with Sump Level LT-930..933)", unit: "SIS", source: "PID-1-SI-LR20448" },
+            { name: "Protective Enclosure", value: "Sealed Guard Chamber CBS-TK-101A + Bellows CBS-EP-36A", unit: "—", source: "PID-1-SI-LR20448" },
+            { name: "Legacy Instrument Status", value: "LE-2350 marked NON-FUNCTIONAL (Replaced by LE-2384-1/2)", unit: "⚠️ NOTE", source: "PID-1-SI-LR20448", conflict: true },
+          ],
+          instruments: [
+            { tag: "LE-2384-1 / LE-2384-2", type: "Redundant Level TX", location: "Sump Pit Grid E/F-12", function: "Automatic RWST-to-Sump recirculation switchover permissive" },
+            { tag: "LS-2356", type: "Leak Level Switch", location: "Chamber CBS-TK-101A", function: "Guard pipe boundary leakage detection outside containment" },
+          ],
+          sources: ["DOC-PID-20448"],
+        },
+
+        "CC-E-17A": {
+          id: "CC-E-17A",
+          kind: "equipment",
+          conceptId: "equipment/CC-E-17A",
+          name: "Primary CCW Heat Exchanger A",
+          unit: "CC / SW — Component Cooling & Service Water",
+          unitShort: "CC / SW",
+          eqClass: "Titanium-Tube Heat Exchanger",
+          conflictCount: 0,
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "R. Subramanian (Thermal-Hydraulics Lead)",
+            approvedAt: "2026-11-05 14:30 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "6b04e91a55d7c210",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/equipment-cc-e-17a",
+          },
+          summary:
+            "Primary Component Cooling Water (CCW) Heat Exchanger Train A transferring heat from the closed-loop inhibited demineralized CCW system (which cools RH-E-9A, RH-P-8A, and SI-P-6A) to open-loop Ocean Service Water through corrosion-resistant Titanium tubes.",
+          parameters: [
+            { name: "Safety Classification", value: "Nuclear Safety Related (Category 1)", unit: "ANS/NRC", source: "PID-1-SW-LR20795" },
+            { name: "Tube Metallurgy", value: "Titanium ('XX' Denoted per General Note 8)", unit: "ASTM", source: "PID-1-SW-LR20795" },
+            { name: "Tube-Side Utility", value: "24\" Raw Ocean Seawater (Service Water Train A)", unit: "in", source: "PID-1-SW-LR20795" },
+            { name: "Thermal Relief Valve (V32)", value: "150 (3/4\"×1\" Tube-Side Relief to Funnel Drain)", unit: "PSIG", source: "PID-1-SW-LR20795" },
+            { name: "LOOP Isolation Interlock", value: "12\" Supply MOV V4 Auto-Closes on Loss of Offsite Power", unit: "SIS", source: "PID-1-SW-LR20795" },
+          ],
+          instruments: [
+            { tag: "TE-6105", type: "Temp Element", location: "24\" SW Outlet [8-E]", function: "Service water discharge thermal performance monitoring" },
+            { tag: "PSL-6103", type: "Pressure Switch Low", location: "24\" SW Outlet [8-D]", function: "Low SW cooling pressure alarm & Cooling Tower switchover logic" },
+            { tag: "MOV-V4 / MOV-V15", type: "Motor-Operated Valves", location: "SW Supply & Return", function: "LOOP emergency realignment & TA Logic A actuation" },
+          ],
+          sources: ["DOC-PID-20795", "DOC-MAN-HX"],
+        },
+
+        "F-33": {
+          id: "F-33",
+          kind: "equipment",
+          conceptId: "equipment/F-33",
+          name: "Spent Fuel Pool Prefilter",
+          unit: "SF — Spent Fuel Pool Cooling & Cleanup",
+          unitShort: "SF",
+          eqClass: "Cartridge Particulate Filter",
+          conflictCount: 0,
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "L. Chen (Radwaste & Auxiliary Systems Lead)",
+            approvedAt: "2026-10-02 12:46 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "8e21a74c903b11f4",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/equipment-f-33",
+          },
+          summary:
+            "Spent Fuel Pool Prefilter removing crud and suspended particulates upstream of Ion-Exchange Demineralizer DM-8 and Postfilter F-34, preventing resin bed fouling.",
+          parameters: [
+            { name: "Safety & AMR Scope", value: "NNS / In Scope 10 CFR 54.4(a)(2) [Green]", unit: "—", source: "PID-1-SF-LR20483" },
+            { name: "Inlet / Outlet Nozzles", value: "4\" Inlet (1-SF-V20) / 3\"×4\" Outlet (1-SF-V27 to DM-8)", unit: "in", source: "PID-1-SF-LR20483" },
+            { name: "Bypass Manifold", value: "4\" Bypass Valve 1-SF-V25 around F-33", unit: "in", source: "PID-1-SF-LR20483" },
+            { name: "Vent Priming Verification", value: "3/4\" Top Vent 1-SF-V55 via Sight Glass FG-2612", unit: "in", source: "PID-1-SF-LR20483" },
+          ],
+          instruments: [
+            { tag: "PDIS-2622", type: "Diff Pressure Switch", location: "Across F-33 Shell", function: "High DP cartridge fouling alarm; triggers bypass V25 / element changeout" },
+            { tag: "FG-2612", type: "Flow Sight Glass", location: "Common Vent Header", function: "Visual verification of gas elimination during priming" },
+          ],
+          sources: ["DOC-PID-20488", "DOC-MAN-HX"],
+        },
+
+        "standards/ram-methodology": {
+          id: "standards/ram-methodology",
+          kind: "concept",
+          conceptId: "standards/ram-methodology",
+          name: "Risk Assessment Matrix (RAM 4×5 & RAC 1–4)",
+          unit: "Plant-Wide Process Safety Standard",
+          unitShort: "STANDARD",
+          eqClass: "Qualitative PHA / HAZOP Standard",
+          conflictCount: 0,
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "Corporate Process Safety Governance Board",
+            approvedAt: "2026-10-02 13:07 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "c4109f82e31b60a9",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/standards-ram-methodology",
+          },
+          summary:
+            "Establishes the 4×5 Qualitative Risk Assessment Matrix intersecting Severity (I Catastrophic to IV Negligible) and Exposure-Adjusted Probability (A Almost Certain to E Rare) into Risk Assessment Codes RAC 1 (Stop, Immediate Correction) through RAC 4 (Possible Acceptance).",
+          parameters: [
+            { name: "Matrix Dimensions", value: "4 Severity Rows (I–IV) × 5 Probability Columns (A–E)", unit: "4×5 Grid", source: "Risk_Assessment_Matrix.pdf" },
+            { name: "RAC 1 Mandate (Red)", value: "Extremely High Risk — Stop Operation, Immediate Physical/SIS Control", unit: "CRITICAL", source: "Risk_Assessment_Matrix.pdf" },
+            { name: "RAC 2 Mandate (Orange)", value: "High Risk — Consider Stopping, Urgent Engineering Mitigation", unit: "HIGH", source: "Risk_Assessment_Matrix.pdf" },
+            { name: "RAC 3 Mandate (Yellow)", value: "Moderate Risk — Corrective Attention & Active Monitoring", unit: "MODERATE", source: "Risk_Assessment_Matrix.pdf" },
+            { name: "RAC 4 Mandate (Green)", value: "Low Risk — Broadly Acceptable within ALARP Discipline", unit: "LOW", source: "Risk_Assessment_Matrix.pdf" },
+          ],
+          instruments: [],
+          sources: ["DOC-STD-RAM", "DOC-STD-HAZOP"],
+        },
+
+        "hazop/guide-words-and-deviations": {
+          id: "hazop/guide-words-and-deviations",
+          kind: "concept",
+          conceptId: "hazop/guide-words-and-deviations",
+          name: "HAZOP Guide Words & 5-Stage PHA Protocol",
+          unit: "Plant-Wide Process Safety Standard",
+          unitShort: "HAZOP",
+          eqClass: "Methodology & Recording Standard",
+          conflictCount: 0,
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "Corporate Process Safety Governance Board",
+            approvedAt: "2026-10-02 13:09 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "b1920d44a82c7712",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/hazop-guide-words",
+          },
+          summary:
+            "Standardizes systematic node boundary selection, Guide Word × Process Parameter pairing (NO/LESS/MORE/REVERSE FLOW, HIGH/LOW PRESSURE & TEMP, CONTAINMENT BREACH), independent protection layer (IPL) crediting, and unmitigated-to-residual RAC scoring.",
+          parameters: [
+            { name: "Core Flow Deviations", value: "NO FLOW, LESS FLOW, MORE FLOW, REVERSE FLOW, MISDIRECTED", unit: "Guide Words", source: "HAZOP_Training_Guide.pdf" },
+            { name: "Pressure & Thermal Deviations", value: "HIGH PRESSURE, BLOCKED-IN THERMAL EXPANSION, OVERCOOLING", unit: "Guide Words", source: "HAZOP_Training_Guide.pdf" },
+            { name: "Safeguard Crediting Rule", value: "Alarms/SOPs reduce Probability (P); only passive/containment alters Severity (S)", unit: "IPL Rule", source: "HAZOP_Training_Guide.pdf" },
+          ],
+          instruments: [],
+          sources: ["DOC-STD-HAZOP", "DOC-STD-RAM"],
+        },
+
+        "procedures/hx-inspection-manual": {
+          id: "procedures/hx-inspection-manual",
+          kind: "concept",
+          conceptId: "procedures/hx-inspection-manual",
+          name: "Heat Exchanger Inspection & Fouling Manual",
+          unit: "Plant Maintenance & Reliability SOP",
+          unitShort: "MANUAL",
+          eqClass: "Inspection & Testing Procedure",
+          conflictCount: 0,
+          governance: {
+            trustTier: "HUMAN-REVIEWED",
+            status: "STABLE",
+            approver: "A. Lindqvist (Reliability & NDE Engineering)",
+            approvedAt: "2026-10-03 09:15 UTC",
+            extractedBy: "extracter_agent / gemini-3.8-flash",
+            bundleVersion: "v8-seabrook",
+            md5: "5d83c109f44e29a1",
+            dataplexEntry: "projects/seabrook-okf/locations/asia-southeast1/entryGroups/okf/entries/procedures-hx-inspection",
+          },
+          summary:
+            "Defines eddy-current NDE tube wall thickness inspection intervals, tube-to-tubesheet hydrotest pressure criteria, biological/particulate fouling DP thresholds, and mechanical tube plugging limits for nuclear safety heat exchangers (RH-E-9A, CC-E-17A).",
+          parameters: [
+            { name: "Eddy-Current NDE Criterion", value: "Plug tubes exhibiting ≥ 40% nominal wall loss", unit: "ASME Sec XI", source: "Inspection_Manual_for_Heat_Exchangers_1.pdf" },
+            { name: "Thermal Fouling Trigger", value: "Clean when overall U-value degrades > 15% or ΔP exceeds alarm", unit: "Threshold", source: "Inspection_Manual_for_Heat_Exchangers_1.pdf" },
+            { name: "Tube Plugging Margin", value: "Max 5% plugged tubes before thermal-hydraulic safety re-analysis", unit: "Limit", source: "Inspection_Manual_for_Heat_Exchangers_1.pdf" },
+          ],
+          instruments: [],
+          sources: ["DOC-MAN-HX"],
+        },
+      };
+
+      /* ======================================================================
+         2. SOURCE PDF DOCUMENT REGISTRY (Lineage & Provenance Tab)
+         ====================================================================== */
+      const SOURCE_DOCS = {
+        "DOC-PID-20448": {
+          id: "DOC-PID-20448",
+          code: "PID-1-SI-LR20448",
+          filename: "reference/raw/pid/ML101620329-part-1.pdf",
+          docType: "Piping & Instrumentation Diagram (P&ID)",
+          revision: "Rev 11 (Ref B20448)",
+          pages: "Sheet 1 (300 DPI 3×2 Vision Tiled)",
+          role: "PRIMARY",
+          excerpt: "Depicts Containment Sump A (CBS-TK-10A, Grid E-12), Guard Chamber CBS-TK-101A, RHR Pump RH-P-8A (Grid F-5), and RHR Loop A Heat Exchanger RH-E-9A (Grid H-3/H-4) with 20\" CCW Loop A shell cooling and 8\" bypass valve RH-FCV-610.",
+        },
+        "DOC-PID-20449": {
+          id: "DOC-PID-20449",
+          code: "PID-1-SI-LR20449",
+          filename: "reference/raw/pid/ML101620329-part-2.pdf",
+          docType: "Piping & Instrumentation Diagram (P&ID)",
+          revision: "Rev 0 (Ref B20449 Rev 9)",
+          pages: "Sheet 2 (300 DPI 3×2 Vision Tiled)",
+          role: "CONFLICTING",
+          excerpt: "Continuation of Train A Low-Head SI header from RH-E-9A through HCV-606 (Note 8 handjack locked open), FE-618/FT-618, thermal relief RH-V13 (Set @ 600 PSIG), MOV RH-V14 at Penetration X-11 to RCS Loops 1 & 2 Cold Legs, and 8\" cross-tie RH-V22 to SI-P-6A.",
+        },
+        "DOC-PID-20795": {
+          id: "DOC-PID-20795",
+          code: "PID-1-SW-LR20795",
+          filename: "reference/raw/pid/ML101620329-part-3.pdf",
+          docType: "Piping & Instrumentation Diagram (P&ID)",
+          revision: "Rev 8",
+          pages: "Sheet 4 (Grid 8-D/E)",
+          role: "PRIMARY",
+          excerpt: "Service Water & Primary Component Cooling Water Heat Exchanger CC-E-17A ('XX' Titanium tubes), 12\"/24\" SW supply MOV V4 (closes on LOOP), thermal relief V32 @ 150 PSIG, and TE-6105 / PSL-6103 instrumentation.",
+        },
+        "DOC-STD-RAM": {
+          id: "DOC-STD-RAM",
+          code: "STD-RAM-001",
+          filename: "reference/raw/standards/Risk_Assessment_Matrix.pdf",
+          docType: "Engineering Safety Standard (RAM)",
+          revision: "Rev 3",
+          pages: "Pages 1–5",
+          role: "PRIMARY",
+          excerpt: "Defines Severity Categories I–IV, Exposure-Adjusted Probability Categories A–E, the 4×5 Risk Assessment Matrix Grid, and mandatory action protocols for RAC 1 (Stop, Immediate Correction) through RAC 4 (Low / Acceptable).",
+        },
+        "DOC-STD-HAZOP": {
+          id: "DOC-STD-HAZOP",
+          code: "STD-PHA-002",
+          filename: "reference/raw/standards/HAZOP_Training_Guide.pdf",
+          docType: "Process Hazard Analysis Guide",
+          revision: "Rev 2",
+          pages: "Pages 1–28",
+          role: "PRIMARY",
+          excerpt: "Establishes node boundary selection, guide-word deviation matrices, upstream cause / downstream consequence graph tracing, and Independent Protection Layer (IPL) safeguard evaluation rules.",
+        },
+        "DOC-MAN-HX": {
+          id: "DOC-MAN-HX",
+          code: "OM-HX-101",
+          filename: "reference/raw/operating_manuals/Inspection_Manual_for_Heat_Exchangers_1.pdf",
+          docType: "Inspection & Maintenance Manual",
+          revision: "Rev 4",
+          pages: "Sections 2.1 – 6.4",
+          role: "PRIMARY",
+          excerpt: "Specifies shell-and-tube eddy-current inspection intervals, tube-to-shell barrier leak testing, differential pressure fouling diagnostics, and 40% wall-thinning tube plugging criteria.",
+        },
+        "DOC-PID-20488": {
+          id: "DOC-PID-20488",
+          code: "PID-1-SF-LR20483",
+          filename: "reference/raw/pid/ML101620329-part-1.pdf (Sheet SF)",
+          docType: "Piping & Instrumentation Diagram (P&ID)",
+          revision: "Rev 0 (Ref B20482 Rev 15)",
+          pages: "Grid E/F-7/8",
+          role: "PRIMARY",
+          excerpt: "Spent Fuel Pool Prefilter F-33, differential pressure switch PDIS-2622, 4\" bypass 1-SF-V25, sight glass FG-2612, and downstream connection to Demineralizer DM-8.",
+        },
+      };
+
+      /* ======================================================================
+         3. CLEAN LEFT-TO-RIGHT P&ID TOPOLOGICAL GRAPH DATA
+            Readable layered engineering layout (Upstream -> Core -> Downstream)
+         ====================================================================== */
+      const GRAPH_NODES = [
+        // Column 1: Upstream Suction & Cooling Sources (x = 95)
+        { id: "CBS-TK-10A", label: "CBS-TK-10A", sub: "Containment Sump A", type: "EQUIPMENT", x: 95, y: 155, hop: 2, blastTier: 0, flowRole: "upstream" },
+        { id: "RCS-HOT-LEG", label: "RCS Hot Leg", sub: "Loop 1 (Pen X-9)", type: "EQUIPMENT", x: 95, y: 265, hop: 2, blastTier: 0, flowRole: "upstream" },
+        { id: "CC-E-17A", label: "CC-E-17A", sub: "Primary CCW HX A", type: "EQUIPMENT", x: 255, y: 385, hop: 1, blastTier: 1, flowRole: "upstream" },
+
+        // Column 2: Primary Pump (x = 255)
+        { id: "RH-P-8A", label: "RH-P-8A", sub: "RHR Pump A (14\")", type: "EQUIPMENT", x: 255, y: 215, hop: 1, blastTier: 1, flowRole: "upstream" },
+
+        // Column 3: Core Heat Exchanger & Local Loops (x = 435)
+        { id: "RH-E-9A", label: "RH-E-9A", sub: "RHR Loop A HX", type: "CENTER", x: 435, y: 215, hop: 0, conflict: true, blastTier: 2, flowRole: "core" },
+        { id: "RH-FCV-610", label: "RH-FCV-610", sub: "Bypass Interlock G", type: "INSTRUMENT", x: 365, y: 82, hop: 1, blastTier: 2, flowRole: "loop" },
+        { id: "RH-V13", label: "RH-V13 / TE-604", sub: "Relief @ 600 PSIG", type: "INSTRUMENT", x: 510, y: 82, hop: 1, blastTier: 2, flowRole: "loop" },
+
+        // Column 4: Boundary & Piggyback Pump (x = 615)
+        { id: "PEN-X-11", label: "PEN-X-11", sub: "8\" LHSI & MOV V14", type: "EQUIPMENT", x: 615, y: 165, hop: 1, blastTier: 2, flowRole: "downstream" },
+        { id: "SI-P-6A", label: "SI-P-6A", sub: "Interm. Head SI Pump", type: "EQUIPMENT", x: 615, y: 295, hop: 1, blastTier: 2, flowRole: "downstream" },
+
+        // Column 5: Terminal Core Targets (x = 755)
+        { id: "SI-TK-9AB", label: "SI-TK-9A/B", sub: "RCS Cold Legs 1 & 2", type: "EQUIPMENT", x: 755, y: 225, hop: 2, blastTier: 3, flowRole: "downstream" },
+
+        // Bottom Row: Source PDF Lineage Nodes (y = 435)
+        { id: "PDF-20448", label: "PID-LR20448", sub: "ML101620329-p1 (Rev 11)", type: "RAW_PDF", x: 395, y: 435, hop: 1, blastTier: 0, flowRole: "doc" },
+        { id: "PDF-20449", label: "PID-LR20449", sub: "ML101620329-p2 (⚠️ Rev 0)", type: "RAW_PDF", x: 545, y: 435, hop: 1, conflict: true, blastTier: 0, flowRole: "doc" },
+      ];
+
+      const GRAPH_EDGES = [
+        { id: "e1", source: "CBS-TK-10A", target: "RH-P-8A", type: "CONNECTS_TO", label: "16\" CBS-V8", detail: "Post-LOCA Sump A suction line via guard pipe 1-CBS-S-611-A", hop: 2, flow: true, blast: false },
+        { id: "e2", source: "RCS-HOT-LEG", target: "RH-P-8A", type: "CONNECTS_TO", label: "12\" Pen X-9", detail: "Normal shutdown decay heat suction from RCS Loop 1 Hot Leg", hop: 2, flow: true, blast: false },
+        { id: "e3", source: "RH-P-8A", target: "RH-E-9A", type: "CONNECTS_TO", label: "14\"×12\" RH-V153", detail: "RHR Pump A discharge entering RH-E-9A tube-side inlet", hop: 1, flow: true, blast: true },
+        { id: "e4", source: "CC-E-17A", target: "RH-E-9A", type: "CONNECTS_TO", label: "20\" CCW Loop A", detail: "Closed-loop Component Cooling Water supply to RH-E-9A shell", hop: 1, flow: true, blast: true },
+        { id: "e5", source: "CC-E-17A", target: "RH-P-8A", type: "CONNECTS_TO", label: "3/4\" Seal CCW", detail: "CCW cooling supply to RH-P-8A mechanical seal & bearings", hop: 1, flow: false, blast: true },
+        { id: "e6", source: "RH-FCV-610", target: "RH-E-9A", type: "MONITORS_OR_TRIPS", label: "Interlock G", detail: "8\" Cooldown bypass valve controlled by suction switch FIS-610", hop: 1, flow: false, blast: false },
+        { id: "e7", source: "RH-V13", target: "RH-E-9A", type: "MONITORS_OR_TRIPS", label: "PSV 600 PSIG", detail: "Tube-side thermal overpressure relief valve RH-V13 + TE-604", hop: 1, flow: false, blast: false },
+        { id: "e8", source: "RH-E-9A", target: "PEN-X-11", type: "CONNECTS_TO", label: "8\" HCV-606/V14", detail: "Cooled Low-Head SI Train A header through FT-618 to Penetration X-11", hop: 1, flow: true, blast: true },
+        { id: "e9", source: "RH-E-9A", target: "SI-P-6A", type: "CONNECTS_TO", label: "8\" MOV RH-V22", detail: "High-head piggyback recirculation cross-tie to SI-P-6A suction", hop: 1, flow: true, blast: true },
+        { id: "e10", source: "PEN-X-11", target: "SI-TK-9AB", type: "CONNECTS_TO", label: "6\" LHSI Inj", detail: "Low-Head Safety Injection into RCS Cold Legs 1 & 2 via FE-2556/2557", hop: 2, flow: true, blast: true },
+        { id: "e11", source: "SI-P-6A", target: "SI-TK-9AB", type: "CONNECTS_TO", label: "4\" HHSI 2235psi", detail: "Intermediate-Head high-pressure injection via FT-918 to Cold Legs", hop: 2, flow: true, blast: true },
+        { id: "e12", source: "RH-E-9A", target: "PDF-20448", type: "DERIVED_FROM", label: "Sheet 1 Rev 11", detail: "Extracted from ML101620329-part-1.pdf (Grid H-3/H-4)", hop: 1, flow: false, blast: false },
+        { id: "e13", source: "RH-E-9A", target: "PDF-20449", type: "DERIVED_FROM", label: "⚠️ Rev 0 Conflict", detail: "Continuation & relief RH-V13 extracted from ML101620329-part-2.pdf", hop: 1, flow: false, blast: false },
+      ];
+
+      /* ======================================================================
+         4. VECTOR + FULL-TEXT HYBRID RRF CHUNKS (768-d text-embedding-005)
+         ====================================================================== */
+      const VECTOR_CHUNKS = [
+        {
+          id: "chk-1",
+          concept: "standards/ram-methodology.md",
+          section: "## 4×5 Risk Assessment Matrix Grid & RAC Action Protocols",
+          vecScore: 0.948,
+          ftsScore: 0.912,
+          rrfScore: 0.0328,
+          tags: ["RAM", "RAC 1", "Severity I-IV", "Probability A-E"],
+          snippet: "Severity (Rows I–IV) intersected with Exposure-Adjusted Probability (Columns A–E) yields RAC 1–4. Any node deviation scored RAC 1 (Extremely High / Red) mandates 'Stop, Immediate Correction' and independent physical/SIS protection layers.",
+          pdf: "Risk_Assessment_Matrix.pdf (p. 2–3)",
+        },
+        {
+          id: "chk-2",
+          concept: "equipment/RH-E-9A.md",
+          section: "## Hazards, Thermal Relief & Interlock Safeguards",
+          vecScore: 0.931,
+          ftsScore: 0.894,
+          rrfScore: 0.0320,
+          tags: ["RH-E-9A", "RH-V13", "600 PSIG", "Interlock G", "CONFLICT"],
+          snippet: "Controlled cooldown rate maintained via 8\" bypass valve RH-FCV-610 interlocked with FIS-610 (Interlock G). Thermal overpressure protection provided by relief valve RH-V13 (Set @ 600 PSIG) monitored by TE-604 discharging to WLD DR 153.",
+          pdf: "ML101620329-part-1.pdf & part-2.pdf",
+        },
+        {
+          id: "chk-3",
+          concept: "procedures/hx-inspection-manual.md",
+          section: "## Tube-to-Shell Integrity, Fouling ΔP & Plugging Criteria",
+          vecScore: 0.904,
+          ftsScore: 0.845,
+          rrfScore: 0.0309,
+          tags: ["Eddy-Current", "Fouling", "Tube Rupture", "CCW"],
+          snippet: "Tube side contains high-activity borated reactor coolant; shell side contains lower-pressure CCW. Perform eddy-current NDE every refueling outage; plug tubes ≥ 40% wall thinning. Verify total plugged tube count remains < 5% design heat transfer margin.",
+          pdf: "Inspection_Manual_for_Heat_Exchangers_1.pdf (Sec 4.2)",
+        },
+        {
+          id: "chk-4",
+          concept: "equipment/CC-E-17A.md",
+          section: "## Service Water Supply & Loss-of-Offsite-Power (LOOP) Interlock",
+          vecScore: 0.882,
+          ftsScore: 0.810,
+          rrfScore: 0.0298,
+          tags: ["CC-E-17A", "Titanium", "MOV V4", "PSL-6103"],
+          snippet: "Primary CCW Heat Exchanger A utilizes Titanium tubes ('XX') cooled by 24\" Service Water Train A. On complete Loss of Offsite Power (LOOP), 12\" supply MOV V4 closes automatically per Note 7 while TA Logic realigns Cooling Tower pump P-110A.",
+          pdf: "ML101620329-part-3.pdf (PID-1-SW-LR20795)",
+        },
+        {
+          id: "chk-5",
+          concept: "equipment/F-33.md",
+          section: "## Cartridge Fouling Monitoring (PDIS-2622) & Vent Priming",
+          vecScore: 0.856,
+          ftsScore: 0.872,
+          rrfScore: 0.0291,
+          tags: ["F-33", "PDIS-2622", "DM-8", "FG-2612"],
+          snippet: "Fuel Pool Prefilter F-33 protects Demineralizer DM-8 resin beds from particulate crud. Differential pressure switch PDIS-2622 alarms on cartridge loading, prompting operator alignment of 4\" bypass valve 1-SF-V25 and air purge check at sight glass FG-2612.",
+          pdf: "ML101620329-part-1.pdf (PID-1-SF-LR20483)",
+        },
+      ];
+
+      /* ======================================================================
+         5. SIX PREDEFINED CLICKABLE DEMO SCENARIOS (Simulated ~4.5s Execution)
+         ====================================================================== */
+      const DEMO_SCENARIOS = [
+        {
+          id: "q1-specs",
+          num: "01",
+          shortLabel: "Equipment & Safety Specs",
+          category: "SPECS & SAFETY",
+          focusAsset: "RH-E-9A",
+          targetStudioTab: "catalog",
+          graphMode: "topology",
+          durationMs: 4450,
+          title: "Equipment Detail & Safety Parameters",
+          question:
+            "What are the governing design specifications, operating conditions, and safety relief/interlock parameters for RHR Heat Exchanger RH-E-9A?",
+          thought:
+            "Intent classified as ENTITY_PARAMETER_AND_SAFETY_LOOKUP. Querying Spanner EngineeringEntities and FactAssertions for RH-E-9A, fetching connected MONITORS_OR_TRIPS safety instruments, and checking FactLineageEdges for active cross-document revision conflicts.",
+          tools: [
+            {
+              name: "lookup_entity_and_parameters",
+              engine: "Spanner SQL",
+              args: 'entity_tag_or_id="RH-E-9A", parameter_filter=""',
+              startMs: 450,
+              endMs: 1850,
+              resultSummary: "10 design/operating facts • 5 safety instruments",
+            },
+            {
+              name: "read_full_okf_concept_from_spanner",
+              engine: "Spanner PK Read",
+              args: 'concept_id="equipment/RH-E-9A"',
+              startMs: 1850,
+              endMs: 3100,
+              resultSummary: "OKF v0.2 concept loaded (0 GCS reads, MD5 verified)",
+            },
+            {
+              name: "trace_data_lineage_and_conflicts",
+              engine: "ISO GQL Lineage",
+              args: 'target="RH-E-9A", direction="BACKWARD_TO_PDF"',
+              startMs: 3100,
+              endMs: 4150,
+              resultSummary: "2 P&ID PDFs traced • 1 ⚠️ CONFLICT flagged",
+            },
+          ],
+          renderAnswerHtml: () => `
+            <div class="answer-top-bar">
+              <div class="answer-title-cluster">
+                <span class="answer-badge">✓ 100% Grounded in Spanner</span>
+                <span class="badge-xs badge-conflict">⚠️ 1 Cross-Sheet Conflict Detected</span>
+              </div>
+              <button type="button" class="studio-jump-btn" data-jump-tab="catalog">
+                🏛️ Inspect in Knowledge Catalog →
+              </button>
+            </div>
+            <div class="ans-body">
+              <h3>1. Equipment Overview &amp; Nuclear Safety Classification — <code>RH-E-9A</code></h3>
+              <p>
+                <strong>RH-E-9A (Residual Heat Removal Loop A Heat Exchanger)</strong> is a dual-mode shell-and-tube heat exchanger located inside <strong>PAB Shielding Vault No. 1 (Grid H-3/H-4)</strong>. It removes core decay heat during normal reactor shutdown cooldown and cools post-LOCA containment recirculation water from Sump A (<code>CBS-TK-10A</code>) prior to Low-Head Safety Injection into RCS Cold Legs 1 &amp; 2.
+              </p>
+
+              <div class="eng-table-wrap">
+                <table class="eng-table">
+                  <thead>
+                    <tr>
+                      <th>Parameter</th>
+                      <th>Governing Value</th>
+                      <th>Unit / Code</th>
+                      <th>Cited Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Safety Classification</strong></td>
+                      <td><code>Safety Class 2</code> (Tube Side) / <code>Safety Class 3</code> (Shell Side)</td>
+                      <td>ANS / 10 CFR 50</td>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                    </tr>
+                    <tr>
+                      <td><strong>AMR License Renewal</strong></td>
+                      <td>In Scope 10 CFR 54.4(a)(1) &amp; (a)(3) [Red Boundary]</td>
+                      <td>10 CFR 54</td>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Tube-Side Process Stream</strong></td>
+                      <td>Borated Reactor Coolant / Sump Water • <code>12" In × 12" Out</code> (Ambient–350°F)</td>
+                      <td>in / °F</td>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Shell-Side Cooling Stream</strong></td>
+                      <td>Component Cooling Water (CCW Loop A from <code>CC-E-17A</code>) • <code>20" Supply/Return</code></td>
+                      <td>in</td>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Thermal Overpressure Relief</strong></td>
+                      <td>Relief Valve <code>RH-V13</code> Set @ <strong>600 PSIG</strong> (1"×3/4" to Drain <code>WLD DR 153</code>)</td>
+                      <td>PSIG</td>
+                      <td><code>PID-1-SI-LR20449</code></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Cooldown Bypass Header</strong></td>
+                      <td><code>8"</code> Bypass around tube bundle via Throttling Valve <code>RH-FCV-610</code></td>
+                      <td>in</td>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3>2. Safety Instrumentation, Relief &amp; SIS Interlock Parameters</h3>
+              <ul>
+                <li><strong>Overpressure Protection (<code>RH-V13</code> + <code>TE-604</code>):</strong> Protects blocked-in tube bundle against thermal expansion when isolated between check valve <code>RH-V153</code> and containment MOV <code>RH-V14</code>; <code>TE-604</code> alarms in Control Room upon relief lift.</li>
+                <li><strong>Cooldown Rate Interlock G (<code>RH-FCV-610</code> + <code>FIS-610</code>):</strong> Suction flow switch <code>FIS-610</code> across orifice <code>FE-610</code> modulates 8" bypass valve <code>RH-FCV-610</code> to prevent thermal shock (&gt;100°F/hr) to the reactor vessel.</li>
+                <li><strong>Piggyback SI Interlock B (<code>INTERLOCK-B</code> / <code>RH-V22</code>):</strong> Governs suction cross-tie alignment from <code>RH-E-9A</code> discharge to Intermediate-Head SI Pump <code>SI-P-6A</code>, interlocked with RWST valves <code>SI-V89/V90/V93</code> and Sump MOV <code>CBS-V8</code>.</li>
+              </ul>
+
+              <div class="callout-box callout-conflict">
+                <strong>⚠️ Cross-Document Revision Alert:</strong> <code>ML101620329-part-1.pdf</code> (<code>PID-1-SI-LR20448 Rev 11</code>) and continuation sheet <code>ML101620329-part-2.pdf</code> (<code>PID-1-SI-LR20449 Rev 0</code>) carry divergent revision metadata and Note 8 handjack lock requirements on <code>HCV-606</code>. Confirm redrafted P&amp;ID revision alignment prior to field lock-out.
+              </div>
+            </div>
+          `,
+        },
+
+        {
+          id: "q2-connectivity",
+          num: "02",
+          shortLabel: "Upstream / Downstream Trace",
+          category: "ISO GQL GRAPH",
+          focusAsset: "RH-E-9A",
+          targetStudioTab: "graph",
+          graphMode: "flow",
+          durationMs: 4600,
+          title: "Upstream & Downstream Connectivity Trace",
+          question:
+            "Trace all upstream suction/cooling feeds and downstream safety injection connectivity up to 3 hops around RH-E-9A.",
+          thought:
+            "Intent classified as GRAPH_CONNECTIVITY_TRAVERSAL. Executing bidirectional 3-hop ISO GQL query on Spanner Property Graph OkfKnowledgeGraph across CONNECTS_TO and MONITORS_OR_TRIPS edges centered on RH-E-9A, then resolving inline valve tags and line sizes.",
+          tools: [
+            {
+              name: "traverse_equipment_connectivity_graph",
+              engine: "Spanner ISO GQL",
+              args: 'start_tag="RH-E-9A", direction="BOTH", max_hops=3, edge_filter="ALL"',
+              startMs: 420,
+              endMs: 2250,
+              resultSummary: "10 topological nodes • 11 CONNECTS_TO + 2 TRIP edges",
+            },
+            {
+              name: "lookup_entity_and_parameters",
+              engine: "Spanner SQL",
+              args: 'entity_tag_or_id="RH-P-8A, SI-P-6A, CBS-TK-10A"',
+              startMs: 2250,
+              endMs: 4200,
+              resultSummary: "Enriched inline MOVs, check valves & penetrations",
+            },
+          ],
+          renderAnswerHtml: () => `
+            <div class="answer-top-bar">
+              <div class="answer-title-cluster">
+                <span class="answer-badge">✓ 3-Hop ISO GQL Traversal Complete</span>
+                <span class="badge-xs badge-neutral">11 Process Streams Mapped</span>
+              </div>
+              <button type="button" class="studio-jump-btn" data-jump-tab="graph">
+                🕸️ View Animated Flow Trace on Graph →
+              </button>
+            </div>
+            <div class="ans-body">
+              <h3>1. Upstream Process &amp; Cooling Feeds into <code>RH-E-9A</code> (Hops −2 → −1 → 0)</h3>
+              <div class="eng-table-wrap">
+                <table class="eng-table">
+                  <thead>
+                    <tr>
+                      <th>Hop Path</th>
+                      <th>Stream Role</th>
+                      <th>Line Size &amp; Inline Valves</th>
+                      <th>Source P&amp;ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><code>CBS-TK-10A</code> → <code>RH-P-8A</code> → <code>RH-E-9A</code></td>
+                      <td>Emergency LOCA Sump Suction (Tube)</td>
+                      <td><code>16"</code> Guard Pipe → MOV <code>CBS-V8</code> → <code>14"×12"</code> Check <code>RH-V153</code></td>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>RCS Loop 1 Hot Leg</code> → <code>RH-P-8A</code> → <code>RH-E-9A</code></td>
+                      <td>Normal Shutdown Cooldown (Tube)</td>
+                      <td><code>12"</code> Pen <code>X-9</code> → <code>FE-610</code> → <code>RH-V4</code> → <code>RH-P-8A</code></td>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>CC-E-17A</code> → <code>RH-E-9A Shell</code></td>
+                      <td>Closed-Loop Heat Sink Utility (Shell)</td>
+                      <td><code>20"</code> CCW Loop A Supply &amp; Return (cooled by Titanium SW HX <code>CC-E-17A</code>)</td>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3>2. Downstream Core Injection &amp; Piggyback Paths from <code>RH-E-9A</code> (Hops 0 → +1 → +2)</h3>
+              <div class="eng-table-wrap">
+                <table class="eng-table">
+                  <thead>
+                    <tr>
+                      <th>Hop Path</th>
+                      <th>Stream Role</th>
+                      <th>Line Size &amp; Inline Components</th>
+                      <th>Source P&amp;ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><code>RH-E-9A</code> → <code>PEN-X-11</code> → <code>SI-TK-9A/B</code></td>
+                      <td>Low-Head Safety Injection (RCS Cold Legs 1 &amp; 2)</td>
+                      <td><code>8"</code> <code>RH-V18</code> → <code>HCV-606</code> → <code>FE-618</code> → MOV <code>RH-V14</code> → <code>6"</code> <code>FE-2556/2557</code></td>
+                      <td><code>PID-1-SI-LR20449</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>RH-E-9A</code> → <code>SI-P-6A</code> → <code>RCS Cold Legs</code></td>
+                      <td>Post-LOCA High-Pressure Piggyback Suction</td>
+                      <td><code>8"</code> Cross-Tie MOV <code>RH-V22</code> → <code>SI-P-6A</code> → <code>4"</code> <code>FT-918</code> (@ 2,235 PSIG)</td>
+                      <td><code>PID-1-SI-LR20449</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>RH-E-9A</code> → <code>WLD DR 153 / DR 154</code></td>
+                      <td>Thermal Relief &amp; Radwaste Vents/Drains</td>
+                      <td><code>1"×3/4"</code> PSV <code>RH-V13</code> (600 PSIG) + <code>3/4"</code> Drains <code>RH-V81..87</code></td>
+                      <td><code>PID-1-SI-LR20449</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                <em>The Knowledge Graph on the right has been switched to <strong>Flow Trace Mode</strong> with animated directional flow lines from upstream suction sources to downstream RCS Cold Leg injection points.</em>
+              </p>
+            </div>
+          `,
+        },
+
+        {
+          id: "q3-hazop",
+          num: "03",
+          shortLabel: "HAZOP & Risk Assessment",
+          category: "5-STAGE HAZOP & RAM",
+          focusAsset: "RH-E-9A",
+          targetStudioTab: "vector",
+          graphMode: "topology",
+          durationMs: 4850,
+          title: "Risk Assessment & HAZOP Study (Before & After Safeguards)",
+          question:
+            "Perform a risk assessment and HAZOP study on RH-E-9A. Show the governing risk standard, unmitigated risk before safeguards, engineered safeguards, and residual risk after safeguards.",
+          thought:
+            "Intent classified as MULTISTAGE_RISK_AND_HAZOP_STUDY. Stage 1: Retrieving governing 4×5 Risk Assessment Matrix (RAC 1–4) from Risk_Assessment_Matrix.pdf via Hybrid RRF. Stage 2–4: Tracing upstream causes (CC-E-17A / RH-P-8A) and downstream consequences (RCS Cold Legs / SI-P-6A) via ISO GQL. Stage 5: Evaluating independent safeguards (RH-V13, RH-FCV-610 Interlock G, TI-608) to compute Before vs. After RAC scores.",
+          tools: [
+            {
+              name: "execute_multistage_risk_and_hazop_query",
+              engine: "5-Stage PHA Engine",
+              args: 'node_tag="RH-E-9A", include_ram_matrix=True',
+              startMs: 400,
+              endMs: 2100,
+              resultSummary: "4 credibly bounded deviations • Before/After RAC computed",
+            },
+            {
+              name: "hybrid_search_okf_spanner",
+              engine: "Vector 768-d + RRF",
+              args: 'query="Risk Assessment Matrix Severity I-IV Probability A-E RAC 1-4 HAZOP", top_k=5',
+              startMs: 2100,
+              endMs: 3450,
+              resultSummary: "5 chunks fused (Cosine 0.948 + TOKENLIST RRF 0.0328)",
+            },
+            {
+              name: "traverse_equipment_connectivity_graph",
+              engine: "Spanner ISO GQL",
+              args: 'start_tag="RH-E-9A", direction="BOTH", max_hops=2',
+              startMs: 3450,
+              endMs: 4500,
+              resultSummary: "Verified SIS interlocks (Interlock G, Interlock B, PSV RH-V13)",
+            },
+          ],
+          renderAnswerHtml: () => `
+            <div class="answer-top-bar">
+              <div class="answer-title-cluster">
+                <span class="answer-badge">✓ 5-Stage HAZOP &amp; RAM Complete</span>
+                <span class="badge-xs badge-neutral">Standard: STD-RAM-001 (4×5 RAC)</span>
+              </div>
+              <button type="button" class="studio-jump-btn" data-jump-tab="vector">
+                🧬 Inspect Retrieved RAM &amp; HAZOP Chunks →
+              </button>
+            </div>
+            <div class="ans-body">
+              <h3>1. Governing Risk Standard — Qualitative Risk Assessment Matrix (<code>Risk_Assessment_Matrix.pdf</code>)</h3>
+              <p>
+                Per <code>standards/ram-methodology.md</code>, hazard scenarios are scored by intersecting <strong>Severity (I Catastrophic → IV Negligible)</strong> with <strong>Exposure-Adjusted Probability (A Almost Certain → E Rare)</strong> into <strong>Risk Assessment Codes (RAC 1–4)</strong>:
+              </p>
+
+              <div class="eng-table-wrap">
+                <table class="eng-table" style="text-align: center;">
+                  <thead>
+                    <tr>
+                      <th style="text-align: left;">Severity Class</th>
+                      <th>Prob A (Almost Certain)</th>
+                      <th>Prob B (Likely)</th>
+                      <th>Prob C (Possible)</th>
+                      <th>Prob D (Unlikely)</th>
+                      <th>Prob E (Rare)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="text-align: left;"><strong>I — Catastrophic</strong> (Core/Unit Loss)</td>
+                      <td><span class="rac-pill rac-1">RAC 1</span></td>
+                      <td><span class="rac-pill rac-1">RAC 1</span></td>
+                      <td><span class="rac-pill rac-1">RAC 1</span></td>
+                      <td><span class="rac-pill rac-2">RAC 2</span></td>
+                      <td><span class="rac-pill rac-3">RAC 3</span></td>
+                    </tr>
+                    <tr>
+                      <td style="text-align: left;"><strong>II — Critical</strong> (Severe Damage)</td>
+                      <td><span class="rac-pill rac-1">RAC 1</span></td>
+                      <td><span class="rac-pill rac-1">RAC 1</span></td>
+                      <td><span class="rac-pill rac-2">RAC 2</span></td>
+                      <td><span class="rac-pill rac-3">RAC 3</span></td>
+                      <td><span class="rac-pill rac-3">RAC 3</span></td>
+                    </tr>
+                    <tr>
+                      <td style="text-align: left;"><strong>III — Moderate</strong> (Degraded Duty)</td>
+                      <td><span class="rac-pill rac-2">RAC 2</span></td>
+                      <td><span class="rac-pill rac-2">RAC 2</span></td>
+                      <td><span class="rac-pill rac-3">RAC 3</span></td>
+                      <td><span class="rac-pill rac-4">RAC 4</span></td>
+                      <td><span class="rac-pill rac-4">RAC 4</span></td>
+                    </tr>
+                    <tr>
+                      <td style="text-align: left;"><strong>IV — Negligible</strong> (Minor Upset)</td>
+                      <td><span class="rac-pill rac-3">RAC 3</span></td>
+                      <td><span class="rac-pill rac-3">RAC 3</span></td>
+                      <td><span class="rac-pill rac-4">RAC 4</span></td>
+                      <td><span class="rac-pill rac-4">RAC 4</span></td>
+                      <td><span class="rac-pill rac-4">RAC 4</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p style="font-size: 11.5px; color: var(--text-muted);">
+                <strong>Action Protocol:</strong> <span class="rac-pill rac-1">RAC 1</span> Stop, Immediate Correction • <span class="rac-pill rac-2">RAC 2</span> Urgent Correction • <span class="rac-pill rac-3">RAC 3</span> Corrective Attention / Active Monitoring • <span class="rac-pill rac-4">RAC 4</span> Acceptable (ALARP).
+              </p>
+
+              <h3>2. Node <code>RH-E-9A</code> HAZOP Worksheet — Risk Before vs. Risk After Safeguards</h3>
+              <div class="eng-table-wrap">
+                <table class="eng-table">
+                  <thead>
+                    <tr>
+                      <th>Deviation &amp; Upstream Cause</th>
+                      <th>Downstream Consequence</th>
+                      <th>Risk Before Safeguard</th>
+                      <th>Engineered Safeguards (IPLs)</th>
+                      <th>Risk After Safeguard</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <strong>1. NO / LESS COOLING FLOW</strong><br/>
+                        Loss of 20" CCW shell flow due to <code>CC-E-17A</code> SW trip or LOOP closure of <code>MOV V4</code>
+                      </td>
+                      <td>
+                        Uncooled sump water enters <code>PEN-X-11</code> &amp; <code>SI-P-6A</code> suction (<code>RH-V22</code>); pump NPSH cavitation &amp; loss of decay heat removal
+                      </td>
+                      <td>
+                        <code>S=I, P=B</code><br/>
+                        <span class="rac-pill rac-1">RAC 1 (Extreme)</span>
+                      </td>
+                      <td>
+                        • Outlet temp alarm <code>TI-608</code><br/>
+                        • SW low-press switch <code>PSL-6103</code> &amp; TA Logic <code>V15</code><br/>
+                        • Redundant Train B (<code>RH-E-9B</code> / <code>CC-E-17B</code>)
+                      </td>
+                      <td>
+                        <code>S=I, P=E</code><br/>
+                        <span class="rac-pill rac-3">RAC 3 (Moderate)</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <strong>2. HIGH PRESSURE (Blocked-In)</strong><br/>
+                        Tube bundle isolated between check <code>RH-V153</code> &amp; closed MOV <code>RH-V14</code> with residual hot coolant
+                      </td>
+                      <td>
+                        Liquid thermal expansion overpressurizes Safety Class 2 tube bundle &amp; flange joints above design rating
+                      </td>
+                      <td>
+                        <code>S=II, P=B</code><br/>
+                        <span class="rac-pill rac-1">RAC 1 (Extreme)</span>
+                      </td>
+                      <td>
+                        • Passive Thermal Relief Valve <code>RH-V13</code> set @ <strong>600 PSIG</strong> to <code>WLD DR 153</code><br/>
+                        • Relief discharge temp sensor <code>TE-604</code>
+                      </td>
+                      <td>
+                        <code>S=II, P=E</code><br/>
+                        <span class="rac-pill rac-3">RAC 3 (Moderate)</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <strong>3. MORE COOLING / OVERCOOLING</strong><br/>
+                        8" bypass valve <code>RH-FCV-610</code> fails closed during rapid RCS shutdown cooldown
+                      </td>
+                      <td>
+                        Excessive cooldown rate (&gt;100°F/hr) induces brittle thermal stress across RCS Cold Legs 1 &amp; 2
+                      </td>
+                      <td>
+                        <code>S=II, P=C</code><br/>
+                        <span class="rac-pill rac-2">RAC 2 (High)</span>
+                      </td>
+                      <td>
+                        • Automatic <strong>Interlock G</strong> via suction flow switch <code>FIS-610</code> (<code>FE-610</code>)<br/>
+                        • Continuous <code>TI-608</code> monitoring
+                      </td>
+                      <td>
+                        <code>S=III, P=D</code><br/>
+                        <span class="rac-pill rac-4">RAC 4 (Low)</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <strong>4. CONTAINMENT BREACH (Tube Leak)</strong><br/>
+                        Tube wall thinning (&ge;40%) ruptures barrier between high-pressure radioactive coolant &amp; CCW shell
+                      </td>
+                      <td>
+                        Radioactive borated coolant contaminates closed-loop Component Cooling Water Loop A outside containment
+                      </td>
+                      <td>
+                        <code>S=I, P=C</code><br/>
+                        <span class="rac-pill rac-1">RAC 1 (Extreme)</span>
+                      </td>
+                      <td>
+                        • Outage Eddy-Current NDE &amp; 40% plugging rule (<code>OM-HX-101</code>)<br/>
+                        • CCW radiation monitors &amp; 20" shell isolation valves
+                      </td>
+                      <td>
+                        <code>S=II, P=E</code><br/>
+                        <span class="rac-pill rac-3">RAC 3 (Moderate)</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="callout-box callout-conflict">
+                <strong>Mandatory Pre-PHA Closeout Action:</strong> Reconcile the drawing continuation &amp; Note 8 handjack lock discrepancy on <code>HCV-606</code> between <code>PID-1-SI-LR20448 (Rev 11)</code> and <code>PID-1-SI-LR20449 (Rev 0)</code> before signing off Deviation #1 &amp; #2 safeguards.
+              </div>
+            </div>
+          `,
+        },
+
+        {
+          id: "q4-blast",
+          num: "04",
+          shortLabel: "Failure Blast Radius",
+          category: "BLAST RADIUS",
+          focusAsset: "CC-E-17A",
+          targetStudioTab: "graph",
+          graphMode: "blast",
+          durationMs: 4550,
+          title: "Blast Radius & Equipment Failure Impact",
+          question:
+            "What is the downstream operational blast radius and safety impact if Primary CCW Heat Exchanger CC-E-17A or RHR Pump RH-P-8A fails during post-LOCA recirculation?",
+          thought:
+            "Intent classified as FAILURE_BLAST_RADIUS_ANALYSIS. Executing forward multi-hop ISO GQL impact propagation from CC-E-17A and RH-P-8A across utility cooling (CCW Loop A) and process injection headers, computing hop-by-hop failure criticality and Train B failover paths.",
+          tools: [
+            {
+              name: "traverse_equipment_connectivity_graph",
+              engine: "Spanner ISO GQL",
+              args: 'start_tag="CC-E-17A", direction="DOWNSTREAM", max_hops=4, edge_filter="CONNECTS_TO"',
+              startMs: 450,
+              endMs: 2150,
+              resultSummary: "6 downstream Train A safety assets impacted across 3 hops",
+            },
+            {
+              name: "lookup_entity_and_parameters",
+              engine: "Spanner SQL",
+              args: 'entity_tag_or_id="CC-E-17A, RH-P-8A, RH-E-9A, SI-P-6A"',
+              startMs: 2150,
+              endMs: 3400,
+              resultSummary: "Retrieved thermal limits, seal cooling dependencies & Train B tags",
+            },
+            {
+              name: "hybrid_search_okf_spanner",
+              engine: "Vector 768-d + RRF",
+              args: 'query="Train A loss of CCW cooling emergency realignment Train B RH-P-8B", top_k=4',
+              startMs: 3400,
+              endMs: 4300,
+              resultSummary: "Matched emergency Train B switchover & TA Logic A procedures",
+            },
+          ],
+          renderAnswerHtml: () => `
+            <div class="answer-top-bar">
+              <div class="answer-title-cluster">
+                <span class="rac-pill rac-1">⚡ Train A Cascade Impact Modeled</span>
+                <span class="badge-xs badge-neutral">6 Assets in Blast Radius</span>
+              </div>
+              <button type="button" class="studio-jump-btn" data-jump-tab="graph">
+                🕸️ View Pulsing Blast Radius on Graph →
+              </button>
+            </div>
+            <div class="ans-body">
+              <h3>1. Multi-Hop Failure Propagation Matrix (<code>CC-E-17A</code> / <code>RH-P-8A</code> Outage)</h3>
+              <p>
+                Because <code>CC-E-17A</code> provides both <strong>20" shell cooling</strong> to <code>RH-E-9A</code> and <strong>3/4" mechanical seal/bearing cooling</strong> to <code>RH-P-8A</code> and <code>SI-P-6A</code>, an unmitigated failure triggers a 3-tier cascading impact across Train A Emergency Core Cooling:
+              </p>
+
+              <div class="eng-table-wrap">
+                <table class="eng-table">
+                  <thead>
+                    <tr>
+                      <th>Blast Tier</th>
+                      <th>Impacted Asset(s)</th>
+                      <th>Failure Mechanism &amp; Process Consequence</th>
+                      <th>Impact Severity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Tier 1 (Hop 1)</strong><br/>Immediate</td>
+                      <td><code>RH-P-8A</code> &amp; <code>RH-E-9A</code></td>
+                      <td>Loss of 3/4" CCW seal cooling causes <code>TE-2566</code> seal temp spike on <code>RH-P-8A</code>; loss of 20" CCW shell heat sink halts decay heat rejection in <code>RH-E-9A</code>.</td>
+                      <td><span class="rac-pill rac-1">CRITICAL</span></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Tier 2 (Hop 2)</strong><br/>&lt; 3–5 mins</td>
+                      <td><code>SI-P-6A</code> &amp; <code>PEN-X-11</code></td>
+                      <td>Loss of cooled RHR discharge head via 8" cross-tie <code>MOV RH-V22</code> starves Intermediate-Head SI Pump <code>SI-P-6A</code> piggyback suction during Sump recirculation; <code>FT-618</code> flow drops to zero.</td>
+                      <td><span class="rac-pill rac-1">CRITICAL</span></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Tier 3 (Hop 3)</strong><br/>Core Boundary</td>
+                      <td><code>SI-TK-9A/B</code> (RCS Cold Legs 1 &amp; 2)</td>
+                      <td>Complete loss of Train A Low-Head (<code>FE-2556/2557</code>) and Intermediate-Head (<code>FT-918</code>) borated coolant delivery through Penetration <code>X-11</code>.</td>
+                      <td><span class="rac-pill rac-2">TRAIN B FAILOVER</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="callout-box callout-critical">
+                <strong>🛡️ Automated Containment &amp; Train B Recovery Protocol:</strong>
+                <ul style="margin-top: 6px; margin-bottom: 0;">
+                  <li><strong>Immediate Train B Assumption:</strong> Verify independent Train B (<code>CBS-TK-10B</code> → <code>RH-P-8B</code> → <code>RH-E-9B</code> cooled by <code>CC-E-17B</code>) is delivering full ECCS design flow to RCS Cold Legs 3 &amp; 4.</li>
+                  <li><strong>Intermediate-Head Crossover:</strong> Open 3" discharge cross-tie MOVs <code>SI-V111</code> &amp; <code>SI-V112</code> from <code>SI-P-6B</code> if high-head injection balancing is required.</li>
+                  <li><strong>UHS Cooling Tower Backup:</strong> If <code>CC-E-17A</code> loss was caused by Ocean Intake outage (<code>PSL-6103</code> low), TA Logic A realigns <code>MOV V15</code> to Ultimate Heat Sink Cooling Tower Pump <code>P-110A</code>.</li>
+                </ul>
+              </div>
+            </div>
+          `,
+        },
+
+        {
+          id: "q5-lineage",
+          num: "05",
+          shortLabel: "Data Lineage & Source Docs",
+          category: "PROVENANCE & DATAPLEX",
+          focusAsset: "RH-E-9A",
+          targetStudioTab: "lineage",
+          graphMode: "topology",
+          durationMs: 4350,
+          title: "Data Lineage, Source Documents & Conflict Audit",
+          question:
+            "Show the complete data lineage, source engineering PDF documents, Dataplex governance verification, and revision conflict history for RH-E-9A.",
+          thought:
+            "Intent classified as DATA_LINEAGE_AND_PROVENANCE_AUDIT. Querying FactLineageEdges and RawSourceDocuments in Cloud Spanner for backward PDF provenance, then invoking sync_or_inspect_knowledge_catalog against Google Cloud Dataplex Universal Catalog (dataplex_v1) to verify human review sign-off and MD5 bundle integrity.",
+          tools: [
+            {
+              name: "trace_data_lineage_and_conflicts",
+              engine: "Spanner Lineage GQL",
+              args: 'target="RH-E-9A", direction="BACKWARD_TO_PDF", include_checksums=True',
+              startMs: 400,
+              endMs: 1950,
+              resultSummary: "4 source PDFs linked • 10 fact assertions mapped to sheet grids",
+            },
+            {
+              name: "sync_or_inspect_knowledge_catalog",
+              engine: "Dataplex v1 API",
+              args: 'concept_id="equipment/RH-E-9A", mode="INSPECT_ASPECTS"',
+              startMs: 1950,
+              endMs: 3350,
+              resultSummary: "Dataplex aspect verified • OpenLineage run COMPLETE",
+            },
+            {
+              name: "read_full_okf_concept_from_spanner",
+              engine: "Spanner PK Read",
+              args: 'concept_id="equipment/RH-E-9A"',
+              startMs: 3350,
+              endMs: 4100,
+              resultSummary: "YAML frontmatter & footnote citations [^src-1, ^src-2] verified",
+            },
+          ],
+          renderAnswerHtml: () => `
+            <div class="answer-top-bar">
+              <div class="answer-title-cluster">
+                <span class="answer-badge">✓ Dataplex &amp; OpenLineage Verified</span>
+                <span class="badge-xs badge-neutral">MD5: 9f4c2e81b70d4a1e</span>
+              </div>
+              <button type="button" class="studio-jump-btn" data-jump-tab="lineage">
+                📄 Inspect Source PDFs &amp; Lineage Chain →
+              </button>
+            </div>
+            <div class="ans-body">
+              <h3>1. 4-Stage Deterministic Provenance Chain</h3>
+              <p>
+                Every engineering parameter served by <code>query_agent</code> is traceable with zero hallucination from raw GCS PDF drawings through human-verified OKF v0.2 Markdown into Cloud Spanner and Dataplex Universal Catalog:
+              </p>
+              <ul>
+                <li><strong>Stage 1 — Immutable Raw PDFs (<code>reference/raw/</code>):</strong> Extracted at 300 DPI using 7-window (3×2) CAD vision tiling + native text by <code>extracter_agent</code>.</li>
+                <li><strong>Stage 2 — OKF v0.2 Concept (<code>equipment/RH-E-9A.md</code>):</strong> Cross-document Read-Merge-Upsert with YAML frontmatter, MD5 hash <code>9f4c2e81b70d4a1e</code>, and reviewer sign-off by <strong>Dr. M. Vance</strong> (<code>2026-10-02 13:18 UTC</code>).</li>
+                <li><strong>Stage 3 — Cloud Spanner (<code>okf_knowledge_graph</code>):</strong> Deterministic <code>.md</code>-only sync (zero LLM calls during ingestion) into <code>OkfConcepts</code>, <code>FactAssertions</code>, and <code>FactLineageEdges</code>.</li>
+                <li><strong>Stage 4 — Dataplex Universal Catalog (<code>dataplex_v1</code>):</strong> Governance aspect published to <code>entryGroups/okf/entries/equipment-rh-e-9a</code>.</li>
+              </ul>
+
+              <h3>2. Authoritative Source Engineering Documents for <code>RH-E-9A</code></h3>
+              <div class="eng-table-wrap">
+                <table class="eng-table">
+                  <thead>
+                    <tr>
+                      <th>Doc Code</th>
+                      <th>Raw PDF Path</th>
+                      <th>Revision &amp; Grid</th>
+                      <th>Asserted Facts</th>
+                      <th>Lineage Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><code>PID-1-SI-LR20448</code></td>
+                      <td><code>pid/ML101620329-part-1.pdf</code></td>
+                      <td>Rev 11 • Grid H-3/H-4</td>
+                      <td>12" Tube In/Out, 20" CCW Shell, 8" Bypass <code>RH-FCV-610</code>, Safety Class 2/3</td>
+                      <td><span class="rac-pill rac-4">PRIMARY</span></td>
+                    </tr>
+                    <tr>
+                      <td><code>PID-1-SI-LR20449</code></td>
+                      <td><code>pid/ML101620329-part-2.pdf</code></td>
+                      <td>Rev 0 (Ref Rev 9) • Grid G-12</td>
+                      <td>PSV <code>RH-V13</code> @ 600 PSIG, Pen <code>X-11</code>, <code>RH-V22</code> to <code>SI-P-6A</code>, Note 8 <code>HCV-606</code></td>
+                      <td><span class="rac-pill rac-2">⚠️ CONFLICT</span></td>
+                    </tr>
+                    <tr>
+                      <td><code>OM-HX-101</code></td>
+                      <td><code>operating_manuals/Inspection_Manual_for_Heat_Exchangers_1.pdf</code></td>
+                      <td>Rev 4 • Sec 4.2</td>
+                      <td>Eddy-current NDE interval &amp; ≥40% tube wall plugging limit</td>
+                      <td><span class="rac-pill rac-4">CORROBORATING</span></td>
+                    </tr>
+                    <tr>
+                      <td><code>STD-RAM-001</code></td>
+                      <td><code>standards/Risk_Assessment_Matrix.pdf</code></td>
+                      <td>Rev 3 • Pages 1–5</td>
+                      <td>4×5 Qualitative RAM Matrix &amp; RAC 1–4 mitigation rules</td>
+                      <td><span class="rac-pill rac-4">GOVERNANCE</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `,
+        },
+
+        {
+          id: "q6-vector",
+          num: "06",
+          shortLabel: "Vector SOP & Fouling Search",
+          category: "HYBRID VECTOR RRF",
+          focusAsset: "F-33",
+          targetStudioTab: "vector",
+          graphMode: "topology",
+          durationMs: 4400,
+          title: "Hybrid Vector + Keyword RRF Diagnostic Search",
+          question:
+            "Search inspection manuals and P&IDs for differential pressure fouling diagnostics (PDIS-2622 on F-33) and heat exchanger tube plugging limits.",
+          thought:
+            "Intent classified as HYBRID_CONCEPTUAL_AND_MANUAL_SEARCH. Generating 768-d text-embedding-005 vector and executing Reciprocal Rank Fusion (k=60) combining COSINE_DISTANCE semantic search with Spanner TOKENLIST exact tag search ('PDIS-2622', 'F-33', '40% wall') across OkfSectionChunks.",
+          tools: [
+            {
+              name: "hybrid_search_okf_spanner",
+              engine: "Vector 768-d + RRF",
+              args: 'query="differential pressure fouling PDIS-2622 F-33 tube plugging NDE", top_k=5',
+              startMs: 400,
+              endMs: 2200,
+              resultSummary: "5 RRF-ranked chunks retrieved across manuals & P&IDs",
+            },
+            {
+              name: "lookup_entity_and_parameters",
+              engine: "Spanner SQL",
+              args: 'entity_tag_or_id="F-33", parameter_filter=""',
+              startMs: 2200,
+              endMs: 3650,
+              resultSummary: "Loaded F-33 nozzles, bypass 1-SF-V25 & sight glass FG-2612",
+            },
+          ],
+          renderAnswerHtml: () => `
+            <div class="answer-top-bar">
+              <div class="answer-title-cluster">
+                <span class="answer-badge">✓ Hybrid RRF Fusion (k=60)</span>
+                <span class="badge-xs badge-neutral">Vector 768-d + TOKENLIST</span>
+              </div>
+              <button type="button" class="studio-jump-btn" data-jump-tab="vector">
+                🧬 View RRF Similarity Scores →
+              </button>
+            </div>
+            <div class="ans-body">
+              <h3>1. Particulate Filter Fouling &amp; Bypass SOP — <code>F-33</code> (<code>PID-1-SF-LR20483</code>)</h3>
+              <ul>
+                <li><strong>High ΔP Detection (<code>PDIS-2622</code>):</strong> Differential Pressure Indicating Switch <code>PDIS-2622</code> monitors pressure drop across Spent Fuel Pool Prefilter <code>F-33</code> (4" inlet <code>1-SF-V20</code> to 3"×4" outlet <code>1-SF-V27</code>) to prevent crud carryover into Ion-Exchange Demineralizer <code>DM-8</code>.</li>
+                <li><strong>On-Line Isolation &amp; Priming:</strong> Upon reaching high ΔP alarm, operators align <code>4"</code> bypass valve <code>1-SF-V25</code>, drain contaminated liquid via bottom valve <code>1-SF-V41</code> to <code>CS DRN HDR (WLD OR 183)</code>, and verify complete air elimination during refill through top vent <code>1-SF-V55</code> and sight glass <code>FG-2612</code>.</li>
+              </ul>
+
+              <h3>2. Heat Exchanger Fouling &amp; Tube Plugging Criteria (<code>OM-HX-101</code>)</h3>
+              <ul>
+                <li><strong>Thermal Conductance Degradation:</strong> Schedule mechanical/chemical cleaning when overall heat transfer coefficient ($U$-value) degrades by <strong>&gt;15%</strong> or shell/tube ΔP exceeds baseline design curve.</li>
+                <li><strong>Eddy-Current NDE Plugging Rule:</strong> Tubes exhibiting <strong>&ge;40% nominal wall loss</strong> must be mechanically plugged and hydrotested; total plugged tube count must not exceed <strong>5%</strong> without a formal nuclear safety thermal-hydraulic margin evaluation.</li>
+              </ul>
+            </div>
+          `,
+        },
+      ];
+
+      /* ======================================================================
+         6. APPLICATION STATE & DOM REFERENCES
+         ====================================================================== */
+      const state = {
+        theme: "light",
+        sidebarCollapsed: false,
+        railMode: "equipment",
+        railSearch: "",
+        activeAssetId: "RH-E-9A",
+        activeStudioTab: "graph",
+        graphHops: 2,
+        graphMode: "topology",
+        enabledEdges: new Set(["CONNECTS_TO", "MONITORS_OR_TRIPS", "DERIVED_FROM"]),
+        selectedGraphNodeId: "RH-E-9A",
+        zoom: 1.0,
+        panX: 0,
+        panY: 0,
+        isPanning: false,
+        panStartX: 0,
+        panStartY: 0,
+        vectorFilterQuery: "Risk Assessment Matrix RAC 1-4 & RH-E-9A Thermal Relief Safeguards",
+        selectedDocId: "DOC-PID-20448",
+        isThinking: false,
+        activeScenarioId: null,
+        timers: [],
+      };
+
+      const dom = {
+        btnToggleSidebar: document.getElementById("btn-toggle-sidebar"),
+        assetRail: document.getElementById("asset-rail"),
+        railSearchInput: document.getElementById("rail-search-input"),
+        railCountBadge: document.getElementById("rail-count-badge"),
+        railListContainer: document.getElementById("rail-list-container"),
+        headerFocusBadge: document.getElementById("header-focus-badge"),
+        btnResetDemo: document.getElementById("btn-reset-demo"),
+        btnThemeToggle: document.getElementById("btn-theme-toggle"),
+        themeToggleText: document.getElementById("theme-toggle-text"),
+        scenarioPillsWrap: document.getElementById("scenario-pills-wrap"),
+        chatStream: document.getElementById("chat-stream"),
+        chatForm: document.getElementById("chat-form"),
+        chatInput: document.getElementById("chat-input"),
+        btnSendQuery: document.getElementById("btn-send-query"),
+        graphCenterLabel: document.getElementById("graph-center-label"),
+        graphStage: document.getElementById("graph-stage"),
+        graphViewport: document.getElementById("graph-viewport"),
+        graphInspectorDock: document.getElementById("graph-inspector-dock"),
+        catalogContainer: document.getElementById("catalog-scroll-container"),
+        vectorContainer: document.getElementById("vector-scroll-container"),
+        lineageContainer: document.getElementById("lineage-scroll-container"),
+        badgeCatalogCount: document.getElementById("badge-catalog-count"),
+      };
+
+      function esc(str) {
+        if (str === null || str === undefined) return "";
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function clearActiveTimers() {
+        state.timers.forEach((t) => clearTimeout(t));
+        state.timers = [];
+      }
+
+      /* ======================================================================
+         7. THEME, ASSET RAIL & CONTEXT SYNCHRONIZATION
+         ====================================================================== */
+      function setTheme(theme) {
+        state.theme = theme;
+        document.documentElement.setAttribute("data-theme", theme);
+        dom.themeToggleText.textContent =
+          theme === "dark" ? "☀️ Light Enterprise" : "🌙 Dark Blueprint";
+        renderGraph();
+      }
+
+      function selectAsset(assetId, switchTab = null) {
+        if (!ASSETS[assetId]) return;
+        state.activeAssetId = assetId;
+        dom.headerFocusBadge.textContent = assetId;
+        dom.graphCenterLabel.textContent = assetId.includes("/") ? "RH-E-9A (Context)" : assetId;
+
+        const matchingNode = GRAPH_NODES.find((n) => n.id === assetId);
+        if (matchingNode) {
+          state.selectedGraphNodeId = matchingNode.id;
+        }
+
+        const asset = ASSETS[assetId];
+        dom.badgeCatalogCount.textContent = `${asset.parameters.length}P`;
+
+        renderAssetRail();
+        renderGraph();
+        renderCatalogTab();
+        renderVectorTab();
+        renderLineageTab();
+
+        if (switchTab) {
+          setStudioTab(switchTab);
+        }
+      }
+
+      function setStudioTab(tabName) {
+        state.activeStudioTab = tabName;
+        document.querySelectorAll(".studio-tab").forEach((btn) => {
+          btn.classList.toggle("active", btn.getAttribute("data-studio-tab") === tabName);
+        });
+        document.querySelectorAll(".studio-panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.id === `panel-${tabName}`);
+        });
+      }
+
+      function setGraphMode(mode) {
+        state.graphMode = mode;
+        document.querySelectorAll("[data-gmode]").forEach((btn) => {
+          btn.classList.toggle("active", btn.getAttribute("data-gmode") === mode);
+        });
+        renderGraph();
+      }
+
+      function renderAssetRail() {
+        const q = state.railSearch.trim().toLowerCase();
+        const allItems = Object.values(ASSETS).filter((a) =>
+          state.railMode === "equipment" ? a.kind === "equipment" : a.kind === "concept"
+        );
+        const filtered = allItems.filter(
+          (a) =>
+            !q ||
+            a.id.toLowerCase().includes(q) ||
+            a.name.toLowerCase().includes(q) ||
+            a.unit.toLowerCase().includes(q)
+        );
+
+        dom.railCountBadge.textContent = `${filtered.length} Items`;
+
+        // Group by unitShort
+        const groups = {};
+        filtered.forEach((item) => {
+          const g = item.unitShort;
+          if (!groups[g]) groups[g] = [];
+          groups[g].push(item);
+        });
+
+        let html = "";
+        Object.keys(groups).forEach((groupName) => {
+          html += `
+            <div>
+              <div class="unit-section-title">
+                <span>${esc(groupName)}</span>
+                <span>${groups[groupName].length}</span>
+              </div>
+              ${groups[groupName]
+                .map((item) => {
+                  const isActive = state.activeAssetId === item.id;
+                  const shortId = item.id.includes("/") ? item.id.split("/").pop() : item.id;
+                  return `
+                    <button type="button" class="asset-item ${isActive ? "active" : ""}" data-asset-id="${esc(item.id)}">
+                      <div class="asset-item-top">
+                        <span class="asset-tag">${esc(shortId)}</span>
+                        ${
+                          item.conflictCount > 0
+                            ? `<span class="badge-xs badge-conflict">⚠️ ${item.conflictCount}</span>`
+                            : `<span class="badge-xs badge-neutral">${item.parameters.length}P</span>`
+                        }
+                      </div>
+                      <div class="asset-name">${esc(item.name)}</div>
+                    </button>
+                  `;
+                })
+                .join("")}
+            </div>
+          `;
+        });
+
+        dom.railListContainer.innerHTML =
+          html || `<div style="padding: 12px; font-size: 12px; color: var(--text-muted);">No matching OKF items.</div>`;
+
+        dom.railListContainer.querySelectorAll(".asset-item").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const id = btn.getAttribute("data-asset-id");
+            selectAsset(id, state.activeStudioTab === "graph" && id.includes("/") ? "catalog" : null);
+          });
+        });
+      }
+
+      /* ======================================================================
+         8. RIGHT STUDIO TAB 1: INTERACTIVE LAYERED SVG KNOWLEDGE GRAPH
+         ====================================================================== */
+      function renderGraph() {
+        const isDark = state.theme === "dark";
+        const visibleNodes = GRAPH_NODES.filter((n) => n.hop <= state.graphHops);
+        const visibleNodeIds = new Set(visibleNodes.map((n) => n.id));
+        const visibleEdges = GRAPH_EDGES.filter(
+          (e) =>
+            state.enabledEdges.has(e.type) &&
+            visibleNodeIds.has(e.source) &&
+            visibleNodeIds.has(e.target)
+        );
+
+        const nodeMap = {};
+        visibleNodes.forEach((n) => {
+          nodeMap[n.id] = n;
+        });
+
+        let svg = "";
+
+        // Zone column subtle labels for clean engineering orientation
+        svg += `
+          <g opacity="0.72">
+            <text x="95" y="34" text-anchor="middle" fill="${isDark ? "#64748b" : "#94a3b8"}" font-size="10" font-weight="700" font-family="Inter">UPSTREAM SUCTION</text>
+            <text x="255" y="34" text-anchor="middle" fill="${isDark ? "#64748b" : "#94a3b8"}" font-size="10" font-weight="700" font-family="Inter">PUMP &amp; CCW UTILITY</text>
+            <text x="435" y="34" text-anchor="middle" fill="${isDark ? "#64748b" : "#94a3b8"}" font-size="10" font-weight="700" font-family="Inter">PRIMARY NODE</text>
+            <text x="685" y="34" text-anchor="middle" fill="${isDark ? "#64748b" : "#94a3b8"}" font-size="10" font-weight="700" font-family="Inter">DOWNSTREAM INJECTION</text>
+          </g>
+        `;
+
+        // Draw Edges
+        visibleEdges.forEach((edge) => {
+          const s = nodeMap[edge.source];
+          const t = nodeMap[edge.target];
+          if (!s || !t) return;
+
+          let stroke = "#2563eb";
+          let marker = "url(#arr-connect)";
+          let dash = "";
+          let width = 2;
+          let extraClass = "";
+
+          if (edge.type === "MONITORS_OR_TRIPS") {
+            stroke = "#0d9488";
+            marker = "url(#arr-trip)";
+            dash = "4,3";
+            width = 1.8;
+          } else if (edge.type === "DERIVED_FROM") {
+            stroke = "#d97706";
+            marker = "url(#arr-derived)";
+            dash = "2,3";
+            width = 1.6;
+          }
+
+          if (state.graphMode === "flow" && edge.flow) {
+            width = 2.8;
+            extraClass = "edge-animated-flow";
+          } else if (state.graphMode === "blast" && edge.blast) {
+            stroke = "#dc2626";
+            marker = "url(#arr-blast)";
+            width = 2.8;
+            extraClass = "edge-animated-flow";
+          }
+
+          const midX = (s.x + t.x) / 2;
+          const midY = (s.y + t.y) / 2;
+          const labelBg = isDark ? "#0f1623" : "#ffffff";
+          const labelBorder = isDark ? "#334155" : "#cbd5e1";
+          const labelText = isDark ? "#cbd5e1" : "#334155";
+
+          svg += `
+            <g class="graph-edge" data-edge-id="${esc(edge.id)}" style="cursor: pointer;">
+              <line
+                x1="${s.x}" y1="${s.y}"
+                x2="${t.x}" y2="${t.y}"
+                stroke="${stroke}"
+                stroke-width="${width}"
+                ${dash && !extraClass ? `stroke-dasharray="${dash}"` : ""}
+                class="${extraClass}"
+                marker-end="${marker}"
+              />
+              <rect x="${midX - 46}" y="${midY - 10}" width="92" height="17" rx="4" fill="${labelBg}" stroke="${labelBorder}" stroke-width="0.8" opacity="0.94" />
+              <text x="${midX}" y="${midY + 1.5}" text-anchor="middle" fill="${labelText}" font-family="IBM Plex Mono" font-size="9" font-weight="500">
+                ${esc(edge.label)}
+              </text>
+            </g>
+          `;
+        });
+
+        // Draw Nodes
+        visibleNodes.forEach((node) => {
+          const isSelected = state.selectedGraphNodeId === node.id;
+          const isActiveAsset = state.activeAssetId === node.id;
+
+          let fill = isDark ? "#162032" : "#ffffff";
+          let ring = "#2563eb";
+          let badgeFill = "#1d4ed8";
+          let r = 21;
+
+          if (node.id === "RH-E-9A" || isActiveAsset) {
+            ring = isDark ? "#38bdf8" : "#1d4ed8";
+            badgeFill = "#1d4ed8";
+            r = 24;
+          } else if (node.type === "INSTRUMENT") {
+            ring = "#0d9488";
+            badgeFill = "#0f766e";
+            r = 18;
+          } else if (node.type === "RAW_PDF") {
+            ring = "#d97706";
+            badgeFill = "#b45309";
+            r = 18;
+          }
+
+          if (state.graphMode === "blast" && node.blastTier >= 1) {
+            ring = node.blastTier === 1 ? "#dc2626" : "#ea580c";
+            badgeFill = node.blastTier === 1 ? "#dc2626" : "#ea580c";
+          }
+
+          const shortCode =
+            node.type === "RAW_PDF"
+              ? "PDF"
+              : node.type === "INSTRUMENT"
+              ? "SIS"
+              : node.label.split("-")[0].slice(0, 4);
+
+          const textPrimary = isDark ? "#f1f5f9" : "#0f172a";
+          const textSub = isDark ? "#94a3b8" : "#64748b";
+
+          svg += `
+            <g class="graph-node" data-node-id="${esc(node.id)}" transform="translate(${node.x}, ${node.y})" style="cursor: pointer;">
+              ${
+                state.graphMode === "blast" && node.blastTier >= 1
+                  ? `<circle r="${r + 4}" class="blast-pulse-ring" />`
+                  : ""
+              }
+              ${
+                isSelected
+                  ? `<circle r="${r + 5}" fill="none" stroke="${ring}" stroke-width="2" stroke-dasharray="3,2" opacity="0.85" />`
+                  : ""
+              }
+              <circle r="${r}" fill="${fill}" stroke="${ring}" stroke-width="${isSelected ? 3 : 2.2}" />
+              <circle r="${r - 5}" fill="${badgeFill}" />
+              <text x="0" y="3.5" text-anchor="middle" fill="#ffffff" font-family="IBM Plex Mono" font-size="9.5" font-weight="600">
+                ${esc(shortCode)}
+              </text>
+              ${
+                node.conflict
+                  ? `<circle cx="${r - 4}" cy="${-r + 4}" r="7" fill="#f59e0b" stroke="${fill}" stroke-width="1.5" />
+                     <text x="${r - 4}" y="${-r + 7}" text-anchor="middle" fill="#ffffff" font-size="9" font-weight="700">!</text>`
+                  : ""
+              }
+              <text x="0" y="${r + 14}" text-anchor="middle" fill="${textPrimary}" font-family="IBM Plex Mono" font-size="10.5" font-weight="600">
+                ${esc(node.label)}
+              </text>
+              <text x="0" y="${r + 26}" text-anchor="middle" fill="${textSub}" font-family="Inter" font-size="9.5">
+                ${esc(node.sub)}
+              </text>
+            </g>
+          `;
+        });
+
+        dom.graphViewport.setAttribute(
+          "transform",
+          `translate(${state.panX}, ${state.panY}) scale(${state.zoom})`
+        );
+        dom.graphViewport.innerHTML = svg;
+
+        // Bind Node Clicks
+        dom.graphViewport.querySelectorAll(".graph-node").forEach((elNode) => {
+          elNode.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const nid = elNode.getAttribute("data-node-id");
+            state.selectedGraphNodeId = nid;
+            renderGraph();
+            if (ASSETS[nid]) {
+              selectAsset(nid);
+            }
+          });
+        });
+
+        renderGraphInspectorDock();
+      }
+
+      function renderGraphInspectorDock() {
+        const node = GRAPH_NODES.find((n) => n.id === state.selectedGraphNodeId) || GRAPH_NODES[4];
+        const canOpenCatalog = Boolean(ASSETS[node.id]);
+
+        let modeTag = `<span class="badge-xs badge-neutral">Hop ${node.hop}</span>`;
+        if (state.graphMode === "blast" && node.blastTier > 0) {
+          modeTag = `<span class="rac-pill rac-1">Blast Tier ${node.blastTier} Impact</span>`;
+        } else if (state.graphMode === "flow" && node.flowRole !== "doc") {
+          modeTag = `<span class="rac-pill rac-4">${esc(node.flowRole.toUpperCase())} PATH</span>`;
+        }
+
+        dom.graphInspectorDock.innerHTML = `
+          <div style="min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+              <code style="font-weight: 700; font-size: 12.5px; color: var(--text-primary);">${esc(node.label)}</code>
+              <span style="font-size: 12px; color: var(--text-secondary);">${esc(node.sub)}</span>
+              ${modeTag}
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted);">
+              Click any node to inspect • ${
+                node.conflict
+                  ? "⚠️ Contains cross-sheet P&ID discrepancy (LR20448 vs LR20449)"
+                  : "Verified in Spanner OkfKnowledgeGraph"
+              }
+            </div>
+          </div>
+          ${
+            canOpenCatalog
+              ? `<button type="button" class="hdr-btn" id="btn-dock-open-catalog" style="flex-shrink: 0;">
+                   Open Catalog →
+                 </button>`
+              : ""
+          }
+        `;
+
+        const btnOpen = document.getElementById("btn-dock-open-catalog");
+        if (btnOpen) {
+          btnOpen.addEventListener("click", () => {
+            selectAsset(node.id, "catalog");
+          });
+        }
+      }
+
+      /* ======================================================================
+         9. RIGHT STUDIO TAB 2: DATAPLEX KNOWLEDGE CATALOG
+         ====================================================================== */
+      function renderCatalogTab() {
+        const asset = ASSETS[state.activeAssetId] || ASSETS["RH-E-9A"];
+        const gov = asset.governance;
+
+        dom.catalogContainer.innerHTML = `
+          <!-- Dataplex Universal Catalog Governance Card -->
+          <div class="studio-card">
+            <div class="studio-card-hdr">
+              <div class="studio-card-title">
+                <span>🏛️ Dataplex Universal Catalog Aspect</span>
+                <code>${esc(asset.conceptId)}</code>
+              </div>
+              <span class="rac-pill rac-4">✓ ${esc(gov.trustTier)}</span>
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+              ${esc(asset.summary)}
+            </p>
+            <div class="gov-grid">
+              <div class="gov-cell">
+                <div class="gov-label">Verified Approver</div>
+                <div class="gov-value">${esc(gov.approver)}</div>
+                <div class="mono" style="font-size: 10.5px; color: var(--text-muted);">${esc(gov.approvedAt)}</div>
+              </div>
+              <div class="gov-cell">
+                <div class="gov-label">Extraction Provenance</div>
+                <div class="gov-value mono" style="font-size: 11.5px;">${esc(gov.extractedBy)}</div>
+                <div class="mono" style="font-size: 10.5px; color: var(--text-muted);">Bundle: ${esc(gov.bundleVersion)} • MD5: ${esc(gov.md5)}</div>
+              </div>
+              <div class="gov-cell" style="grid-column: span 2;">
+                <div class="gov-label">Dataplex Entry Resource (dataplex_v1)</div>
+                <div class="mono" style="font-size: 11px; color: var(--text-secondary); word-break: break-all;">
+                  ${esc(gov.dataplexEntry)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          ${
+            asset.conflictCount > 0
+              ? `
+                <div class="callout-box callout-conflict" style="margin: 0;">
+                  <strong>⚠️ Active Cross-Document Discrepancy (${asset.conflictCount}):</strong><br/>
+                  ${esc(asset.conflictSummary)}
+                </div>
+              `
+              : ""
+          }
+
+          <!-- Governing Design & Safety Parameters -->
+          <div class="studio-card">
+            <div class="studio-card-hdr">
+              <div class="studio-card-title">📐 Governing Parameters (${asset.parameters.length})</div>
+              <span class="badge-xs badge-neutral">Spanner FactAssertions</span>
+            </div>
+            <div class="eng-table-wrap" style="margin: 0;">
+              <table class="eng-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Value</th>
+                    <th>Unit</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${asset.parameters
+                    .map(
+                      (p) => `
+                        <tr>
+                          <td><strong>${esc(p.name)}</strong></td>
+                          <td>
+                            <code>${esc(p.value)}</code>
+                            ${p.conflict ? `<span class="badge-xs badge-conflict">⚠️</span>` : ""}
+                          </td>
+                          <td class="mono">${esc(p.unit)}</td>
+                          <td class="mono" style="font-size: 11px;">${esc(p.source)}</td>
+                        </tr>
+                      `
+                    )
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          ${
+            asset.instruments.length > 0
+              ? `
+                <div class="studio-card">
+                  <div class="studio-card-hdr">
+                    <div class="studio-card-title">🎛️ Connected Safety Instruments &amp; Interlocks (${asset.instruments.length})</div>
+                    <span class="badge-xs badge-neutral">MONITORS_OR_TRIPS</span>
+                  </div>
+                  <div class="eng-table-wrap" style="margin: 0;">
+                    <table class="eng-table">
+                      <thead>
+                        <tr>
+                          <th>Tag</th>
+                          <th>Type</th>
+                          <th>Safety / Control Function</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${asset.instruments
+                          .map(
+                            (inst) => `
+                              <tr>
+                                <td><code style="font-weight: 600;">${esc(inst.tag)}</code></td>
+                                <td>${esc(inst.type)}</td>
+                                <td>${esc(inst.function)}</td>
+                              </tr>
+                            `
+                          )
+                          .join("")}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              `
+              : ""
+          }
+        `;
+      }
+
+      /* ======================================================================
+         10. RIGHT STUDIO TAB 3: 768-D VECTOR + FTS HYBRID RRF INSPECTOR
+         ====================================================================== */
+      function renderVectorTab() {
+        const q = state.vectorFilterQuery.trim().toLowerCase();
+        const tokens = q.split(/\s+/).filter((w) => w.length > 2);
+
+        const scoredChunks = VECTOR_CHUNKS.map((c) => {
+          if (!tokens.length) return c;
+          const hay = `${c.concept} ${c.section} ${c.snippet} ${c.tags.join(" ")}`.toLowerCase();
+          let hits = 0;
+          tokens.forEach((tk) => {
+            if (hay.includes(tk)) hits += 1;
+          });
+          const boost = Math.min(0.04, hits * 0.008);
+          return {
+            ...c,
+            vecScore: Math.min(0.985, +(c.vecScore + boost * 0.5).toFixed(3)),
+            ftsScore: Math.min(0.975, +(c.ftsScore + boost).toFixed(3)),
+            rrfScore: +(c.rrfScore + boost * 0.1).toFixed(4),
+          };
+        }).sort((a, b) => b.rrfScore - a.rrfScore);
+
+        dom.vectorContainer.innerHTML = `
+          <div class="studio-card">
+            <div class="studio-card-hdr">
+              <div class="studio-card-title">🧬 Spanner Hybrid Search (768-d Vector + TOKENLIST RRF)</div>
+              <span class="arch-pill">text-embedding-005</span>
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
+              Combines semantic dense vector search (<code>COSINE_DISTANCE</code>) with exact alphanumeric tag matching (<code>SEARCH_SUBSTRING</code>) via Reciprocal Rank Fusion: <code>RRF = 1/(60 + r_vec) + 1/(60 + r_fts)</code>.
+            </p>
+            <div class="vector-search-bar">
+              <input
+                type="search"
+                id="vector-live-input"
+                class="rail-search"
+                value="${esc(state.vectorFilterQuery)}"
+                placeholder="Test live RRF ranking (e.g., RAC 1, PDIS-2622, Titanium, 600 PSIG)..."
+              />
+            </div>
+          </div>
+
+          ${scoredChunks
+            .map(
+              (chk, idx) => `
+                <div class="chunk-card">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 7px; min-width: 0;">
+                      <span class="rac-pill rac-4">#${idx + 1}</span>
+                      <code style="font-weight: 700; font-size: 12px; color: var(--text-primary);">${esc(chk.concept)}</code>
+                    </div>
+                    <span class="mono" style="font-size: 10.5px; color: var(--text-muted);">${esc(chk.pdf)}</span>
+                  </div>
+
+                  <div style="font-size: 11.5px; font-weight: 600; color: var(--brand-primary);">
+                    ${esc(chk.section)}
+                  </div>
+
+                  <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                    ${esc(chk.snippet)}
+                  </div>
+
+                  <div class="score-bars-row">
+                    <div class="score-metric">
+                      <div class="score-metric-top">
+                        <span>Vector Sim</span>
+                        <strong>${chk.vecScore.toFixed(3)}</strong>
+                      </div>
+                      <div class="score-track">
+                        <div class="score-fill-vec" style="width: ${Math.round(chk.vecScore * 100)}%;"></div>
+                      </div>
+                    </div>
+                    <div class="score-metric">
+                      <div class="score-metric-top">
+                        <span>FTS Token</span>
+                        <strong>${chk.ftsScore.toFixed(3)}</strong>
+                      </div>
+                      <div class="score-track">
+                        <div class="score-fill-fts" style="width: ${Math.round(chk.ftsScore * 100)}%;"></div>
+                      </div>
+                    </div>
+                    <div class="score-metric">
+                      <div class="score-metric-top">
+                        <span>RRF Fused</span>
+                        <strong>${chk.rrfScore.toFixed(4)}</strong>
+                      </div>
+                      <div class="score-track">
+                        <div class="score-fill-rrf" style="width: ${Math.min(100, Math.round(chk.rrfScore * 2800))}%;"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `
+            )
+            .join("")}
+        `;
+
+        const vecInput = document.getElementById("vector-live-input");
+        if (vecInput) {
+          vecInput.addEventListener("input", (e) => {
+            state.vectorFilterQuery = e.target.value;
+            const pos = e.target.selectionStart;
+            renderVectorTab();
+            const restored = document.getElementById("vector-live-input");
+            if (restored) {
+              restored.focus();
+              restored.setSelectionRange(pos, pos);
+            }
+          });
+        }
+      }
+
+      /* ======================================================================
+         11. RIGHT STUDIO TAB 4: DATA LINEAGE & SOURCE PDF DOCUMENTS
+         ====================================================================== */
+      function renderLineageTab() {
+        const asset = ASSETS[state.activeAssetId] || ASSETS["RH-E-9A"];
+        const allDocs = Object.values(SOURCE_DOCS);
+        const activeDoc = SOURCE_DOCS[state.selectedDocId] || allDocs[0];
+
+        dom.lineageContainer.innerHTML = `
+          <!-- 4-Stage Visual Provenance Pipeline -->
+          <div class="studio-card">
+            <div class="studio-card-hdr">
+              <div class="studio-card-title">🔗 End-to-End Provenance Pipeline — <code>${esc(asset.id)}</code></div>
+              <span class="badge-xs badge-neutral">OpenLineage Verified</span>
+            </div>
+            <div class="lineage-pipeline">
+              <div class="pipeline-step">
+                <div class="pipeline-step-num">STAGE 01</div>
+                <div class="pipeline-step-title">Raw PDFs (GCS)</div>
+                <div class="pipeline-step-meta">300 DPI 3×2 Vision Tiling + Read-Only Source</div>
+              </div>
+              <div class="pipeline-step">
+                <div class="pipeline-step-num">STAGE 02</div>
+                <div class="pipeline-step-title">OKF v0.2 .md</div>
+                <div class="pipeline-step-meta">Read-Merge-Upsert &amp; ⚠️ Conflict Tagging</div>
+              </div>
+              <div class="pipeline-step">
+                <div class="pipeline-step-num">STAGE 03</div>
+                <div class="pipeline-step-title">Cloud Spanner</div>
+                <div class="pipeline-step-meta">100% .md Deterministic Sync (MD5: ${esc(asset.governance.md5.slice(0, 8))})</div>
+              </div>
+              <div class="pipeline-step">
+                <div class="pipeline-step-num">STAGE 04</div>
+                <div class="pipeline-step-title">Dataplex Catalog</div>
+                <div class="pipeline-step-meta">Human-Reviewed Aspect &amp; Audit Trail</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Source Engineering PDF Registry -->
+          <div class="studio-card">
+            <div class="studio-card-hdr">
+              <div class="studio-card-title">📄 Authoritative Source PDF Registry (Click Row to Preview)</div>
+              <span class="badge-xs badge-neutral">DERIVED_FROM</span>
+            </div>
+            <div class="eng-table-wrap" style="margin: 0;">
+              <table class="eng-table">
+                <thead>
+                  <tr>
+                    <th>Doc Code</th>
+                    <th>Document Type &amp; File</th>
+                    <th>Revision</th>
+                    <th>Role</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${allDocs
+                    .map((doc) => {
+                      const isCited = asset.sources.includes(doc.id);
+                      const isSelected = activeDoc.id === doc.id;
+                      return `
+                        <tr class="doc-preview-row" data-doc-id="${esc(doc.id)}" style="cursor: pointer; ${
+                          isSelected ? "background: var(--brand-primary-soft);" : ""
+                        }">
+                          <td>
+                            <code style="font-weight: 700;">${esc(doc.code)}</code>
+                            ${isCited ? `<div style="font-size: 10px; color: var(--accent-teal); font-weight: 600;">● Cited by ${esc(asset.id)}</div>` : ""}
+                          </td>
+                          <td>
+                            <div style="font-weight: 600; color: var(--text-primary);">${esc(doc.docType)}</div>
+                            <div class="mono" style="font-size: 10.5px; color: var(--text-muted);">${esc(doc.filename)}</div>
+                          </td>
+                          <td class="mono" style="font-size: 11px;">${esc(doc.revision)}</td>
+                          <td>
+                            ${
+                              doc.role === "CONFLICTING"
+                                ? `<span class="badge-xs badge-conflict">⚠️ CONFLICT</span>`
+                                : `<span class="rac-pill rac-4">PRIMARY</span>`
+                            }
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Selected PDF Document Inspector Card -->
+          <div class="studio-card">
+            <div class="studio-card-hdr">
+              <div class="studio-card-title">🔍 Source Document Excerpt — <code>${esc(activeDoc.code)}</code></div>
+              <span class="mono" style="font-size: 11px; color: var(--text-muted);">${esc(activeDoc.pages)}</span>
+            </div>
+            <div class="mono" style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">
+              GCS URI: gs://seabrook-okf-knowledge-vault/${esc(activeDoc.filename)}
+            </div>
+            <div style="padding: 10px 12px; background: var(--bg-elevated); border-radius: var(--radius-xs); border-left: 3px solid var(--brand-primary); font-size: 12px; color: var(--text-secondary);">
+              ${esc(activeDoc.excerpt)}
+            </div>
+          </div>
+        `;
+
+        dom.lineageContainer.querySelectorAll(".doc-preview-row").forEach((row) => {
+          row.addEventListener("click", () => {
+            state.selectedDocId = row.getAttribute("data-doc-id");
+            renderLineageTab();
+          });
+        });
+      }
+
+      /* ======================================================================
+         12. DEMO SCENARIO STRIP, WELCOME SCREEN & 4.5s THINKING EXECUTION
+         ====================================================================== */
+      function renderScenarioStrip() {
+        dom.scenarioPillsWrap.innerHTML = DEMO_SCENARIOS.map(
+          (sc) => `
+            <button
+              type="button"
+              class="scenario-pill ${state.activeScenarioId === sc.id ? "active-scenario" : ""}"
+              id="demo-pill-${esc(sc.id)}"
+              data-scenario-id="${esc(sc.id)}"
+              ${state.isThinking ? "disabled" : ""}
+            >
+              <span class="scenario-num">${esc(sc.num)}</span>
+              <span>${esc(sc.shortLabel)}</span>
+            </button>
+          `
+        ).join("");
+
+        dom.scenarioPillsWrap.querySelectorAll(".scenario-pill").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const scId = btn.getAttribute("data-scenario-id");
+            const sc = DEMO_SCENARIOS.find((s) => s.id === scId);
+            if (sc) executeScenario(sc);
+          });
+        });
+      }
+
+      function renderWelcomeScreen() {
+        dom.chatStream.innerHTML = `
+          <div class="welcome-hero" id="welcome-hero">
+            <div class="welcome-header-box">
+              <div class="welcome-eyebrow">Google ADK • Cloud Spanner Graph-RAG • Dataplex Universal Catalog</div>
+              <h2 class="welcome-title">Ask Engineering, Connectivity, HAZOP &amp; Provenance Questions</h2>
+              <p class="welcome-desc">
+                Select any predefined scenario below (or type a custom question) to experience live <strong>ADK cognitive reasoning</strong>, <strong>multi-tool retrieval telemetry (~4.5s)</strong>, and synchronized visualization across the <strong>Knowledge Graph</strong>, <strong>Catalog</strong>, <strong>768-d Vector RRF</strong>, and <strong>PDF Lineage</strong> studio tabs.
+              </p>
+            </div>
+
+            <div class="demo-grid">
+              ${DEMO_SCENARIOS.map(
+                (sc) => `
+                  <button type="button" class="demo-card" id="welcome-card-${esc(sc.id)}" data-scenario-id="${esc(sc.id)}">
+                    <div class="demo-card-top">
+                      <span class="demo-card-cat">${esc(sc.num)} • ${esc(sc.category)}</span>
+                      <span class="demo-card-target">Focus: ${esc(sc.focusAsset)}</span>
+                    </div>
+                    <div class="demo-card-title">${esc(sc.title)}</div>
+                    <div class="demo-card-prompt">"${esc(sc.question)}"</div>
+                  </button>
+                `
+              ).join("")}
+            </div>
+          </div>
+        `;
+
+        dom.chatStream.querySelectorAll(".demo-card").forEach((card) => {
+          card.addEventListener("click", () => {
+            const scId = card.getAttribute("data-scenario-id");
+            const sc = DEMO_SCENARIOS.find((s) => s.id === scId);
+            if (sc) executeScenario(sc);
+          });
+        });
+      }
+
+      /**
+       * Core 4–5s Simulated Thinking & Tool Call Orchestrator
+       */
+      function executeScenario(scenario, customQuestionText = null) {
+        if (state.isThinking) return;
+        clearActiveTimers();
+
+        state.isThinking = true;
+        state.activeScenarioId = scenario.id;
+        dom.btnSendQuery.disabled = true;
+        renderScenarioStrip();
+
+        // Remove welcome hero on first query
+        const welcome = document.getElementById("welcome-hero");
+        if (welcome) welcome.remove();
+
+        const displayedQuestion = customQuestionText || scenario.question;
+        const totalMs = scenario.durationMs || 4500;
+
+        // 1. Append User Bubble
+        const userEl = document.createElement("div");
+        userEl.className = "msg-user";
+        userEl.innerHTML = `
+          <div class="msg-user-meta">
+            <span>Lead Process Engineer</span>
+            <span>Context: ${esc(scenario.focusAsset)}</span>
+          </div>
+          <div class="msg-user-text">${esc(displayedQuestion)}</div>
+        `;
+        dom.chatStream.appendChild(userEl);
+
+        // 2. Append Agent Turn Wrapper with Live Thinking & Tool Trace Card
+        const turnId = "turn-" + Date.now();
+        const wrapEl = document.createElement("div");
+        wrapEl.className = "msg-agent-wrap";
+        wrapEl.id = turnId;
+
+        wrapEl.innerHTML = `
+          <div class="thinking-card" id="${turnId}-thinking">
+            <div class="thinking-progress-track">
+              <div class="thinking-progress-fill" id="${turnId}-prog"></div>
+            </div>
+            <div class="thinking-header" id="${turnId}-hdr" title="Click to expand/collapse reasoning and ADK tool trace">
+              <div class="thinking-header-left">
+                <span class="spinner-ring" id="${turnId}-icon"></span>
+                <span class="thinking-status-title" id="${turnId}-status">
+                  Model Armor Guardrail &amp; Intent Framing...
+                </span>
+              </div>
+              <div class="thinking-header-right">
+                <span class="thinking-timer" id="${turnId}-timer">0.1s</span>
+                <span class="thinking-chevron">▾</span>
+              </div>
+            </div>
+            <div class="thinking-body" id="${turnId}-body">
+              <div class="thought-bubble" id="${turnId}-thought" style="display: none;">
+                <strong>🧠 Cognitive Plan (gemini-3.8-flash):</strong><br/>
+                <span>${esc(scenario.thought)}</span>
+              </div>
+              <div class="tool-call-list" id="${turnId}-tools">
+                <div class="tool-call-row running" id="${turnId}-guardrail">
+                  <div class="tool-call-main">
+                    <div class="tool-call-title-line">
+                      <span class="tool-fn-name">before_agent_callback (Model Armor)</span>
+                      <span class="tool-engine-tag">Security Hook</span>
+                    </div>
+                    <div class="tool-args-code">Inspecting prompt safety &amp; canonical MECE intent routing</div>
+                  </div>
+                  <div class="tool-call-status" id="${turnId}-guardrail-stat">⏳ Running...</div>
+                </div>
+                ${scenario.tools
+                  .map(
+                    (t, idx) => `
+                      <div class="tool-call-row pending" id="${turnId}-tool-${idx}">
+                        <div class="tool-call-main">
+                          <div class="tool-call-title-line">
+                            <span class="tool-fn-name">🔧 ${esc(t.name)}</span>
+                            <span class="tool-engine-tag">${esc(t.engine)}</span>
+                          </div>
+                          <div class="tool-args-code">${esc(t.args)}</div>
+                        </div>
+                        <div class="tool-call-status" id="${turnId}-tool-stat-${idx}">Queued</div>
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </div>
+          </div>
+          <div id="${turnId}-answer-slot"></div>
+        `;
+
+        dom.chatStream.appendChild(wrapEl);
+        dom.chatStream.scrollTop = dom.chatStream.scrollHeight;
+
+        const cardEl = document.getElementById(`${turnId}-thinking`);
+        const progEl = document.getElementById(`${turnId}-prog`);
+        const iconEl = document.getElementById(`${turnId}-icon`);
+        const statusEl = document.getElementById(`${turnId}-status`);
+        const timerEl = document.getElementById(`${turnId}-timer`);
+        const thoughtEl = document.getElementById(`${turnId}-thought`);
+        const hdrEl = document.getElementById(`${turnId}-hdr`);
+
+        hdrEl.addEventListener("click", () => {
+          cardEl.classList.toggle("collapsed-trace");
+        });
+
+        const startTs = performance.now();
+
+        // Smooth 100ms ticker for progress bar & elapsed time
+        const tickInterval = setInterval(() => {
+          const elapsed = performance.now() - startTs;
+          const pct = Math.min(100, (elapsed / totalMs) * 100);
+          if (progEl) progEl.style.width = `${pct.toFixed(1)}%`;
+          if (timerEl) timerEl.textContent = `${(Math.min(elapsed, totalMs) / 1000).toFixed(1)}s`;
+          if (elapsed >= totalMs) {
+            clearInterval(tickInterval);
+          }
+        }, 90);
+        state.timers.push(tickInterval);
+
+        // Step A (380ms): Complete Model Armor & reveal Cognitive Reasoning Thought
+        state.timers.push(
+          setTimeout(() => {
+            const grRow = document.getElementById(`${turnId}-guardrail`);
+            const grStat = document.getElementById(`${turnId}-guardrail-stat`);
+            if (grRow) {
+              grRow.classList.remove("running");
+              grRow.classList.add("done");
+            }
+            if (grStat) grStat.textContent = "✓ 142 ms • Safe";
+            if (thoughtEl) thoughtEl.style.display = "block";
+            if (statusEl) statusEl.textContent = "Thinking & Planning Spanner Tool Trajectory...";
+            dom.chatStream.scrollTop = dom.chatStream.scrollHeight;
+          }, 380)
+        );
+
+        // Step B: Trigger each ADK FunctionTool sequentially across the 4.5s window
+        scenario.tools.forEach((tool, idx) => {
+          state.timers.push(
+            setTimeout(() => {
+              const row = document.getElementById(`${turnId}-tool-${idx}`);
+              const stat = document.getElementById(`${turnId}-tool-stat-${idx}`);
+              if (row) {
+                row.classList.remove("pending");
+                row.classList.add("running");
+              }
+              if (stat) stat.textContent = "⏳ Querying...";
+              if (statusEl) statusEl.textContent = `Calling ${tool.name} (${tool.engine})...`;
+              dom.chatStream.scrollTop = dom.chatStream.scrollHeight;
+            }, tool.startMs)
+          );
+
+          state.timers.push(
+            setTimeout(() => {
+              const row = document.getElementById(`${turnId}-tool-${idx}`);
+              const stat = document.getElementById(`${turnId}-tool-stat-${idx}`);
+              const dur = tool.endMs - tool.startMs;
+              if (row) {
+                row.classList.remove("running");
+                row.classList.add("done");
+              }
+              if (stat) stat.textContent = `✓ ${dur} ms • ${tool.resultSummary}`;
+              if (idx === scenario.tools.length - 1 && statusEl) {
+                statusEl.textContent = "Synthesizing Grounded Engineering Response...";
+              }
+            }, tool.endMs)
+          );
+        });
+
+        // Step C (totalMs ~4.5s): Finalize Thinking Card, Sync Right Studio & Render Answer
+        state.timers.push(
+          setTimeout(() => {
+            clearInterval(tickInterval);
+            if (progEl) progEl.style.width = "100%";
+            if (cardEl) cardEl.classList.add("completed");
+            if (iconEl) {
+              iconEl.outerHTML = `<span class="done-check-icon">✓</span>`;
+            }
+            const secStr = (totalMs / 1000).toFixed(2);
+            if (statusEl) {
+              statusEl.textContent = `Reasoning & ${scenario.tools.length} ADK Tool Calls Completed (${
+                scenario.tools.map((t) => t.name).join(", ")
+              })`;
+            }
+            if (timerEl) timerEl.textContent = `${secStr}s`;
+
+            // Sync Right Context Studio to matching Asset, Graph Overlay & Tab
+            if (scenario.id === "q3-hazop") {
+              state.vectorFilterQuery = "Risk Assessment Matrix Severity I-IV RAC 1-4 RH-E-9A Safeguards";
+            } else if (scenario.id === "q6-vector") {
+              state.vectorFilterQuery = "PDIS-2622 F-33 differential pressure fouling tube plugging 40%";
+            }
+            setGraphMode(scenario.graphMode || "topology");
+            selectAsset(scenario.focusAsset, scenario.targetStudioTab);
+
+            // Render Answer HTML
+            const slotEl = document.getElementById(`${turnId}-answer-slot`);
+            if (slotEl) {
+              slotEl.innerHTML = `<div class="answer-card">${scenario.renderAnswerHtml()}</div>`;
+              slotEl.querySelectorAll("[data-jump-tab]").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                  setStudioTab(btn.getAttribute("data-jump-tab"));
+                });
+              });
+            }
+
+            state.isThinking = false;
+            dom.btnSendQuery.disabled = false;
+            renderScenarioStrip();
+            dom.chatStream.scrollTop = dom.chatStream.scrollHeight;
+          }, totalMs)
+        );
+      }
+
+      /**
+       * Free-Form Custom Question Router (maps any typed question to grounded data)
+       */
+      function handleCustomQuestion(rawText) {
+        const lower = rawText.toLowerCase();
+
+        // Match closest scenario or synthesize dynamic equipment lookup
+        if (lower.includes("hazop") || lower.includes("risk") || lower.includes("rac") || lower.includes("safeguard")) {
+          executeScenario(DEMO_SCENARIOS[2], rawText);
+          return;
+        }
+        if (lower.includes("blast") || lower.includes("fail") || lower.includes("trip") || lower.includes("impact")) {
+          executeScenario(DEMO_SCENARIOS[3], rawText);
+          return;
+        }
+        if (lower.includes("upstream") || lower.includes("downstream") || lower.includes("connect") || lower.includes("trace") || lower.includes("hop")) {
+          executeScenario(DEMO_SCENARIOS[1], rawText);
+          return;
+        }
+        if (lower.includes("lineage") || lower.includes("source") || lower.includes("pdf") || lower.includes("conflict") || lower.includes("provenance")) {
+          executeScenario(DEMO_SCENARIOS[4], rawText);
+          return;
+        }
+        if (lower.includes("foul") || lower.includes("manual") || lower.includes("f-33") || lower.includes("pdis") || lower.includes("vector")) {
+          executeScenario(DEMO_SCENARIOS[5], rawText);
+          return;
+        }
+
+        // Check if a specific asset tag was mentioned; otherwise use activeAssetId
+        let targetId = state.activeAssetId;
+        Object.keys(ASSETS).forEach((k) => {
+          if (lower.includes(k.toLowerCase())) targetId = k;
+        });
+
+        const asset = ASSETS[targetId] || ASSETS["RH-E-9A"];
+        const dynamicScenario = {
+          id: "custom-query",
+          focusAsset: asset.id,
+          targetStudioTab: "catalog",
+          graphMode: "topology",
+          durationMs: 4400,
+          thought: `Analyzing custom engineering query against active context (${asset.id}). Executing Spanner SQL entity parameter lookup and Hybrid Vector + TOKENLIST RRF search to synthesize a 100% grounded answer.`,
+          tools: [
+            {
+              name: "lookup_entity_and_parameters",
+              engine: "Spanner SQL",
+              args: `entity_tag_or_id="${asset.id}"`,
+              startMs: 420,
+              endMs: 2100,
+              resultSummary: `${asset.parameters.length} governing facts retrieved`,
+            },
+            {
+              name: "hybrid_search_okf_spanner",
+              engine: "Vector 768-d + RRF",
+              args: `query="${rawText.slice(0, 52)}", top_k=5`,
+              startMs: 2100,
+              endMs: 4050,
+              resultSummary: "5 OKF section chunks ranked via RRF (k=60)",
+            },
+          ],
+          renderAnswerHtml: () => `
+            <div class="answer-top-bar">
+              <div class="answer-title-cluster">
+                <span class="answer-badge">✓ Grounded Spanner Synthesis</span>
+                <span class="badge-xs badge-neutral">Entity: ${esc(asset.id)}</span>
+              </div>
+              <button type="button" class="studio-jump-btn" data-jump-tab="catalog">
+                🏛️ Open ${esc(asset.id)} in Catalog →
+              </button>
+            </div>
+            <div class="ans-body">
+              <h3>Grounded Retrieval Summary — <code>${esc(asset.id)}</code> (${esc(asset.name)})</h3>
+              <p>${esc(asset.summary)}</p>
+              <div class="eng-table-wrap">
+                <table class="eng-table">
+                  <thead>
+                    <tr><th>Parameter</th><th>Value</th><th>Unit</th><th>Source</th></tr>
+                  </thead>
+                  <tbody>
+                    ${asset.parameters
+                      .slice(0, 6)
+                      .map(
+                        (p) => `
+                          <tr>
+                            <td><strong>${esc(p.name)}</strong></td>
+                            <td><code>${esc(p.value)}</code></td>
+                            <td class="mono">${esc(p.unit)}</td>
+                            <td class="mono">${esc(p.source)}</td>
+                          </tr>
+                        `
+                      )
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted);">
+                Verified by <strong>${esc(asset.governance.approver)}</strong> • Bundle <code>${esc(asset.governance.bundleVersion)}</code> (MD5 <code>${esc(asset.governance.md5)}</code>).
+              </p>
+            </div>
+          `,
+        };
+
+        executeScenario(dynamicScenario, rawText);
+      }
+
+      /* ======================================================================
+         13. INTERACTIVE BINDINGS & INITIALIZATION
+         ====================================================================== */
+      function bindEvents() {
+        // Collapsible Left Rail
+        dom.btnToggleSidebar.addEventListener("click", () => {
+          state.sidebarCollapsed = !state.sidebarCollapsed;
+          dom.assetRail.classList.toggle("collapsed", state.sidebarCollapsed);
+        });
+
+        // Theme Toggle
+        dom.btnThemeToggle.addEventListener("click", () => {
+          setTheme(state.theme === "dark" ? "light" : "dark");
+        });
+
+        // Reset Demo
+        dom.btnResetDemo.addEventListener("click", () => {
+          clearActiveTimers();
+          state.isThinking = false;
+          state.activeScenarioId = null;
+          dom.btnSendQuery.disabled = false;
+          setGraphMode("topology");
+          selectAsset("RH-E-9A", "graph");
+          renderScenarioStrip();
+          renderWelcomeScreen();
+        });
+
+        // Rail Search & Mode Tabs
+        dom.railSearchInput.addEventListener("input", (e) => {
+          state.railSearch = e.target.value || "";
+          renderAssetRail();
+        });
+
+        document.querySelectorAll("[data-rail-mode]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            document.querySelectorAll("[data-rail-mode]").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            state.railMode = btn.getAttribute("data-rail-mode");
+            renderAssetRail();
+          });
+        });
+
+        // Right Studio Tabs
+        document.querySelectorAll(".studio-tab").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            setStudioTab(btn.getAttribute("data-studio-tab"));
+          });
+        });
+
+        // Graph Hop Depth
+        document.querySelectorAll("[data-hop]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            document.querySelectorAll("[data-hop]").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            state.graphHops = parseInt(btn.getAttribute("data-hop"), 10);
+            renderGraph();
+          });
+        });
+
+        // Graph Visualization Overlay Mode
+        document.querySelectorAll("[data-gmode]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            setGraphMode(btn.getAttribute("data-gmode"));
+          });
+        });
+
+        // Graph Edge Filters
+        document.querySelectorAll(".edge-filter-cb").forEach((cb) => {
+          cb.addEventListener("change", () => {
+            if (cb.checked) state.enabledEdges.add(cb.value);
+            else state.enabledEdges.delete(cb.value);
+            renderGraph();
+          });
+        });
+
+        // Graph Zoom & Pan
+        document.getElementById("btn-zoom-in").addEventListener("click", () => {
+          state.zoom = Math.min(2.0, +(state.zoom + 0.18).toFixed(2));
+          renderGraph();
+        });
+        document.getElementById("btn-zoom-out").addEventListener("click", () => {
+          state.zoom = Math.max(0.6, +(state.zoom - 0.18).toFixed(2));
+          renderGraph();
+        });
+        document.getElementById("btn-zoom-reset").addEventListener("click", () => {
+          state.zoom = 1.0;
+          state.panX = 0;
+          state.panY = 0;
+          renderGraph();
+        });
+
+        dom.graphStage.addEventListener("mousedown", (e) => {
+          if (e.target.closest("button") || e.target.closest(".graph-inspector-dock")) return;
+          state.isPanning = true;
+          state.panStartX = e.clientX - state.panX;
+          state.panStartY = e.clientY - state.panY;
+        });
+        window.addEventListener("mousemove", (e) => {
+          if (!state.isPanning) return;
+          state.panX = e.clientX - state.panStartX;
+          state.panY = e.clientY - state.panStartY;
+          dom.graphViewport.setAttribute(
+            "transform",
+            `translate(${state.panX}, ${state.panY}) scale(${state.zoom})`
+          );
+        });
+        window.addEventListener("mouseup", () => {
+          state.isPanning = false;
+        });
+
+        // Chat Form Submit & Enter Shortcut
+        dom.chatForm.addEventListener("submit", (e) => {
+          e.preventDefault();
+          const text = dom.chatInput.value.trim();
+          if (!text || state.isThinking) return;
+          dom.chatInput.value = "";
+          handleCustomQuestion(text);
+        });
+
+        dom.chatInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            dom.chatForm.requestSubmit();
+          }
+        });
+      }
+
+      function init() {
+        bindEvents();
+        setTheme("light");
+        selectAsset("RH-E-9A", "graph");
+        renderScenarioStrip();
+        renderWelcomeScreen();
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>

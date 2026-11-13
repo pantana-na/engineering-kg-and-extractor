@@ -21,6 +21,9 @@ This repository maintains a strict boundary between specification documents and 
   - [Interactive Standalone Data Ingestion Diagram (`docs/data-ingestion-architecture.html`)](./data-ingestion-architecture.html)
   - [Multi-Source OKF Extraction Step-by-Step Architecture (`docs/multi-source-extraction-architecture.md`)](./multi-source-extraction-architecture.md)
   - [Interactive Standalone Multi-Source Diagram Asset (`docs/multi-source-extraction-architecture.html`)](./multi-source-extraction-architecture.html)
+  - [OKF Query Agent Demo Mockup Baseline Specification (`docs/okf-query-agent-mockup-spec.md`)](./okf-query-agent-mockup-spec.md)
+  - [OKF Query Agent Interactive Single-File Demo Mockup UI (`docs/okf-query-agent-mockup.html`)](./okf-query-agent-mockup.html)
+  - [OKF Query Agent 5–7 Minute Executive Demo Script & Talking Points (`docs/okf-query-agent-demo-script.md`)](./okf-query-agent-demo-script.md)
 
 ### 2. Static Security & SAST Audit Reports ([`codemender`](../_agents/skills/codemender/SKILL.md))
 - **Vulnerability Discovery Report:** `docs/codemender-01-vulnerability-scan-report.md` (`cm find`)
