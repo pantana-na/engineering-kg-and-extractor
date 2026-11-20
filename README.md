@@ -366,7 +366,7 @@ for f in unified_web/static/js/*.js; do node --check "$f"; done
 .venv/bin/bandit -r extracter_agent/ query_agent/ unified_web/ -q
 
 # 4. Run live ADK evaluations against Vertex AI Agent Runtime
-bash scripts/run_dual_evals_v5.sh
+PYTHONPATH=. .venv/bin/python evals/run_live_vertex_eval.py --dataset file-by-file --use-agent-runtime
 bash scripts/run_query_agent_eval_live.sh
 ```
 
