@@ -550,13 +550,17 @@ def test_multimodal_streaming_with_hydrogen_fallback_and_1page_pid_window(
 
     from extracter_agent.pdf import processor as proc
 
-    # 1. Streaming vision fails on primary gemini-4-carbon (504) -> cleanly falls back to gemini-4-hydrogen
+    # 1. Streaming vision fails on primary gemini-4-carbon (504) -> cleanly falls back to gemini-4-hydrogen with thinking_level=LOW only on fallback
+    from google.genai import types as genai_types
+
     called_models: list[str] = []
+    captured_configs: list[Any] = []
     progress_events: list[dict[str, Any]] = []
 
     class _FakeModels:
         def generate_content_stream(self, *, model: str, contents: Any, config: Any) -> Any:
             called_models.append(model)
+            captured_configs.append(config)
             if model == "gemini-4-carbon":
                 raise RuntimeError("504 DEADLINE_EXCEEDED")
             return iter(
@@ -572,6 +576,7 @@ def test_multimodal_streaming_with_hydrogen_fallback_and_1page_pid_window(
 
     monkeypatch.setattr(genai_mod, "Client", _FakeClient)
     fake_cfg = SimpleNamespace(google_cloud_project="test-proj", gemini_location="global")
+    primary_cfg = genai_types.GenerateContentConfig(max_output_tokens=65536, temperature=0.0)
 
     with proc.multimodal_execution_context(
         model_name="gemini-4-carbon",
@@ -580,13 +585,17 @@ def test_multimodal_streaming_with_hydrogen_fallback_and_1page_pid_window(
         text_out, model_used, used_fb = proc._invoke_multimodal_streaming_with_fallback(
             primary_model="gemini-4-carbon",
             contents=["dummy-part", "prompt"],
-            gen_cfg=None,
+            gen_cfg=primary_cfg,
             cfg=fake_cfg,
             label="ML101620329-part-2_p1-1",
             step_id="vision-p1",
         )
 
     assert called_models == ["gemini-4-carbon", "gemini-4-hydrogen"]
+    assert captured_configs[0].thinking_config is None
+    assert captured_configs[1].thinking_config is not None
+    assert str(captured_configs[1].thinking_config.thinking_level).endswith("LOW")
+    assert primary_cfg.thinking_config is None  # original primary config must not be mutated
     assert model_used == "gemini-4-hydrogen"
     assert used_fb is True
     assert "V-101" in text_out

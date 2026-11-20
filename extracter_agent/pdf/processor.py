@@ -566,6 +566,23 @@ def extract_image_multimodal_summary(
 
 
 VISION_FALLBACK_MODEL: str = "gemini-4-hydrogen"
+VISION_FALLBACK_THINKING_LEVEL: str = "LOW"
+
+
+def _build_fallback_gen_config(gen_cfg: Any, thinking_level: str) -> Any:
+    """Return a copy of GenerateContentConfig with bounded thinking_level for fast fallback vision streaming."""
+    from google.genai import types
+
+    tc = types.ThinkingConfig(thinking_level=thinking_level)
+    if gen_cfg is None:
+        return types.GenerateContentConfig(thinking_config=tc)
+    if hasattr(gen_cfg, "model_copy"):
+        return gen_cfg.model_copy(update={"thinking_config": tc})
+    return types.GenerateContentConfig(
+        max_output_tokens=getattr(gen_cfg, "max_output_tokens", 65536),
+        temperature=getattr(gen_cfg, "temperature", 0.0),
+        thinking_config=tc,
+    )
 
 
 def _invoke_multimodal_streaming_with_fallback(
@@ -579,8 +596,9 @@ def _invoke_multimodal_streaming_with_fallback(
 ) -> tuple[str, str, bool]:
     """Stream multimodal vision response with single-layer HTTP retries and automatic failover to gemini-4-hydrogen.
 
-    Eliminates 180s non-streaming reverse-proxy 504 DEADLINE_EXCEEDED errors and 12x nested retry loops
-    while preserving WAF Pillar 3 graceful degradation to a faster Gemini 4 model on persistent timeouts.
+    Primary model runs with full default thinking untouched. Only the fallback pass applies a bounded
+    `ThinkingConfig(thinking_level="LOW")` (verified for Gemini 4) to slash Time-To-First-Byte well
+    below Vertex AI's server-side 504 deadline.
     """
     from google import genai
     from google.genai import types
@@ -598,31 +616,45 @@ def _invoke_multimodal_streaming_with_fallback(
         os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() in ("true", "1")
         or os.getenv("GOOGLE_GENAI_USE_ENTERPRISE", "").lower() in ("true", "1")
     )
+    fallback_level = (
+        os.getenv("VISION_FALLBACK_THINKING_LEVEL", VISION_FALLBACK_THINKING_LEVEL)
+        .strip()
+        .upper()
+        or VISION_FALLBACK_THINKING_LEVEL
+    )
 
-    candidate_models: list[str] = [primary_model]
-    if primary_model != VISION_FALLBACK_MODEL:
-        candidate_models.append(VISION_FALLBACK_MODEL)
+    # (model_name, is_fallback_pass)
+    candidate_passes: list[tuple[str, bool]] = [(primary_model, False)]
+    candidate_passes.append((VISION_FALLBACK_MODEL, True))
 
     last_err: Exception | None = None
-    for idx, model_name in enumerate(candidate_models):
-        used_fallback = idx > 0
+    for model_name, used_fallback in candidate_passes:
+        effective_cfg = (
+            _build_fallback_gen_config(gen_cfg, fallback_level)
+            if used_fallback
+            else gen_cfg
+        )
         if used_fallback:
             logging.getLogger(__name__).warning(
-                "Vision model %s failed on %s (%s); falling back to %s",
+                "Vision model %s failed on %s (%s); falling back to %s (thinking_level=%s)",
                 primary_model,
                 label,
                 last_err,
                 model_name,
+                fallback_level,
             )
             if step_id:
                 _emit_pdf_progress(
                     {
                         "step_id": step_id,
                         "phase": "VISION // FALLBACK",
-                        "title": f"{label} ({primary_model} -> {model_name})",
+                        "title": f"{label} ({primary_model} -> {model_name} [{fallback_level}])",
                         "status": "RUNNING",
                         "duration_ms": None,
-                        "detail": f"Primary model timed out/failed ({str(last_err)[:100]}); retrying with {model_name}...",
+                        "detail": (
+                            f"Primary model timed out/failed ({str(last_err)[:90]}); "
+                            f"retrying with {model_name} (thinking_level={fallback_level})..."
+                        ),
                     }
                 )
         try:
@@ -642,7 +674,7 @@ def _invoke_multimodal_streaming_with_fallback(
                 for chunk in stream_fn(
                     model=model_name,
                     contents=contents,
-                    config=gen_cfg,
+                    config=effective_cfg,
                 ):
                     txt = getattr(chunk, "text", None)
                     if txt:
@@ -652,7 +684,7 @@ def _invoke_multimodal_streaming_with_fallback(
                 resp = client.models.generate_content(
                     model=model_name,
                     contents=contents,
-                    config=gen_cfg,
+                    config=effective_cfg,
                 )
                 text_out = resp.text or ""
             return text_out, model_name, used_fallback
