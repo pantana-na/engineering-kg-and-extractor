@@ -1548,47 +1548,49 @@ class SpannerGraphRepository:
         vec_ranks: dict[str, tuple[int, float, dict[str, Any]]] = {}
         fts_ranks: dict[str, tuple[int, dict[str, Any]]] = {}
 
-        with db.snapshot(multi_use=True) as snap:
-            # 1. Dense Vector Search: prefer native Spanner ML.PREDICT + ANN APPROX_COSINE_DISTANCE
-            native_ann_ok = False
-            if self.native_embedding_mode == "native_ml_predict":
-                sql_native_ann = f"""
-                    WITH q AS (
-                        SELECT ARRAY(
-                            SELECT CAST(v AS FLOAT32)
-                            FROM UNNEST(embeddings.values) AS v WITH OFFSET pos
-                            ORDER BY pos
-                        ) AS qvec
-                        FROM ML.PREDICT(
-                            MODEL {self.embedding_model_name},
-                            (SELECT @query_text AS content)
-                        )
+        # 1. Dense Vector Search: prefer native Spanner ML.PREDICT + ANN APPROX_COSINE_DISTANCE.
+        # IMPORTANT: Always use isolated fresh `db.snapshot()` contexts per stage so an ANN/ML.PREDICT
+        # error can never poison an inline-begin `multi_use=True` snapshot used by the fallback query.
+        native_ann_ok = False
+        if self.native_embedding_mode == "native_ml_predict":
+            sql_native_ann = f"""
+                WITH q AS (
+                    SELECT ARRAY(
+                        SELECT CAST(v AS FLOAT32)
+                        FROM UNNEST(embeddings.values) AS v WITH OFFSET pos
+                        ORDER BY pos
+                    ) AS qvec
+                    FROM ML.PREDICT(
+                        MODEL {self.embedding_model_name},
+                        (SELECT @query_text AS content)
                     )
-                    SELECT
-                        s.chunk_id,
-                        s.concept_id,
-                        c.name,
-                        s.category,
-                        s.unit,
-                        s.section_heading,
-                        s.header_preserved_markdown,
-                        s.has_conflict,
-                        APPROX_COSINE_DISTANCE(
-                            s.embedding,
-                            q.qvec,
-                            OPTIONS => '{{"num_leaves_to_search": 50}}'
-                        ) AS cosine_dist
-                    FROM OkfSectionChunks s
-                    CROSS JOIN q
-                    JOIN OkfConcepts c ON s.concept_id = c.concept_id
-                    WHERE s.embedding IS NOT NULL
-                      AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
-                    ORDER BY cosine_dist ASC
-                    LIMIT 30
-                """
-                try:
+                )
+                SELECT
+                    s.chunk_id,
+                    s.concept_id,
+                    c.name,
+                    s.category,
+                    s.unit,
+                    s.section_heading,
+                    s.header_preserved_markdown,
+                    s.has_conflict,
+                    APPROX_COSINE_DISTANCE(
+                        s.embedding,
+                        q.qvec,
+                        OPTIONS => JSON '{{"num_leaves_to_search": 50}}'
+                    ) AS cosine_dist
+                FROM OkfSectionChunks@{{FORCE_INDEX=idx_okf_chunks_vec}} s
+                CROSS JOIN q
+                JOIN OkfConcepts c ON s.concept_id = c.concept_id
+                WHERE s.embedding IS NOT NULL
+                  AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
+                ORDER BY cosine_dist ASC
+                LIMIT 30
+            """
+            try:
+                with db.snapshot() as snap_ann:
                     for rank_idx, row in enumerate(
-                        snap.execute_sql(
+                        snap_ann.execute_sql(
                             sql_native_ann,
                             params={
                                 "query_text": query[:3500],
@@ -1614,37 +1616,38 @@ class SpannerGraphRepository:
                             "has_conflict": bool(row[7]),
                         }
                         vec_ranks[row[0]] = (rank_idx, sim, meta)
-                    native_ann_ok = True
-                    self.last_vector_search_mode = "NATIVE_ML_PREDICT_ANN"
-                except Exception as exc:
-                    logger.warning(
-                        "Spanner native ML.PREDICT/ANN vector search fallback to exact COSINE_DISTANCE: %s",
-                        exc,
-                    )
-                    vec_ranks.clear()
+                native_ann_ok = True
+                self.last_vector_search_mode = "NATIVE_ML_PREDICT_ANN"
+            except Exception as exc:
+                logger.warning(
+                    "Spanner native ML.PREDICT/ANN vector search fallback to exact COSINE_DISTANCE: %s",
+                    exc,
+                )
+                vec_ranks.clear()
 
-            if not native_ann_ok:
-                query_vec = self.embed_query(query)
-                sql_vec = """
-                    SELECT
-                        s.chunk_id,
-                        s.concept_id,
-                        c.name,
-                        s.category,
-                        s.unit,
-                        s.section_heading,
-                        s.header_preserved_markdown,
-                        s.has_conflict,
-                        COSINE_DISTANCE(s.embedding, @qvec) AS cosine_dist
-                    FROM OkfSectionChunks s
-                    JOIN OkfConcepts c ON s.concept_id = c.concept_id
-                    WHERE s.embedding IS NOT NULL
-                      AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
-                    ORDER BY cosine_dist ASC
-                    LIMIT 30
-                """
+        if not native_ann_ok:
+            query_vec = self.embed_query(query)
+            sql_vec = """
+                SELECT
+                    s.chunk_id,
+                    s.concept_id,
+                    c.name,
+                    s.category,
+                    s.unit,
+                    s.section_heading,
+                    s.header_preserved_markdown,
+                    s.has_conflict,
+                    COSINE_DISTANCE(s.embedding, @qvec) AS cosine_dist
+                FROM OkfSectionChunks s
+                JOIN OkfConcepts c ON s.concept_id = c.concept_id
+                WHERE s.embedding IS NOT NULL
+                  AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
+                ORDER BY cosine_dist ASC
+                LIMIT 30
+            """
+            with db.snapshot() as snap_vec:
                 for rank_idx, row in enumerate(
-                    snap.execute_sql(
+                    snap_vec.execute_sql(
                         sql_vec,
                         params={
                             "qvec": query_vec,
@@ -1670,34 +1673,35 @@ class SpannerGraphRepository:
                         "has_conflict": bool(row[7]),
                     }
                     vec_ranks[row[0]] = (rank_idx, sim, meta)
-                self.last_vector_search_mode = "EXACT_COSINE_FALLBACK"
+            self.last_vector_search_mode = "EXACT_COSINE_FALLBACK"
 
-            # 2. Full-Text Search (SEARCH on ChunkTokens)
-            sql_fts = """
-                SELECT
-                    s.chunk_id,
-                    s.concept_id,
-                    c.name,
-                    s.category,
-                    s.unit,
-                    s.section_heading,
-                    s.header_preserved_markdown,
-                    s.has_conflict,
-                    SCORE(s.ChunkTokens, @fts_query) AS fts_score
-                FROM OkfSectionChunks s
-                JOIN OkfConcepts c ON s.concept_id = c.concept_id
-                WHERE SEARCH(s.ChunkTokens, @fts_query)
-                  AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
-                ORDER BY fts_score DESC
-                LIMIT 30
-            """
-            try:
+        # 2. Full-Text Search (SEARCH on ChunkTokens) on its own isolated snapshot
+        sql_fts = """
+            SELECT
+                s.chunk_id,
+                s.concept_id,
+                c.name,
+                s.category,
+                s.unit,
+                s.section_heading,
+                s.header_preserved_markdown,
+                s.has_conflict,
+                SCORE(s.ChunkTokens, @fts_query) AS fts_score
+            FROM OkfSectionChunks s
+            JOIN OkfConcepts c ON s.concept_id = c.concept_id
+            WHERE SEARCH(s.ChunkTokens, @fts_query)
+              AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
+            ORDER BY fts_score DESC
+            LIMIT 30
+        """
+        try:
+            with db.snapshot() as snap_fts:
                 for rank_idx, row in enumerate(
-                    snap.execute_sql(
+                    snap_fts.execute_sql(
                         sql_fts,
                         params={
                             "fts_query": fts_query,
-                            "domain_filter": (domain_filter or "").strip(),
+                            "domain_filter": clean_domain,
                         },
                         param_types={
                             "fts_query": param_types.STRING,
@@ -1717,8 +1721,8 @@ class SpannerGraphRepository:
                         "has_conflict": bool(row[7]),
                     }
                     fts_ranks[row[0]] = (rank_idx, meta)
-            except Exception as exc:
-                logger.debug("FTS fallback notice: %s", exc)
+        except Exception as exc:
+            logger.debug("FTS fallback notice: %s", exc)
 
         # Reciprocal Rank Fusion (k = 60)
         all_chunk_ids = set(vec_ranks.keys()) | set(fts_ranks.keys())

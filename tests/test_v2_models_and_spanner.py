@@ -280,6 +280,68 @@ def test_spanner_ddl_v2_native_embedding_and_indexes() -> None:
     assert res["ddl_count"] == 11
 
 
+def test_hybrid_rrf_search_uses_json_options_and_isolated_snapshots_on_ann_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test (Rule 13 RCA #11): verify JSON OPTIONS syntax and isolated snapshots preventing poisoned transaction-begin timeouts."""
+    repo = SpannerGraphRepository(
+        project_id="engineering-kg-demo",
+        instance_id="okf-knowledge-spanner",
+        database_id="okf_knowledge_graph",
+        use_in_memory=False,
+    )
+    repo.native_embedding_mode = "native_ml_predict"
+    monkeypatch.setattr(repo, "embed_query", lambda q: [0.1] * 768)
+
+    snapshot_instances: list[int] = []
+    executed_sqls: list[str] = []
+
+    class _FakeSnapshot:
+        def __init__(self, snap_id: int) -> None:
+            self.snap_id = snap_id
+            self.poisoned = False
+
+        def __enter__(self) -> "_FakeSnapshot":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+            return False
+
+        def execute_sql(self, sql: str, params: Any = None, param_types: Any = None) -> list[tuple[Any, ...]]:
+            if self.poisoned:
+                raise ValueError("Timed out waiting for transaction to begin.")
+            executed_sqls.append(sql)
+            if "APPROX_COSINE_DISTANCE" in sql:
+                self.poisoned = True
+                raise RuntimeError("400 ANN index building")
+            if "COSINE_DISTANCE" in sql:
+                return [
+                    ("chunk-1", "equipment/S-2B", "Tank S-2B", "equipment", "U1", "Design", "MAWP 10 barg", False, 0.12)
+                ]
+            if "SEARCH(s.ChunkTokens" in sql:
+                return [
+                    ("chunk-1", "equipment/S-2B", "Tank S-2B", "equipment", "U1", "Design", "MAWP 10 barg", False, 4.5)
+                ]
+            return []
+
+    class _FakeDatabase:
+        def snapshot(self, multi_use: bool = False) -> _FakeSnapshot:
+            assert multi_use is False, "Each hybrid_rrf_search stage must open an isolated fresh snapshot"
+            sid = len(snapshot_instances) + 1
+            snapshot_instances.append(sid)
+            return _FakeSnapshot(sid)
+
+    monkeypatch.setattr(repo, "_get_database", lambda: _FakeDatabase())
+
+    hits = repo.hybrid_rrf_search("S-2B conflict lineage", top_k=5)
+    assert len(hits) == 1
+    assert hits[0].concept_id == "equipment/S-2B"
+    assert repo.last_vector_search_mode == "EXACT_COSINE_FALLBACK"
+    assert len(snapshot_instances) == 3  # 1: ANN attempt, 2: exact COSINE fallback, 3: FTS SEARCH
+    assert "OPTIONS => JSON '{\"num_leaves_to_search\": 50}'" in executed_sqls[0]
+    assert "FORCE_INDEX=idx_okf_chunks_vec" in executed_sqls[0]
+
+
 def test_spanner_lazy_hierarchy_summary_and_paginated_items() -> None:
     repo = SpannerGraphRepository(use_in_memory=True)
     for i in range(1, 26):
