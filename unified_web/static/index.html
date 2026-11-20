@@ -103,6 +103,10 @@
               <button id="btn-interactive-extract-sync" class="wb-btn wb-btn-secondary" title="Choose Spanner sync mode and extract the selected document with live tool/latency streaming">
                 Extract + Sync (Interactive)
               </button>
+
+              <button id="btn-open-upload-modal" class="wb-btn wb-btn-ghost" title="Upload a raw engineering document directly to GCS">
+                &#x21ea; Upload Doc
+              </button>
             </div>
 
             <div class="wb-action-group">
@@ -110,6 +114,17 @@
                 Assistant
               </button>
             </div>
+          </div>
+
+          <!-- Prominent Live Interactive Extraction Running Banner (Locks Competing UI Actions) -->
+          <div id="ext-running-banner" class="wb-running-banner hidden" role="status" aria-live="polite">
+            <div class="wb-running-banner-left">
+              <span class="wb-status-dot running"></span>
+              <span id="ext-running-banner-text">Interactive extraction running...</span>
+            </div>
+            <button id="btn-banner-open-assistant" class="wb-btn wb-btn-secondary wb-btn-sm" type="button">
+              View Progress
+            </button>
           </div>
 
           <!-- Center Viewer + Collapsible Assistant Drawer -->
@@ -158,11 +173,8 @@
               <form id="ext-chat-form" class="wb-chat-form">
                 <textarea id="ext-chat-input" class="wb-textarea" rows="2" placeholder="Extract equipment specs or audit log.md..."></textarea>
                 <div class="wb-chat-form-foot">
-                  <label class="wb-check">
-                    <input type="checkbox" id="ext-live-llm-toggle" checked />
-                    <span>Invoke Vertex LLM</span>
-                  </label>
-                  <button type="submit" class="wb-btn wb-btn-primary wb-btn-sm">Send</button>
+                  <span class="wb-muted wb-xs">Vertex AI Gemini 4 active</span>
+                  <button type="submit" id="btn-ext-chat-send" class="wb-btn wb-btn-primary wb-btn-sm">Send</button>
                 </div>
               </form>
             </aside>
@@ -257,7 +269,7 @@
 
           <div id="insp-pane-catalog" class="wb-inspector-body">
             <div id="catalog-content" class="wb-dossier">
-              <div class="wb-empty">Loading Dataplex Universal Catalog governance metadata...</div>
+              <div class="wb-empty">Select an equipment, instrument, or graph node to inspect Cloud Spanner governance &amp; Dataplex catalog lineage.</div>
             </div>
           </div>
         </aside>
@@ -339,6 +351,49 @@
           </button>
         </div>
       </details>
+    </div>
+
+    <!-- Raw Engineering Document Upload to GCS Modal -->
+    <div id="upload-raw-backdrop" class="wb-backdrop hidden"></div>
+    <div id="upload-raw-modal" class="wb-modal wb-modal-info hidden" role="dialog" aria-modal="true" aria-labelledby="upload-raw-title">
+      <div class="wb-popover-head">
+        <h3 id="upload-raw-title">Upload Raw Document to GCS</h3>
+        <button id="btn-close-upload-modal" class="wb-icon-btn wb-icon-btn-xs" type="button" aria-label="Close">&times;</button>
+      </div>
+      <div class="wb-modal-explainer">
+        <p class="wb-xs" style="margin-bottom:0">
+          Select the engineering document type and upload directly to GCS (<code>reference/raw/&lt;type&gt;/</code>).
+          The Extractor manifest &amp; sidebar refresh automatically after upload. Supported formats: PDF, DOCX, XLSX, PPTX, PNG, JPG, TIF, WEBP (max 50 MB).
+        </p>
+      </div>
+      <div class="wb-form-grid">
+        <label class="wb-field-label" for="upload-doc-type">Document Type (GCS Folder)</label>
+        <select id="upload-doc-type" class="wb-select">
+          <option value="data_sheets">data_sheets — Equipment &amp; Instrument Datasheets</option>
+          <option value="pid">pid — Piping &amp; Instrumentation Diagrams (P&amp;ID)</option>
+          <option value="pfd">pfd — Process Flow Diagrams (PFD)</option>
+          <option value="operating_manuals">operating_manuals — Operating Manuals &amp; SOPs</option>
+          <option value="standards">standards — Engineering &amp; HAZOP Standards</option>
+          <option value="moc">moc — Management of Change (MOC) Packages</option>
+        </select>
+
+        <label class="wb-field-label" for="upload-file-input">Document File</label>
+        <input
+          id="upload-file-input"
+          type="file"
+          class="wb-input"
+          accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.webp"
+        />
+
+        <label class="wb-check" style="margin-top:4px">
+          <input type="checkbox" id="upload-overwrite-check" />
+          <span>Overwrite existing file if the same filename already exists in GCS</span>
+        </label>
+      </div>
+      <div class="wb-modal-actions">
+        <button id="btn-cancel-upload-modal" class="wb-btn wb-btn-ghost" type="button">Cancel</button>
+        <button id="btn-confirm-upload-raw" class="wb-btn wb-btn-primary" type="button">Upload to GCS</button>
+      </div>
     </div>
 
     <!-- Interactive Extract + Sync Mode Selector Modal -->

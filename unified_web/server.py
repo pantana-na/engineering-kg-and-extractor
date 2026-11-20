@@ -31,7 +31,7 @@ from typing import Any, AsyncIterator
 from urllib.parse import quote
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from google.adk.agents import Agent
@@ -173,7 +173,7 @@ class UnifiedExtractRequest(BaseModel):
     subfolder: str = Field(default="data_sheets")
     pdf_filename: str = Field(default="")
     model: str | None = Field(default=None, description="Allowlisted Gemini 4 model (default: gemini-4-carbon)")
-    invoke_vertex_llm: bool = Field(default=False)
+    invoke_vertex_llm: bool = Field(default=True)
     async_job: bool = Field(default=False)
     sync_to_spanner: bool = Field(
         default=False,
@@ -498,6 +498,136 @@ def create_unified_app(
             media_type=get_raw_mime_type(target),
             headers={"Content-Disposition": f'inline; filename="{target.name}"'},
         )
+
+    @app.post("/api/raw-docs/upload", status_code=201, response_class=JSONResponse)
+    async def upload_raw_document_endpoint(
+        request: Request,
+        file: UploadFile = File(...),
+        subfolder: str = Form(...),
+        overwrite: bool = Form(default=False),
+    ) -> dict[str, Any]:
+        """Upload a raw engineering document directly into GCS (or local raw dir when offline) & refresh manifest."""
+        principal = getattr(request.state, "principal", None)
+        principal_email = principal.email if principal else "local-dev"
+        state.jobs_rate_limiter.check(principal_email)
+
+        clean_sub = (subfolder or "").strip().lower()
+        if clean_sub not in ALLOWED_RAW_SUBFOLDERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid document type '{subfolder}'. Allowed: {', '.join(ALLOWED_RAW_SUBFOLDERS)}.",
+            )
+
+        raw_filename = (file.filename or "").strip()
+        if not raw_filename or ".." in raw_filename or "/" in raw_filename or "\\" in raw_filename or "\x00" in raw_filename:
+            raise HTTPException(status_code=400, detail="Invalid filename (must not contain path separators or '..').")
+
+        safe_name = Path(raw_filename).name.strip()
+        if not safe_name or len(safe_name) > 200 or any(ord(ch) < 32 for ch in safe_name):
+            raise HTTPException(status_code=400, detail="Invalid filename characters or length.")
+        if not is_supported_raw_file(safe_name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file format for '{safe_name}'. Supported: PDF, DOCX, XLSX, PPTX, PNG, JPG, TIF, WEBP.",
+            )
+
+        max_bytes = int(os.getenv("MAX_RAW_UPLOAD_BYTES", str(50 * 1024 * 1024)))
+        content = await file.read(max_bytes + 1)
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        if len(content) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds maximum allowed size ({max_bytes // (1024 * 1024)} MB).",
+            )
+
+        cfg = get_extracter_config()
+        mime_type = get_raw_mime_type(safe_name)
+        rel_path = f"{clean_sub}/{safe_name}"
+
+        def _persist_upload() -> dict[str, Any]:
+            if cfg.use_gcs_storage:
+                from google.cloud import storage
+
+                client = storage.Client(project=cfg.google_cloud_project)
+                bucket = client.bucket(cfg.destination_gcs_bucket)
+                raw_prefix = cfg.source_gcs_raw_prefix.strip("/")
+                blob_path = f"{raw_prefix}/{clean_sub}/{safe_name}"
+                blob = bucket.blob(blob_path)
+                if blob.exists() and not overwrite:
+                    raise FileExistsError(
+                        f"'{rel_path}' already exists in GCS. Check 'Overwrite existing file' to replace it."
+                    )
+                blob.metadata = {
+                    "uploaded_by": principal_email,
+                    "doc_type": clean_sub,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                }
+                blob.upload_from_string(content, content_type=mime_type)
+                storage_uri = f"gs://{cfg.destination_gcs_bucket}/{blob_path}"
+            else:
+                raw_dir = cfg.reference_raw_dir
+                if not raw_dir.is_absolute():
+                    raw_dir = (REPO_ROOT / raw_dir).resolve()
+                dest_dir = (raw_dir / clean_sub).resolve()
+                if not dest_dir.is_relative_to(raw_dir.resolve()):
+                    raise ValueError("Invalid target directory.")
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest_file = (dest_dir / safe_name).resolve()
+                if not dest_file.is_relative_to(dest_dir):
+                    raise ValueError("Invalid destination file path.")
+                if dest_file.exists() and not overwrite:
+                    raise FileExistsError(
+                        f"'{rel_path}' already exists. Check 'Overwrite existing file' to replace it."
+                    )
+                dest_file.write_bytes(content)
+                storage_uri = str(dest_file)
+
+            state.manifest_store.invalidate()
+            manifest = state.manifest_store.rebuild_manifest(
+                force_gcs=False,
+                persist_to_gcs=bool(cfg.use_gcs_storage),
+            )
+            return {"storage_uri": storage_uri, "manifest": manifest}
+
+        try:
+            res = await asyncio.to_thread(_persist_upload)
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("Raw document upload failed for %s: %s", rel_path, exc)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "UPSTREAM_UNAVAILABLE_DEGRADED",
+                    "component": "gcs_storage",
+                    "retryable": True,
+                    "detail": f"Raw document upload failed: {exc}",
+                },
+            )  # type: ignore[return-value]
+
+        manifest = res["manifest"]
+        logger.info(
+            "Uploaded raw document %s (%d bytes) to %s by %s",
+            rel_path,
+            len(content),
+            res["storage_uri"],
+            principal_email,
+        )
+        return {
+            "status": "success",
+            "subfolder": clean_sub,
+            "file_name": safe_name,
+            "relative_path": rel_path,
+            "size_bytes": len(content),
+            "content_type": mime_type,
+            "storage_uri": res["storage_uri"],
+            "raw_pdf_count": manifest.get("raw_pdf_count", 0),
+            "raw_subfolders": manifest.get("raw_subfolders", {}),
+            "sync_version": manifest.get("sync_version", ""),
+        }
 
     @app.get("/api/okf/{concept_id:path}", response_class=JSONResponse)
     @app.get("/api/extractor/okf/{concept_id:path}", response_class=JSONResponse)
@@ -1604,7 +1734,7 @@ def create_unified_app(
 
     @app.get("/api/spanner/graph", response_class=JSONResponse)
     async def api_spanner_graph(
-        center_tag: str = Query(default="D-2304", min_length=1),
+        center_tag: str = Query(..., min_length=1),
         max_hops: int = Query(default=2, ge=1, le=3),
         include_lineage: bool = Query(default=True),
         max_nodes: int = Query(default=120, ge=10, le=300),
@@ -1646,8 +1776,94 @@ def create_unified_app(
         state.graph_cache.set(cache_key, graph_data)
         return graph_data
 
+    def _resolve_spanner_node_sync(
+        repo_inst: SpannerGraphRepository,
+        node_ref: str,
+    ) -> dict[str, Any] | None:
+        """Resolve any equipment, instrument, or concept node strictly from Cloud Spanner (Zero GCS reads)."""
+        clean_ref = (node_ref or "").strip()
+        if not clean_ref:
+            return None
+
+        doc = repo_inst.read_full_concept(concept_id_or_tag=clean_ref)
+        lookup_tag = clean_ref.split("/", 1)[-1] if "/" in clean_ref else clean_ref
+        lookup_res = repo_inst.lookup_entity_and_parameters(entity_tag_or_id=lookup_tag)
+        raw_entities = (
+            lookup_res.get("matching_entities")
+            or lookup_res.get("entities")
+            or ([lookup_res["primary_entity"]] if lookup_res.get("primary_entity") else [])
+        )
+        entities_list = list(raw_entities)[:10]
+        parameters_list = list(lookup_res.get("parameters") or [])[:50]
+
+        # If concept not found directly (e.g., an instrument graph node like PSV-101), resolve via entity's concept_id
+        if (not doc or doc.get("found") is False) and entities_list:
+            parent_cid = str(entities_list[0].get("concept_id") or "").strip()
+            if parent_cid:
+                parent_doc = repo_inst.read_full_concept(concept_id_or_tag=parent_cid)
+                if parent_doc and parent_doc.get("found") is not False:
+                    doc = parent_doc
+
+        if (not doc or doc.get("found") is False) and not entities_list:
+            return None
+
+        if not doc or doc.get("found") is False:
+            ent = entities_list[0]
+            ent_tag = str(ent.get("canonical_tag") or lookup_tag)
+            ent_type = str(ent.get("entity_type") or "INSTRUMENT").lower()
+            cat_prefix = "instruments" if "instrument" in ent_type else "equipment"
+            doc = {
+                "found": True,
+                "concept_id": str(ent.get("concept_id") or f"{cat_prefix}/{ent_tag}"),
+                "category": cat_prefix,
+                "name": str(ent.get("name") or ent_tag),
+                "title": str(ent.get("name") or ent_tag),
+                "canonical_tag": ent_tag,
+                "unit": str(ent.get("unit") or ""),
+                "trust_tier": "human-reviewed",
+                "has_conflict": any(bool(p.get("has_conflict")) for p in parameters_list),
+                "conflict_count": sum(1 for p in parameters_list if p.get("has_conflict")),
+                "frontmatter": {"type": ent.get("entity_type") or "Entity", "unit": ent.get("unit") or ""},
+                "body_markdown": f"### {ent_tag} ({ent.get('entity_type') or 'Entity'})\n\nResolved directly from Cloud Spanner `EngineeringEntities`.",
+            }
+
+        resolved_cid = str(doc.get("concept_id") or clean_ref)
+        target_tag = (
+            str(entities_list[0].get("canonical_tag") or lookup_tag)
+            if entities_list
+            else (
+                resolved_cid.split("/", 1)[-1]
+                if "/" in resolved_cid
+                else str(doc.get("canonical_tag") or resolved_cid)
+            )
+        )
+
+        lineage = repo_inst.trace_lineage_gql(
+            target_id=target_tag,
+            direction="BACKWARD_TO_PDF",
+            conflicts_only=False,
+        )
+        lineage_list = [t.model_dump() for t in lineage[:25]]
+
+        catalog_dossier = repo_inst.build_catalog_dossier(
+            concept_doc=doc,
+            lineage_traces=lineage_list,
+            parameters=parameters_list,
+            fallback_tag=target_tag,
+            fallback_unit=str(doc.get("unit") or ""),
+        )
+        return {
+            "concept": doc,
+            "entities": entities_list,
+            "parameters": parameters_list,
+            "lineage_traces": lineage_list,
+            "catalog_dossier": catalog_dossier,
+            "target_tag": target_tag,
+        }
+
     @app.get("/api/spanner/concept/{concept_id:path}", response_class=JSONResponse)
     async def api_spanner_concept(concept_id: str, refresh: bool = Query(default=False)) -> dict[str, Any]:
+        """Resolve any equipment, instrument, or concept dossier strictly from Cloud Spanner (Zero GCS reads)."""
         t0 = time.perf_counter()
         cache_key = concept_id.strip()
         if not refresh:
@@ -1659,84 +1875,139 @@ def create_unified_app(
                 return out
 
         repo_inst = state.get_repo()
-        doc = await asyncio.to_thread(repo_inst.read_full_concept, concept_id_or_tag=concept_id)
-        if not doc or doc.get("found") is False:
-            raise HTTPException(status_code=404, detail=f"Concept '{concept_id}' not found in Spanner.")
+        resolved = await asyncio.to_thread(_resolve_spanner_node_sync, repo_inst, concept_id)
+        if resolved is None:
+            raise HTTPException(status_code=404, detail=f"Concept or entity '{concept_id}' not found in Spanner.")
 
-        resolved_cid = str(doc.get("concept_id") or concept_id)
-        is_non_eq = (
-            "/" in resolved_cid and not resolved_cid.lower().startswith("equipment/")
-        ) or resolved_cid.lower() in ("overview", "project")
-        target_tag = (
-            resolved_cid.split("/", 1)[-1]
-            if resolved_cid.lower().startswith("equipment/")
-            else str(doc.get("canonical_tag") or resolved_cid)
-        )
-
-        if is_non_eq:
-            parameters_list: list[dict[str, Any]] = []
-            entities_list: list[dict[str, Any]] = []
-            lineage_list: list[dict[str, Any]] = []
-        else:
-            # Parallel Spanner RPC execution via asyncio.gather (eliminates sequential RTT waterfall)
-            lookup_res, lineage = await asyncio.gather(
-                asyncio.to_thread(repo_inst.lookup_entity_and_parameters, entity_tag_or_id=target_tag),
-                asyncio.to_thread(
-                    repo_inst.trace_lineage_gql,
-                    target_id=target_tag,
-                    direction="BACKWARD_TO_PDF",
-                    conflicts_only=False,
-                ),
-            )
-            parameters_list = lookup_res.get("parameters", [])[:50]
-            entities_list = lookup_res.get("entities", [])[:10]
-            lineage_list = [t.model_dump() for t in lineage[:25]]
-
-        catalog_dossier = repo_inst.build_catalog_dossier(
-            concept_doc=doc,
-            lineage_traces=lineage_list,
-            parameters=parameters_list,
-            fallback_tag=target_tag,
-            fallback_unit=str(doc.get("unit") or ""),
-        )
         payload = {
             "status": "OK",
             "cached": False,
             "execution_time_ms": round((time.perf_counter() - t0) * 1000, 2),
-            "concept": doc,
-            "entities": entities_list,
-            "parameters": parameters_list,
-            "lineage_traces": lineage_list,
-            "catalog_dossier": catalog_dossier,
+            "concept": resolved["concept"],
+            "entities": resolved["entities"],
+            "parameters": resolved["parameters"],
+            "lineage_traces": resolved["lineage_traces"],
+            "catalog_dossier": resolved["catalog_dossier"],
         }
         state.concept_cache.set(cache_key, payload)
         return payload
 
+    def _build_node_focused_catalog_payload(
+        repo_inst: SpannerGraphRepository,
+        *,
+        focus_tag: str | None,
+        force_sync: bool,
+    ) -> dict[str, Any]:
+        """Query Dataplex Universal Catalog + Spanner-only node governance & lineage (Zero GCS/Raw PDF reads)."""
+        data = _fetch_catalog_payload(repo_inst, force_sync)
+        clean_focus = (focus_tag or "").strip()
+        if not clean_focus:
+            data["focused_node"] = None
+            return data
+
+        resolved = _resolve_spanner_node_sync(repo_inst, clean_focus)
+        if resolved is None:
+            data["focused_node"] = {
+                "found": False,
+                "tag": clean_focus,
+                "message": f"No Spanner concept or entity found for '{clean_focus}'.",
+            }
+            return data
+
+        dossier = resolved.get("catalog_dossier") or {}
+        gov = dict(dossier.get("governance") or {})
+        doc = resolved.get("concept") or {}
+        gov["has_conflict"] = bool(doc.get("has_conflict") or any(p.get("has_conflict") for p in resolved["parameters"]))
+        gov["conflict_count"] = int(
+            doc.get("conflict_count")
+            or sum(1 for p in resolved["parameters"] if p.get("has_conflict"))
+        )
+        gov["canonical_tag"] = resolved["target_tag"]
+
+        # Pull 1-hop Spanner graph degree strictly from Spanner for node lineage summary
+        connected_nodes = 0
+        connected_edges = 0
+        try:
+            g = repo_inst.get_interactive_graph(
+                center_tag=resolved["target_tag"],
+                max_hops=1,
+                include_lineage=False,
+            )
+            connected_nodes = max(0, len(g.get("nodes") or []) - 1)
+            connected_edges = len(g.get("edges") or [])
+        except Exception:
+            pass
+
+        spanner_entry = next(
+            (e for e in (data.get("dataplex_entries") or []) if e.get("entry_id") == "okf_spanner_knowledge_graph"),
+            None,
+        )
+        data["focused_node"] = {
+            "found": True,
+            "tag": resolved["target_tag"],
+            "governance": gov,
+            "source_documents": dossier.get("source_documents") or [],
+            "lineage_traces": resolved.get("lineage_traces") or [],
+            "wiki_links": dossier.get("wiki_links") or [],
+            "metrics": {
+                "parameter_count": len(resolved.get("parameters") or []),
+                "entity_count": len(resolved.get("entities") or []),
+                "conflict_count": gov["conflict_count"],
+                "source_doc_count": len(dossier.get("source_documents") or []),
+                "connected_nodes": connected_nodes,
+                "connected_edges": connected_edges,
+            },
+            "dataplex_binding": {
+                "entry_group": data.get("entry_group", ""),
+                "aspect_type": (data.get("dataplex_aspect_type") or {}).get("aspect_type_id", "okf-governance-template"),
+                "spanner_entry_name": spanner_entry.get("dataplex_entry_name", "") if spanner_entry else "",
+                "spanner_linked_resource": spanner_entry.get("linked_resource", "") if spanner_entry else "",
+                "status": data.get("status", "SYNCED_LIVE"),
+            },
+        }
+        return data
+
     @app.get("/api/catalog", response_class=JSONResponse)
-    async def api_catalog_inspect(refresh: bool = Query(default=False)) -> dict[str, Any]:
+    async def api_catalog_inspect(
+        focus_tag: str | None = Query(default=None),
+        refresh: bool = Query(default=False),
+    ) -> dict[str, Any]:
+        """Inspect Dataplex Universal Catalog + optional node-scoped Spanner governance (Zero GCS reads)."""
         t0 = time.perf_counter()
+        cache_key = ("catalog", (focus_tag or "").strip())
         if not refresh:
-            cached = state.catalog_cache.get("catalog")
+            cached = state.catalog_cache.get(cache_key)
             if cached is not None:
                 out = dict(cached)
                 out["cached"] = True
                 out["execution_time_ms"] = round((time.perf_counter() - t0) * 1000, 2)
                 return out
         repo_inst = state.get_repo()
-        data = await asyncio.to_thread(_fetch_catalog_payload, repo_inst, False)
+        data = await asyncio.to_thread(
+            _build_node_focused_catalog_payload,
+            repo_inst,
+            focus_tag=focus_tag,
+            force_sync=False,
+        )
         data["cached"] = False
         data["execution_time_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-        state.catalog_cache.set("catalog", data)
+        state.catalog_cache.set(cache_key, data)
         return data
 
     @app.post("/api/catalog/sync", response_class=JSONResponse)
-    async def api_catalog_sync() -> dict[str, Any]:
+    async def api_catalog_sync(focus_tag: str | None = Query(default=None)) -> dict[str, Any]:
         t0 = time.perf_counter()
         repo_inst = state.get_repo()
-        data = await asyncio.to_thread(_fetch_catalog_payload, repo_inst, True)
+        state.catalog_cache.clear()
+        data = await asyncio.to_thread(
+            _build_node_focused_catalog_payload,
+            repo_inst,
+            focus_tag=focus_tag,
+            force_sync=True,
+        )
         data["cached"] = False
         data["execution_time_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-        state.catalog_cache.set("catalog", data)
+        state.catalog_cache.set(("catalog", (focus_tag or "").strip()), data)
         return data
 
     async def _get_or_create_query_session(
@@ -1850,15 +2121,23 @@ def create_unified_app(
                 return
 
             if os.environ.get("QUERY_WEB_TEST_FAST_AGENT", "false").lower() in ("true", "1"):
-                target_tag = effective_focus or "D-2304"
-                raw_lookup = lookup_entity_and_parameters(target_tag)
+                target_tag = effective_focus or ""
+                if target_tag:
+                    raw_lookup = lookup_entity_and_parameters(target_tag)
+                    summary = _summarize_tool_output("lookup_entity_and_parameters", raw_lookup)
+                    tname = "lookup_entity_and_parameters"
+                    targs = {"entity_tag_or_id": target_tag}
+                else:
+                    raw_lookup = hybrid_search_okf_spanner(query=question, top_k=5)
+                    summary = _summarize_tool_output("hybrid_search_okf_spanner", raw_lookup)
+                    tname = "hybrid_search_okf_spanner"
+                    targs = {"query": question, "top_k": 5}
                 t_tool = time.perf_counter()
-                summary = _summarize_tool_output("lookup_entity_and_parameters", raw_lookup)
                 tc = {
                     "call_index": 1,
-                    "tool_name": "lookup_entity_and_parameters",
-                    "description": TOOL_DESCRIPTIONS["lookup_entity_and_parameters"],
-                    "args": {"entity_tag_or_id": target_tag},
+                    "tool_name": tname,
+                    "description": TOOL_DESCRIPTIONS[tname],
+                    "args": targs,
                     "status": "COMPLETED",
                     "duration_ms": round((t_tool - t_cursor) * 1000, 1),
                     "summary": summary["summary"],
@@ -1869,7 +2148,7 @@ def create_unified_app(
                 st1 = {
                     "step_index": 1,
                     "phase": "STEP 1 // ADK TOOL CALL #1",
-                    "title": f"lookup_entity_and_parameters ({model_name})",
+                    "title": f"{tname} ({model_name})",
                     "status": "COMPLETED",
                     "duration_ms": tc["duration_ms"],
                     "detail": summary["summary"],
@@ -1877,8 +2156,9 @@ def create_unified_app(
                 job["steps"].append(st1)
                 _emit("step", st1)
 
+                scope_label = target_tag or "All Spanner Concepts"
                 answer_md = (
-                    f"### Grounded Spanner Retrieval (`{target_tag}` · `{model_name}`)\n\n"
+                    f"### Grounded Spanner Retrieval (`{scope_label}` · `{model_name}`)\n\n"
                     f"- **Summary:** {summary['summary']}\n"
                     f"- **Model:** `{model_name}`"
                 )
@@ -1889,7 +2169,7 @@ def create_unified_app(
                     {
                         "status": "COMPLETED",
                         "answer_markdown": answer_md,
-                        "referenced_tags": [target_tag],
+                        "referenced_tags": [target_tag] if target_tag else [],
                         "steps_sum_ms": s_sum,
                         "total_duration_ms": tot,
                         "completed_at": datetime.now(timezone.utc).isoformat(),

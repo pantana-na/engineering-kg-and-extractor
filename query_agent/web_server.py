@@ -58,87 +58,64 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 # Pre-built engineering prompt templates for the Middle Pane
 PRE_BUILT_PROMPTS: list[dict[str, Any]] = [
     {
-        "id": "hazop_d2304",
-        "title": "5-Stage HAZOP & Risk Study (D-2304)",
+        "id": "hazop_plant_overview",
+        "title": "HAZOP Study (Pre/Post-Mitigation Risk)",
         "badge": "HAZOP // 5-STAGE",
         "category": "G_MULTISTAGE_HAZOP_AND_RISK_ASSESSMENT",
-        "focus_tag": "D-2304",
+        "focus_tag": None,
         "question": (
-            "Perform a comprehensive 5-stage HAZOP and risk assessment for Debutanizer Reflux Drum D-2304 "
-            "under blocked vapor outlet and fire exposure scenarios: determine the risk tier, cause-to-consequence "
-            "chain, connected relief valves and trip instruments, plant-wide blast radius across Unit 23, "
-            "and verify if any governing design parameters have cross-document conflicts."
+            "Perform a 5-stage HAZOP study on the primary process equipment stored in Cloud Spanner: "
+            "identify the most relevant guideword deviations (e.g., High Pressure, High/Low Temperature, "
+            "No/Low Flow, High/Low Level, Loss of Containment), output both Pre-Mitigation Risk and "
+            "Post-Mitigation Risk (Severity, Likelihood, Risk Tier) in a table, list active safeguards "
+            "and relief devices, and cite exact Spanner document provenance."
         ),
     },
     {
-        "id": "risk_c2301",
-        "title": "Column Overpressure Risk Assessment (C-2301)",
-        "badge": "RISK // TIER AUDIT",
-        "category": "G_MULTISTAGE_HAZOP_AND_RISK_ASSESSMENT",
-        "focus_tag": "C-2301",
-        "question": (
-            "Execute a multi-stage risk assessment on Debutanizer Column C-2301 and its overhead condenser E-2304: "
-            "what are the high-severity HAZOP nodes, design pressure/temperature limits, overpressure protection "
-            "devices, and downstream plant implications if reflux is lost?"
-        ),
-    },
-    {
-        "id": "graph_traversal_d2304",
-        "title": "Multi-Hop Process & Trip Graph Traversal (D-2304)",
-        "badge": "GRAPH // 2-HOP GQL",
+        "id": "graph_traversal_overview",
+        "title": "Upstream & Downstream Process Trace",
+        "badge": "GRAPH // GQL TRACE",
         "category": "D_GRAPH_CONNECTIVITY_AND_BLAST_RADIUS",
-        "focus_tag": "D-2304",
+        "focus_tag": None,
         "question": (
-            "Traverse the Spanner Property Graph (OkfKnowledgeGraph) up to 2 hops around D-2304: "
-            "list all upstream and downstream process connections (CONNECTS_TO), stream IDs, and all safety "
-            "instruments or interlocks (MONITORS_OR_TRIPS) protecting D-2304."
+            "Summarize the primary upstream and downstream process flow paths (CONNECTS_TO) across the "
+            "Spanner Property Graph (OkfKnowledgeGraph), including major vessels, exchangers, pumps, "
+            "and stream IDs."
         ),
     },
     {
-        "id": "conflict_audit_d2304",
-        "title": "Cross-Document Parameter Conflict & Lineage Audit",
+        "id": "conflict_lineage_overview",
+        "title": "Document Lineage & Conflict Audit",
         "badge": "LINEAGE // CONFLICT",
         "category": "E_BACKWARD_LINEAGE_AND_CONFLICT_AUDIT",
-        "focus_tag": "D-2304",
+        "focus_tag": None,
         "question": (
-            "Audit Debutanizer Reflux Drum D-2304 for cross-document parameter conflicts in Spanner: "
-            "compare design pressure, operating temperature, and corrosion allowance across authoritative datasheets "
-            "and P&IDs, and trace the backward PDF lineage with exact document revisions and MD5 hashes."
+            "Audit Cloud Spanner for all active cross-document parameter conflicts, MOC_AUTHORITY overrides, "
+            "and PENDING_REDRAFT source documents: list each affected equipment or instrument tag, conflicting "
+            "values, and governing source citations."
         ),
     },
     {
-        "id": "instrument_interlock_lookup",
-        "title": "Safety Instrument & ESD Trip Loop Verification",
-        "badge": "SIS // INTERLOCKS",
+        "id": "safety_instruments_overview",
+        "title": "Safety Instruments & Interlocks",
+        "badge": "SIS // PSV AUDIT",
         "category": "B_INSTRUMENT_AND_INTERLOCK_LOOKUP",
-        "focus_tag": "PSV-2304A",
+        "focus_tag": None,
         "question": (
-            "Look up safety relief valve PSV-2304A and high-level/pressure instruments on D-2304: "
-            "what are their setpoints, governing relief cases, orifice designations, and connected process equipment?"
-        ),
-    },
-    {
-        "id": "hybrid_vector_fts_search",
-        "title": "Hybrid Vector + Full-Text Search (Blowdown & Relief)",
-        "badge": "HYBRID // RRF SEARCH",
-        "category": "C_HYBRID_SEMANTIC_AND_KEYWORD_SEARCH",
-        "focus_tag": "D-2304",
-        "question": (
-            "Use hybrid semantic vector + full-text RRF search in Spanner to find all engineering concepts, "
-            "operating procedures, and relief philosophy rules governing emergency depressuring, flare header "
-            "backpressure, and liquid carry-over in Unit 23."
+            "List all safety instruments, interlocks, alarm/trip setpoints, and pressure relief devices "
+            "(MONITORS_OR_TRIPS) currently stored in Cloud Spanner, grouped by the protected equipment tag."
         ),
     },
     {
         "id": "dataplex_catalog_governance",
-        "title": "Dataplex Universal Catalog & OpenLineage Governance",
+        "title": "Dataplex Catalog & Lineage Governance",
         "badge": "DATAPLEX // CATALOG",
         "category": "H_CATALOG_AND_GOVERNANCE",
-        "focus_tag": "D-2304",
+        "focus_tag": None,
         "question": (
-            "Synchronize and inspect the Google Cloud Dataplex Universal Catalog and OpenLineage governance registry "
+            "Inspect the Google Cloud Dataplex Universal Catalog and OpenLineage governance registry "
             "for the OKF Spanner Graph: report the registered entry group, aspect type schema, governed assets, "
-            "steward metadata, and verification status."
+            "and current Spanner concept/conflict metrics."
         ),
     },
 ]

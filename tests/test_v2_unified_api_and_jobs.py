@@ -425,6 +425,120 @@ def test_decoupled_interactive_extraction_start_poll_replay_and_active(
     assert client.get("/api/extractor/interactive/ijob-missing/events").status_code == 404
 
 
+def test_raw_document_upload_validation_duplicate_and_overwrite(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify POST /api/raw-docs/upload enforces allowlists, duplicate 409, overwrite=true, and manifest refresh."""
+    _setup_bundle_env(monkeypatch, tmp_path, n_okf=2)
+    app = create_unified_app(repo=_make_sample_repo(), manifest_store=BundleManifestStore())
+    client = TestClient(app)
+
+    # 1. Valid upload to moc/ succeeds (HTTP 201) and refreshes manifest counts
+    r_ok = client.post(
+        "/api/raw-docs/upload",
+        data={"subfolder": "moc", "overwrite": "false"},
+        files={"file": ("MOC-2026-009.pdf", b"%PDF-1.4\n%EOF\n", "application/pdf")},
+    )
+    assert r_ok.status_code == 201
+    d_ok = r_ok.json()
+    assert d_ok["relative_path"] == "moc/MOC-2026-009.pdf"
+    assert d_ok["raw_subfolders"]["moc"] == 1
+
+    # 2. Duplicate upload without overwrite returns HTTP 409 Conflict
+    r_dup = client.post(
+        "/api/raw-docs/upload",
+        data={"subfolder": "moc", "overwrite": "false"},
+        files={"file": ("MOC-2026-009.pdf", b"%PDF-1.4\n%EOF\n", "application/pdf")},
+    )
+    assert r_dup.status_code == 409
+
+    # 3. Duplicate upload WITH overwrite=true succeeds
+    r_ow = client.post(
+        "/api/raw-docs/upload",
+        data={"subfolder": "moc", "overwrite": "true"},
+        files={"file": ("MOC-2026-009.pdf", b"%PDF-1.4\n%%UPDATED\n%EOF\n", "application/pdf")},
+    )
+    assert r_ow.status_code == 201
+
+    # 4. Disallowed subfolder rejected (HTTP 400)
+    r_sub = client.post(
+        "/api/raw-docs/upload",
+        data={"subfolder": "evil_folder"},
+        files={"file": ("test.pdf", b"%PDF-1.4\n", "application/pdf")},
+    )
+    assert r_sub.status_code == 400
+
+    # 5. Unsupported extension rejected (HTTP 400)
+    r_ext = client.post(
+        "/api/raw-docs/upload",
+        data={"subfolder": "pid"},
+        files={"file": ("malware.exe", b"MZ", "application/octet-stream")},
+    )
+    assert r_ext.status_code == 400
+
+    # 6. Path traversal filename rejected (HTTP 400)
+    r_trav = client.post(
+        "/api/raw-docs/upload",
+        data={"subfolder": "pid"},
+        files={"file": ("../escape.pdf", b"%PDF-1.4\n", "application/pdf")},
+    )
+    assert r_trav.status_code == 400
+
+    # 7. Oversized file rejected (HTTP 413)
+    monkeypatch.setenv("MAX_RAW_UPLOAD_BYTES", "32")
+    r_big = client.post(
+        "/api/raw-docs/upload",
+        data={"subfolder": "pid"},
+        files={"file": ("too_big.pdf", b"A" * 64, "application/pdf")},
+    )
+    assert r_big.status_code == 413
+
+
+def test_node_focused_catalog_instrument_resolution_and_zero_fake_default_focus(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify Query right-pane endpoints resolve instruments from Spanner only, focus Dataplex on node, and never default to non-existent D-2304."""
+    from query_agent.models.schemas import EngineeringEntityNode
+    from query_agent.web_server import PRE_BUILT_PROMPTS
+
+    _setup_bundle_env(monkeypatch, tmp_path, n_okf=2)
+    repo = _make_sample_repo()
+    repo._mem_entities["INST:PSV-901"] = EngineeringEntityNode(
+        entity_id="INST:PSV-901",
+        entity_type="INSTRUMENT",
+        canonical_tag="PSV-901",
+        name="Relief Valve PSV-901",
+        unit="Unit 23",
+        concept_id="instruments/PSV-901",
+    )
+    app = create_unified_app(repo=repo, manifest_store=BundleManifestStore())
+    client = TestClient(app)
+
+    # 1. Pre-built prompts never hardcode a non-existent default focus_tag
+    for p in PRE_BUILT_PROMPTS:
+        assert p.get("focus_tag") is None
+
+    # 2. /api/spanner/graph requires center_tag (no hardcoded D-2304 default)
+    assert client.get("/api/spanner/graph").status_code == 422
+
+    # 3. Instrument node without standalone concept resolves cleanly from Spanner EngineeringEntities
+    inst_res = client.get("/api/spanner/concept/PSV-901")
+    assert inst_res.status_code == 200
+    assert inst_res.json()["concept"]["canonical_tag"] == "PSV-901"
+
+    # 4. Node-focused /api/catalog?focus_tag=D-2304 returns 3-section governance + lineage + binding strictly from Spanner/Dataplex
+    cat_res = client.get("/api/catalog?focus_tag=D-2304")
+    assert cat_res.status_code == 200
+    focused = cat_res.json()["focused_node"]
+    assert focused["found"] is True
+    assert focused["tag"] == "D-2304"
+    assert focused["governance"]["concept_id"] == "equipment/D-2304"
+    assert "entry_group" in focused["dataplex_binding"]
+    assert "parameter_count" in focused["metrics"]
+
+
 def test_multimodal_execution_context_propagates_model_and_progress_to_worker_threads() -> None:
     import contextvars
     from concurrent.futures import ThreadPoolExecutor

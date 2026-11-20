@@ -34,9 +34,16 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     for model_id in ALLOWED_GEMINI_MODELS:
         assert f'value="{model_id}"' in index_html
 
-    # Streamlined v2.2 persistent 2-extract-button toolbar, left-pane GCS sync, Interactive Sync modal, Batch modal & Purge HITL modal
+    # Streamlined v2.3 toolbar, left-pane GCS sync, Raw Upload modal, Running Banner, Removed LLM toggle, Collapsible Sources & Dynamic Query Prompts
     assert 'id="btn-open-batch-modal"' in index_html
     assert 'id="btn-interactive-extract-sync"' in index_html
+    assert 'id="btn-open-upload-modal"' in index_html
+    assert 'id="upload-raw-modal"' in index_html
+    assert 'id="upload-doc-type"' in index_html
+    assert 'id="upload-file-input"' in index_html
+    assert 'id="upload-overwrite-check"' in index_html
+    assert 'id="ext-running-banner"' in index_html
+    assert 'id="ext-live-llm-toggle"' not in index_html
     assert 'id="btn-interactive-info"' not in index_html
     assert 'id="interactive-info-popover"' not in index_html
     assert 'id="ext-refresh-btn"' not in index_html
@@ -52,7 +59,7 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     assert 'id="purge-modal"' in index_html
     assert "PURGE SPANNER" in index_html
 
-    # Verify both Extractor & Query chats use the shared live telemetry-card.js component & MOC badges
+    # Verify both Extractor & Query chats use the shared live telemetry-card.js component, MOC badges, Upload, Lockout & Dynamic Prompts
     ext_js = (STATIC_DIR / "js" / "extractor-tab.js").read_text(encoding="utf-8")
     qry_js = (STATIC_DIR / "js" / "query-tab.js").read_text(encoding="utf-8")
     api_js = (STATIC_DIR / "js" / "api.js").read_text(encoding="utf-8")
@@ -61,10 +68,21 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     assert "/api/extractor/interactive/start" in ext_js
     assert "/events?after_seq=" in ext_js
     assert "/api/extractor/interactive/active" in ext_js
+    assert "/api/raw-docs/upload" in ext_js
+    assert "setInteractiveLockout" in ext_js
+    assert "btn-toggle-okf-sources" in ext_js
+    assert "ext-live-llm-toggle" not in ext_js
     assert "interactive-sync-modal" in ext_js
     assert "/api/gcs/sync" in ext_js
     assert "MOC_AUTHORITY" in qry_js
     assert "PENDING_REDRAFT" in qry_js
+    assert "buildDynamicPromptsForNode" in qry_js
+    assert "Pre-Mitigation Risk" in qry_js
+    assert "Post-Mitigation Risk" in qry_js
+    assert "focus_tag=" in qry_js
+    # Query tab right pane must NEVER call /api/raw-pdf or /api/gcs/sync (Spanner & Dataplex only)
+    assert "/api/raw-pdf" not in qry_js
+    assert "/api/gcs/" not in qry_js
     # Regression guard: fetchJson must preserve Content-Type when custom headers are passed & format 422 arrays
     assert "const { headers: customHeaders, ...restOptions } = options" in api_js
     assert "formatApiErrorDetail" in api_js

@@ -131,6 +131,10 @@ export async function triggerPipelineJob(
   jobMode,
   { purge = false, confirmPurge = false, targetSubfolder = undefined } = {}
 ) {
+  if (state.extractor.isRunning) {
+    showToast("An interactive extraction is currently running — please wait for it to finish first.", "err");
+    return;
+  }
   const syncMode = document.getElementById("sync-mode-select")?.value || "FULL_MIRROR";
   const model = state.selectedModels.extractor || getActiveModel();
   const resolvedSubfolder =

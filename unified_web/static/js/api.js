@@ -25,9 +25,10 @@ function formatApiErrorDetail(rawDetail, fallback) {
 
 export async function fetchJson(url, options = {}) {
   const { headers: customHeaders, ...restOptions } = options || {};
+  const isFormData = typeof FormData !== "undefined" && restOptions.body instanceof FormData;
   const mergedHeaders = {
     "Accept": "application/json",
-    ...(restOptions.body ? { "Content-Type": "application/json" } : {}),
+    ...(restOptions.body && !isFormData ? { "Content-Type": "application/json" } : {}),
     ...(customHeaders || {}),
   };
   const resp = await fetch(url, {

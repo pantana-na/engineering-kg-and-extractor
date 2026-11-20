@@ -986,6 +986,120 @@ code, pre {
 .wb-toast.err { border-color: var(--rose); }
 .wb-toast.ok { border-color: var(--emerald); }
 
+/* Prominent Interactive Extraction Running Banner */
+.wb-running-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: rgba(56, 189, 248, 0.12);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.45);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.wb-running-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 500;
+}
+
+/* Collapsible Referenced Source PDFs Card in OKF Viewer */
+.wb-sources-card {
+  margin-bottom: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.wb-sources-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wb-sources-list {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wb-source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.wb-source-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Node-Focused Dataplex Governance & Lineage Panel */
+.wb-dp-section {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wb-dp-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  font-size: 11.5px;
+}
+.wb-dp-k { color: var(--muted); white-space: nowrap; }
+.wb-dp-v { color: var(--text-soft); word-break: break-word; font-family: var(--font-mono); font-size: 11px; }
+.wb-dp-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wb-lineage-chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.wb-health-ok {
+  background: rgba(52, 211, 153, 0.16);
+  color: var(--emerald);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+.wb-health-warn {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
 @media (max-width: 1120px) {
   .wb-inspector { width: 340px; }
   .wb-sidebar { width: 260px; }

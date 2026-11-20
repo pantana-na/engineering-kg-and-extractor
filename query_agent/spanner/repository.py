@@ -2797,7 +2797,7 @@ class SpannerGraphRepository:
             )
         )
 
-        cid = str(doc.get("concept_id") or (f"equipment/{fallback_tag}" if fallback_tag else "equipment/D-2304"))
+        cid = str(doc.get("concept_id") or (f"equipment/{fallback_tag}" if fallback_tag else "unassigned"))
         cat = str(doc.get("category") or (cid.split("/", 1)[0] if "/" in cid else "equipment"))
         title = str(doc.get("title") or fm.get("title") or fm.get("name") or fallback_tag or cid)
         concept_type = str(

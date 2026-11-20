@@ -10,13 +10,96 @@ import { createTelemetryCard } from "./telemetry-card.js";
 
 let searchTimer = null;
 
-function setFocusTag(tag) {
-  state.query.focusTag = tag || null;
+function buildDynamicPromptsForNode(tag, nodeType = null) {
+  if (!tag) {
+    return state.query.defaultPrompts || [];
+  }
+  const typeHint = nodeType ? ` (${nodeType.toLowerCase()})` : "";
+  return [
+    {
+      id: `hazop_${tag}`,
+      title: `HAZOP Study (${tag})`,
+      focus_tag: tag,
+      question:
+        `Perform a 5-stage HAZOP study for ${tag}${typeHint} using Cloud Spanner: ` +
+        `evaluate all relevant guideword deviations for ${tag} (such as High Pressure, High/Low Temperature, ` +
+        `No/Low/Reverse Flow, High/Low Level, or Loss of Containment as applicable), and output a structured ` +
+        `HAZOP table clearly showing both Pre-Mitigation Risk (unmitigated Severity x Likelihood = Risk Tier) ` +
+        `and Post-Mitigation Risk (residual Severity x Likelihood = Risk Tier after safeguards/SIS/PSVs), ` +
+        `along with upstream/downstream impact and Spanner source citations.`,
+    },
+    {
+      id: `trace_${tag}`,
+      title: `Upstream & Downstream Trace (${tag})`,
+      focus_tag: tag,
+      question:
+        `Traverse the Cloud Spanner Property Graph (OkfKnowledgeGraph) around ${tag} up to 2 hops: ` +
+        `list all upstream feeding nodes and downstream receiving nodes across CONNECTS_TO edges, ` +
+        `stream/line IDs, fluid services, and operational blast radius if ${tag} trips or isolates.`,
+    },
+    {
+      id: `lineage_${tag}`,
+      title: `Document Lineage & Conflicts (${tag})`,
+      focus_tag: tag,
+      question:
+        `Audit backward data lineage and cross-document conflicts for ${tag} in Cloud Spanner: ` +
+        `list all governing source documents (PRIMARY, MOC_AUTHORITY, PENDING_REDRAFT, CONFLICTING), ` +
+        `revisions, and any conflicting design or operating parameters side-by-side.`,
+    },
+    {
+      id: `safety_${tag}`,
+      title: `Safety Instruments (${tag})`,
+      focus_tag: tag,
+      question:
+        `Identify all safety instruments, interlocks, alarm/trip setpoints, and pressure relief devices ` +
+        `(MONITORS_OR_TRIPS) protecting or linked to ${tag} in Cloud Spanner, including governing relief cases, ` +
+        `trip actions, and any unverified or conflicting setpoints.`,
+    },
+  ];
+}
+
+function renderRoleBadge(role) {
+  const r = String(role || "PRIMARY").toUpperCase();
+  const cls =
+    r === "MOC_AUTHORITY"
+      ? "role-moc"
+      : r === "PENDING_REDRAFT"
+        ? "role-redraft"
+        : r === "CONFLICTING"
+          ? "role-conflict"
+          : "role-primary";
+  return `<span class="wb-role-badge ${cls}">${escapeHtml(r)}</span>`;
+}
+
+function setFocusTag(tag, nodeType = null) {
+  const cleanTag = tag ? String(tag).trim() : null;
+  state.query.focusTag = cleanTag || null;
+  state.query.focusNodeType = cleanTag ? (nodeType || null) : null;
+
   const pill = document.getElementById("qry-focus-pill");
-  if (pill) pill.textContent = tag ? `Focus: ${tag}` : "Focus: All";
-  if (tag) {
-    loadGraph(tag);
-    loadConceptDossier(tag);
+  if (pill) {
+    if (cleanTag) {
+      pill.innerHTML = `Focus: ${escapeHtml(cleanTag)} <button type="button" id="btn-clear-focus" class="wb-icon-btn-xs" style="border:none;background:transparent;color:inherit;cursor:pointer;margin-left:4px" title="Clear focus">&times;</button>`;
+      pill.querySelector("#btn-clear-focus")?.addEventListener("click", () => setFocusTag(null));
+    } else {
+      pill.textContent = "Focus: All";
+    }
+  }
+
+  renderPreBuiltPrompts(buildDynamicPromptsForNode(cleanTag, nodeType), { isDynamic: true });
+
+  if (cleanTag) {
+    loadGraph(cleanTag);
+    loadConceptDossier(cleanTag);
+    loadDataplexCatalog(false, cleanTag);
+  } else {
+    const svgEl = document.getElementById("graph-svg");
+    const gPill = document.getElementById("graph-status-pill");
+    const dEl = document.getElementById("dossier-content");
+    if (svgEl) svgEl.innerHTML = "";
+    if (gPill) gPill.textContent = "Select a tag to visualize graph";
+    if (dEl) dEl.innerHTML = `<div class="wb-empty">Select an equipment tag, instrument, or graph node to inspect Spanner parameters &amp; lineage.</div>`;
+    loadDataplexCatalog(false, null);
   }
 }
 
@@ -190,7 +273,7 @@ export async function loadGraph(centerTag) {
       `/api/spanner/graph?center_tag=${encodeURIComponent(centerTag)}&max_hops=${hops}&include_lineage=${lineage}`
     );
     renderInteractiveGraph(svgEl, data, {
-      onNodeClick: (label) => setFocusTag(label),
+      onNodeClick: (label, nodeType) => setFocusTag(label, nodeType),
     });
     if (pill) {
       pill.textContent = `${centerTag} · ${data.nodes?.length || 0} nodes · ${data.edges?.length || 0} edges (${data.execution_time_ms} ms)`;
@@ -203,31 +286,18 @@ export async function loadGraph(centerTag) {
 async function loadConceptDossier(tagOrId) {
   const el = document.getElementById("dossier-content");
   if (!el) return;
-  el.innerHTML = `<div class="wb-empty">Loading concept dossier for ${escapeHtml(tagOrId)}...</div>`;
+  el.innerHTML = `<div class="wb-empty">Loading Cloud Spanner dossier for ${escapeHtml(tagOrId)}...</div>`;
   try {
-    const cid = tagOrId.includes("/") ? tagOrId : `equipment/${tagOrId}`;
-    const data = await fetchJson(`/api/spanner/concept/${encodeURI(cid)}`);
-    const params = (data.parameters || []).slice(0, 20);
+    const data = await fetchJson(`/api/spanner/concept/${encodeURI(tagOrId)}`);
+    const params = (data.parameters || []).slice(0, 25);
     const paramRows = params
       .map(
         (p) =>
           `<tr><td>${escapeHtml(p.parameter_name)}</td><td>${escapeHtml(p.parameter_value)} ${escapeHtml(p.parameter_unit || "")}</td><td>${p.has_conflict ? "CONFLICT" : "OK"}</td></tr>`
       )
       .join("");
-    const renderRoleBadge = (role) => {
-      const r = String(role || "PRIMARY").toUpperCase();
-      const cls =
-        r === "MOC_AUTHORITY"
-          ? "role-moc"
-          : r === "PENDING_REDRAFT"
-            ? "role-redraft"
-            : r === "CONFLICTING"
-              ? "role-conflict"
-              : "role-primary";
-      return `<span class="wb-role-badge ${cls}">${escapeHtml(r)}</span>`;
-    };
     const lineageHtml = (data.lineage_traces || [])
-      .slice(0, 10)
+      .slice(0, 12)
       .map(
         (l) =>
           `<li><code>${escapeHtml(l.filename || l.source_id)}</code> ${renderRoleBadge(l.source_role)}</li>`
@@ -236,46 +306,129 @@ async function loadConceptDossier(tagOrId) {
 
     el.innerHTML = `
       <div>
-        <h3 style="margin:0">${escapeHtml(data.concept?.title || data.concept?.name || cid)}</h3>
-        <span class="wb-muted wb-xs">${escapeHtml(data.concept?.concept_id || cid)} · ${data.execution_time_ms} ms ${data.cached ? "(cached)" : "(parallel RPC)"}</span>
+        <h3 style="margin:0">${escapeHtml(data.concept?.title || data.concept?.name || tagOrId)}</h3>
+        <span class="wb-muted wb-xs">${escapeHtml(data.concept?.concept_id || tagOrId)} · Spanner Only · ${data.execution_time_ms} ms ${data.cached ? "(cached)" : "(live)"}</span>
       </div>
       ${paramRows ? `<div class="wb-md"><table><thead><tr><th>Parameter</th><th>Value</th><th>Status</th></tr></thead><tbody>${paramRows}</tbody></table></div>` : ""}
-      ${lineageHtml ? `<div><strong>Backward PDF Lineage</strong><ul>${lineageHtml}</ul></div>` : ""}
+      ${lineageHtml ? `<div><strong>Document Lineage (Cloud Spanner)</strong><ul>${lineageHtml}</ul></div>` : ""}
       ${renderMarkdown(data.concept?.body_markdown || "")}
     `;
   } catch (err) {
-    el.innerHTML = `<div class="wb-empty">Dossier not found: ${escapeHtml(err.message)}</div>`;
+    el.innerHTML = `<div class="wb-empty">Dossier not found in Spanner: ${escapeHtml(err.message)}</div>`;
   }
 }
 
-async function loadDataplexCatalog(forceSync = false) {
+async function loadDataplexCatalog(forceSync = false, focusTag = undefined) {
   const el = document.getElementById("catalog-content");
   if (!el) return;
-  el.innerHTML = `<div class="wb-empty">Querying Dataplex Universal Catalog...</div>`;
+  const activeTag = focusTag !== undefined ? focusTag : state.query.focusTag;
+  const qs = activeTag ? `?focus_tag=${encodeURIComponent(activeTag)}` : "";
+  el.innerHTML = `<div class="wb-empty">Querying Cloud Spanner &amp; Dataplex Universal Catalog${activeTag ? ` for ${escapeHtml(activeTag)}` : ""}...</div>`;
   try {
     const data = forceSync
-      ? await fetchJson("/api/catalog/sync", { method: "POST" })
-      : await fetchJson("/api/catalog");
+      ? await fetchJson(`/api/catalog/sync${qs}`, { method: "POST" })
+      : await fetchJson(`/api/catalog${qs}`);
     state.query.catalogLoaded = true;
-    const entriesHtml = (data.dataplex_entries || [])
-      .map(
-        (e) => `
-          <div class="wb-job-card">
-            <div class="wb-item-top"><strong>${escapeHtml(e.display_name || e.entry_id)}</strong><span class="wb-pill">${escapeHtml(e.status)}</span></div>
-            <div class="wb-muted wb-xs"><code>${escapeHtml(e.linked_resource || "")}</code></div>
+    state.query.lastCatalogFocus = activeTag || null;
+
+    const focused = data.focused_node;
+    let focusedHtml = "";
+    if (focused && focused.found) {
+      const g = focused.governance || {};
+      const m = focused.metrics || {};
+      const b = focused.dataplex_binding || {};
+      const healthBadge = g.has_conflict
+        ? `<span class="wb-health-warn">${g.conflict_count || 1} CONFLICT(S)</span>`
+        : `<span class="wb-health-ok">VERIFIED · NO CONFLICTS</span>`;
+      const srcDocs = Array.isArray(focused.source_documents) ? focused.source_documents : [];
+      const traces = Array.isArray(focused.lineage_traces) ? focused.lineage_traces : [];
+      const docRows = (srcDocs.length ? srcDocs : traces)
+        .slice(0, 10)
+        .map((d) => {
+          const fname = d.filename || d.document_name || d.source_id || "unknown";
+          const rev = d.revision ? ` · Rev ${d.revision}` : "";
+          const role = d.source_role || d.role || "PRIMARY";
+          return `<li><code>${escapeHtml(fname)}</code>${escapeHtml(rev)} ${renderRoleBadge(role)}</li>`;
+        })
+        .join("");
+
+      focusedHtml = `
+        <div class="wb-dp-section">
+          <div class="wb-item-top">
+            <strong>1. Asset Governance &amp; Trust (${escapeHtml(focused.tag)})</strong>
+            ${healthBadge}
           </div>
-        `
-      )
-      .join("");
+          <div class="wb-dp-kv">
+            <span class="wb-dp-k">Concept ID</span><span class="wb-dp-v">${escapeHtml(g.concept_id || focused.tag)}</span>
+            <span class="wb-dp-k">Class / Unit</span><span class="wb-dp-v">${escapeHtml(g.concept_type || "—")} · ${escapeHtml(g.unit || "—")}</span>
+            <span class="wb-dp-k">Trust Tier</span><span class="wb-dp-v">${escapeHtml(g.trust_tier || "human-reviewed")} (${escapeHtml(g.status || "stable")})</span>
+            <span class="wb-dp-k">Custodian</span><span class="wb-dp-v">${escapeHtml(g.governing_authority || (g.approved_by || []).join(", ") || "—")}</span>
+            <span class="wb-dp-k">Provenance</span><span class="wb-dp-v">${escapeHtml(g.extracted_by || "—")} · ${escapeHtml(g.bundle_version || "—")}</span>
+            <span class="wb-dp-k">Content MD5</span><span class="wb-dp-v">${escapeHtml((g.content_md5 || "—").slice(0, 16))}</span>
+          </div>
+        </div>
+
+        <div class="wb-dp-section">
+          <strong>2. Node Data Lineage &amp; Fact Coverage (Spanner)</strong>
+          <div class="wb-lineage-chain">
+            <span>RawSourceDocs (${m.source_doc_count ?? 0})</span>
+            <span>&rarr;</span>
+            <span>OKF Concept</span>
+            <span>&rarr;</span>
+            <span>${escapeHtml(focused.tag)} (${m.parameter_count ?? 0} facts)</span>
+          </div>
+          <div class="wb-dp-metrics">
+            <span class="wb-pill">${m.parameter_count ?? 0} params</span>
+            <span class="wb-pill">${m.connected_nodes ?? 0} linked nodes</span>
+            <span class="wb-pill">${m.connected_edges ?? 0} edges</span>
+            <span class="wb-pill">${m.conflict_count ?? 0} conflicts</span>
+          </div>
+          ${docRows ? `<ul style="margin:2px 0 0;padding-left:16px;font-size:11.5px">${docRows}</ul>` : `<div class="wb-muted wb-xs">No backward document lineage edges recorded for this node in Spanner.</div>`}
+        </div>
+
+        <div class="wb-dp-section">
+          <div class="wb-item-top">
+            <strong>3. Dataplex Universal Catalog Aspect Binding</strong>
+            <span class="wb-pill">${escapeHtml(b.status || data.status || "SYNCED_LIVE")}</span>
+          </div>
+          <div class="wb-dp-kv">
+            <span class="wb-dp-k">Entry Group</span><span class="wb-dp-v">${escapeHtml(b.entry_group || data.entry_group || "—")}</span>
+            <span class="wb-dp-k">Aspect Type</span><span class="wb-dp-v">${escapeHtml(b.aspect_type || "okf-governance-template")}</span>
+            <span class="wb-dp-k">Spanner Asset</span><span class="wb-dp-v">${escapeHtml(b.spanner_linked_resource || "—")}</span>
+          </div>
+        </div>
+      `;
+    } else if (focused && !focused.found) {
+      focusedHtml = `<div class="wb-empty">${escapeHtml(focused.message || "Selected node not found in Spanner.")}</div>`;
+    } else {
+      const spannerEntries = (data.dataplex_entries || []).filter(
+        (e) => e.entry_id === "okf_spanner_knowledge_graph"
+      );
+      const entriesHtml = (spannerEntries.length ? spannerEntries : data.dataplex_entries || [])
+        .map(
+          (e) => `
+            <div class="wb-job-card">
+              <div class="wb-item-top"><strong>${escapeHtml(e.display_name || e.entry_id)}</strong><span class="wb-pill">${escapeHtml(e.status)}</span></div>
+              <div class="wb-muted wb-xs"><code>${escapeHtml(e.linked_resource || "")}</code></div>
+            </div>
+          `
+        )
+        .join("");
+      focusedHtml = `
+        <div class="wb-muted wb-xs">Select an equipment, instrument, or graph node on the left (or in the Graph tab) to inspect node-specific Spanner governance &amp; Dataplex lineage.</div>
+        <div class="wb-muted wb-xs">Entry Group: <code>${escapeHtml(data.entry_group || "")}</code></div>
+        ${entriesHtml}
+      `;
+    }
+
     el.innerHTML = `
       <div class="wb-item-top">
-        <strong>Dataplex Universal Catalog</strong>
+        <strong>Dataplex &amp; Governance ${activeTag ? `· ${escapeHtml(activeTag)}` : ""}</strong>
         <button id="btn-sync-dataplex" class="wb-btn wb-btn-secondary wb-btn-sm">Sync Catalog</button>
       </div>
-      <div class="wb-muted wb-xs">Entry Group: <code>${escapeHtml(data.entry_group || "")}</code></div>
-      ${entriesHtml}
+      ${focusedHtml}
     `;
-    el.querySelector("#btn-sync-dataplex")?.addEventListener("click", () => loadDataplexCatalog(true));
+    el.querySelector("#btn-sync-dataplex")?.addEventListener("click", () => loadDataplexCatalog(true, activeTag));
   } catch (err) {
     el.innerHTML = `<div class="wb-empty">Catalog error: ${escapeHtml(err.message)}</div>`;
   }
@@ -364,10 +517,17 @@ async function sendQueryQuestion(question) {
   }
 }
 
-export function renderPreBuiltPrompts(prompts) {
+export function renderPreBuiltPrompts(prompts, { isDynamic = false } = {}) {
   const strip = document.getElementById("qry-prompt-chips");
   if (!strip) return;
-  strip.innerHTML = (prompts || [])
+  if (!isDynamic) {
+    state.query.defaultPrompts = Array.isArray(prompts) ? prompts : [];
+  }
+  const activeList =
+    !isDynamic && state.query.focusTag
+      ? buildDynamicPromptsForNode(state.query.focusTag, state.query.focusNodeType)
+      : (prompts || []);
+  strip.innerHTML = activeList
     .slice(0, 5)
     .map(
       (p) =>
@@ -376,8 +536,6 @@ export function renderPreBuiltPrompts(prompts) {
     .join("");
   strip.querySelectorAll("[data-prompt-q]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const tag = btn.getAttribute("data-prompt-tag");
-      if (tag) setFocusTag(tag);
       sendQueryQuestion(btn.getAttribute("data-prompt-q"));
     });
   });
@@ -445,8 +603,8 @@ export function initQueryTab() {
       document.querySelectorAll(".wb-inspector-body").forEach((p) => p.classList.remove("active"));
       document.getElementById(`insp-pane-${target}`)?.classList.add("active");
       document.getElementById("graph-toolbar")?.classList.toggle("hidden", target !== "graph");
-      if (target === "catalog" && !state.query.catalogLoaded) {
-        loadDataplexCatalog(false);
+      if (target === "catalog" && (!state.query.catalogLoaded || state.query.lastCatalogFocus !== (state.query.focusTag || null))) {
+        loadDataplexCatalog(false, state.query.focusTag);
       }
     });
   });

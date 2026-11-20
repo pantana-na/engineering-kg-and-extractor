@@ -228,9 +228,47 @@ function resolveInteractiveTargetPdf() {
   return null;
 }
 
+function setInteractiveLockout(active, meta = null) {
+  isExtracting = Boolean(active);
+  state.extractor.isRunning = isExtracting;
+  state.extractor.activeJobMeta = isExtracting ? meta : null;
+
+  const lockIds = [
+    "btn-open-batch-modal",
+    "btn-interactive-extract-sync",
+    "btn-open-upload-modal",
+    "btn-sync-gcs",
+    "ext-chat-input",
+    "btn-ext-chat-send",
+    "model-select",
+    "btn-okf-sync-spanner",
+    "btn-launch-batch-extract-sync",
+    "btn-job-sync",
+    "btn-job-purge-modal",
+  ];
+  for (const id of lockIds) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = isExtracting;
+  }
+
+  const banner = document.getElementById("ext-running-banner");
+  const bannerText = document.getElementById("ext-running-banner-text");
+  if (banner) {
+    banner.classList.toggle("hidden", !isExtracting);
+  }
+  if (isExtracting && bannerText) {
+    const label = meta?.targetPdf || meta?.prompt || "interactive job";
+    const shortLabel = label.length > 72 ? `${label.slice(0, 69)}...` : label;
+    const modelStr = meta?.model || state.selectedModels.extractor || "gemini-4-carbon";
+    const syncStr = meta?.syncToSpanner ? "Extract + Sync" : "Extraction";
+    bannerText.textContent = `${syncStr} running (${modelStr}): ${shortLabel} — other actions are paused until complete.`;
+  }
+}
+
 async function attachToInteractiveJob({
   jobId,
   prompt,
+  targetPdf = null,
   model,
   syncToSpanner = false,
   reconnected = false,
@@ -267,9 +305,7 @@ async function attachToInteractiveJob({
   log.appendChild(botDiv);
   log.scrollTop = log.scrollHeight;
 
-  isExtracting = true;
-  const topBtn = document.getElementById("btn-interactive-extract-sync");
-  if (topBtn) topBtn.disabled = true;
+  setInteractiveLockout(true, { jobId, prompt, targetPdf, model, syncToSpanner });
 
   let afterSeq = -1;
   let streamedText = "";
@@ -362,8 +398,7 @@ async function attachToInteractiveJob({
     }
   } finally {
     telemetry.destroy();
-    isExtracting = false;
-    if (topBtn) topBtn.disabled = false;
+    setInteractiveLockout(false);
   }
 }
 
@@ -379,6 +414,7 @@ async function checkAndResumeInteractiveJob() {
         await attachToInteractiveJob({
           jobId: probe.job_id,
           prompt: probe.prompt || saved.prompt || "Interactive extraction",
+          targetPdf: probe.target_pdf || saved.target_pdf || null,
           model: probe.model || saved.model || state.selectedModels.extractor,
           syncToSpanner: Boolean(probe.sync_to_spanner ?? saved.sync_to_spanner),
           reconnected: true,
@@ -397,12 +433,14 @@ async function checkAndResumeInteractiveJob() {
       saveActiveJob({
         job_id: active.job_id,
         prompt: active.prompt,
+        target_pdf: active.target_pdf || null,
         model: active.model,
         sync_to_spanner: Boolean(active.sync_to_spanner),
       });
       await attachToInteractiveJob({
         jobId: active.job_id,
         prompt: active.prompt || "Interactive extraction",
+        targetPdf: active.target_pdf || null,
         model: active.model || state.selectedModels.extractor,
         syncToSpanner: Boolean(active.sync_to_spanner),
         reconnected: true,
@@ -416,7 +454,6 @@ export async function runInteractiveExtract({
   targetPdf = null,
   syncToSpanner = false,
   syncMode = null,
-  invokeVertexLlm = null,
 } = {}) {
   if (isExtracting) {
     showToast("An interactive extraction is already running — please wait for it to finish.", "err");
@@ -424,10 +461,6 @@ export async function runInteractiveExtract({
   }
 
   const model = state.selectedModels.extractor;
-  const invokeLlm =
-    invokeVertexLlm !== null
-      ? Boolean(invokeVertexLlm)
-      : Boolean(document.getElementById("ext-live-llm-toggle")?.checked ?? true);
   const resolvedSyncMode =
     syncMode ||
     document.getElementById("interactive-sync-mode-select")?.value ||
@@ -447,7 +480,7 @@ export async function runInteractiveExtract({
         mode: targetPdf ? "by_pdf" : "chat",
         target_pdf: targetPdf,
         model,
-        invoke_vertex_llm: invokeLlm,
+        invoke_vertex_llm: true,
         sync_to_spanner: Boolean(syncToSpanner),
         sync_mode: resolvedSyncMode,
       }),
@@ -455,12 +488,14 @@ export async function runInteractiveExtract({
     saveActiveJob({
       job_id: started.job_id,
       prompt: effectivePrompt,
+      target_pdf: targetPdf,
       model: started.model || model,
       sync_to_spanner: Boolean(syncToSpanner),
     });
     await attachToInteractiveJob({
       jobId: started.job_id,
       prompt: effectivePrompt,
+      targetPdf,
       model: started.model || model,
       syncToSpanner: Boolean(syncToSpanner),
       reconnected: false,
@@ -511,15 +546,120 @@ async function openOkfConcept(conceptId) {
     const actions = document.getElementById("ext-viewer-actions");
     actions.innerHTML = `
       <button class="wb-btn wb-btn-ghost wb-btn-sm" id="btn-toggle-raw-md">Raw YAML</button>
-      <button class="wb-btn wb-btn-secondary wb-btn-sm" id="btn-okf-sync-spanner" title="Sync existing OKF Markdown bundle to Cloud Spanner">Sync to Spanner</button>
+      <button class="wb-btn wb-btn-secondary wb-btn-sm" id="btn-okf-sync-spanner" title="Sync existing OKF Markdown bundle to Cloud Spanner" ${isExtracting ? "disabled" : ""}>Sync to Spanner</button>
       <button class="wb-btn wb-btn-primary wb-btn-sm" id="btn-jump-to-graph">Inspect in Graph &rarr;</button>
     `;
 
+    const buildSourcesPanelHtml = () => {
+      const rawSources = Array.isArray(data.sources) ? data.sources : [];
+      const resolvedList = Array.isArray(data.resolved_pdf_sources) ? data.resolved_pdf_sources : [];
+      const resolvedByName = new Map();
+      for (const r of resolvedList) {
+        if (r.file_name) resolvedByName.set(String(r.file_name).toLowerCase(), r);
+        if (r.relative_path) resolvedByName.set(String(r.relative_path).toLowerCase(), r);
+      }
+
+      const combined = [];
+      const seen = new Set();
+      for (const s of rawSources) {
+        const resStr = typeof s === "string" ? s : String(s?.resource || s?.file_name || s?.document || "");
+        if (!resStr) continue;
+        const baseName = resStr.split("/").pop();
+        const key = baseName.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const match = resolvedByName.get(resStr.toLowerCase()) || resolvedByName.get(key) || null;
+        combined.push({
+          label: match?.relative_path || resStr,
+          fileName: match?.file_name || baseName,
+          subfolder: match?.subfolder || (resStr.includes("/") ? resStr.split("/")[0] : ""),
+          url: match?.url || null,
+          pages: typeof s === "object" && s?.pages ? String(s.pages) : "",
+          revision: typeof s === "object" && s?.revision ? String(s.revision) : "",
+          role: typeof s === "object" && (s?.role || s?.source_role) ? String(s.role || s.source_role) : "",
+        });
+      }
+      for (const r of resolvedList) {
+        const key = String(r.file_name || r.relative_path || "").toLowerCase();
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          combined.push({
+            label: r.relative_path || r.file_name,
+            fileName: r.file_name || r.relative_path,
+            subfolder: r.subfolder || "",
+            url: r.url || null,
+            pages: "",
+            revision: "",
+            role: "",
+          });
+        }
+      }
+
+      const rowsHtml = combined.length
+        ? combined
+            .map((src) => {
+              const metaParts = [
+                src.subfolder ? `type: ${src.subfolder}` : "",
+                src.revision ? `rev: ${src.revision}` : "",
+                src.pages ? `pp. ${src.pages}` : "",
+              ].filter(Boolean);
+              const roleUpper = src.role.toUpperCase();
+              const roleBadge = roleUpper
+                ? `<span class="wb-role-badge ${
+                    roleUpper === "MOC_AUTHORITY"
+                      ? "role-moc"
+                      : roleUpper === "PENDING_REDRAFT"
+                        ? "role-redraft"
+                        : roleUpper === "CONFLICTING"
+                          ? "role-conflict"
+                          : "role-primary"
+                  }">${escapeHtml(roleUpper)}</span>`
+                : "";
+              const openLink = src.url
+                ? `<a class="wb-btn wb-btn-ghost wb-btn-sm" href="${escapeHtml(src.url)}" target="_blank" rel="noopener">Open PDF</a>`
+                : "";
+              return `
+                <div class="wb-source-row">
+                  <div class="wb-source-main">
+                    <code>${escapeHtml(src.label)}</code>
+                    ${roleBadge}
+                    ${metaParts.length ? `<span class="wb-muted wb-xs">${escapeHtml(metaParts.join(" · "))}</span>` : ""}
+                  </div>
+                  ${openLink}
+                </div>
+              `;
+            })
+            .join("")
+        : `<div class="wb-muted wb-xs">No PDF source links recorded in YAML frontmatter for this concept.</div>`;
+
+      const expanded = Boolean(state.extractor.showOkfSources);
+      return `
+        <div class="wb-sources-card" id="okf-sources-card">
+          <div class="wb-sources-head">
+            <strong class="wb-xs">Referenced PDF Sources (${combined.length})</strong>
+            <button type="button" class="wb-btn wb-btn-ghost wb-btn-sm" id="btn-toggle-okf-sources">
+              ${expanded ? "Hide Sources" : "Show Sources"}
+            </button>
+          </div>
+          <div class="wb-sources-list ${expanded ? "" : "hidden"}" id="okf-sources-list">
+            ${rowsHtml}
+          </div>
+        </div>
+      `;
+    };
+
     let showingRaw = false;
     const renderBody = () => {
-      body.innerHTML = showingRaw
+      const contentHtml = showingRaw
         ? `<pre><code>${escapeHtml(data.raw_markdown || "")}</code></pre>`
         : renderMarkdown(data.body_markdown || data.raw_markdown || "");
+      body.innerHTML = `${buildSourcesPanelHtml()}${contentHtml}`;
+      body.querySelector("#btn-toggle-okf-sources")?.addEventListener("click", (e) => {
+        state.extractor.showOkfSources = !state.extractor.showOkfSources;
+        const listEl = body.querySelector("#okf-sources-list");
+        listEl?.classList.toggle("hidden", !state.extractor.showOkfSources);
+        e.target.textContent = state.extractor.showOkfSources ? "Hide Sources" : "Show Sources";
+      });
     };
     renderBody();
 
@@ -620,9 +760,87 @@ export function initExtractorTab({ onJumpToGraph, onSpannerMutated, onQuickSyncS
       syncMode: chosenMode,
     });
   });
+  // Raw Document Upload to GCS Modal
+  function setUploadModalOpen(open) {
+    const modal = document.getElementById("upload-raw-modal");
+    const bg = document.getElementById("upload-raw-backdrop");
+    if (open) {
+      const typeSel = document.getElementById("upload-doc-type");
+      const fileInput = document.getElementById("upload-file-input");
+      const overwriteCheck = document.getElementById("upload-overwrite-check");
+      if (typeSel && state.extractor.subfolder) {
+        typeSel.value = state.extractor.subfolder;
+      }
+      if (fileInput) fileInput.value = "";
+      if (overwriteCheck) overwriteCheck.checked = false;
+    }
+    modal?.classList.toggle("hidden", !open);
+    bg?.classList.toggle("hidden", !open);
+  }
+
+  document.getElementById("btn-open-upload-modal")?.addEventListener("click", () => {
+    if (isExtracting) {
+      showToast("An interactive extraction is currently running — please wait for it to finish.", "err");
+      return;
+    }
+    setUploadModalOpen(true);
+  });
+  document.getElementById("btn-close-upload-modal")?.addEventListener("click", () => setUploadModalOpen(false));
+  document.getElementById("btn-cancel-upload-modal")?.addEventListener("click", () => setUploadModalOpen(false));
+  document.getElementById("upload-raw-backdrop")?.addEventListener("click", () => setUploadModalOpen(false));
+
+  document.getElementById("btn-confirm-upload-raw")?.addEventListener("click", async () => {
+    const typeSel = document.getElementById("upload-doc-type");
+    const fileInput = document.getElementById("upload-file-input");
+    const overwriteCheck = document.getElementById("upload-overwrite-check");
+    const confirmBtn = document.getElementById("btn-confirm-upload-raw");
+    const file = fileInput?.files?.[0];
+    if (!file) {
+      showToast("Please choose a file to upload.", "err");
+      return;
+    }
+    const subfolder = typeSel?.value || "data_sheets";
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("subfolder", subfolder);
+    fd.append("overwrite", overwriteCheck?.checked ? "true" : "false");
+
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Uploading...";
+    }
+    try {
+      const res = await fetchJson("/api/raw-docs/upload", {
+        method: "POST",
+        body: fd,
+      });
+      setUploadModalOpen(false);
+      // Switch to Raw Docs view and refresh manifest/list
+      state.extractor.kind = "raw";
+      state.extractor.offset = 0;
+      document.querySelectorAll("[data-ext-kind]").forEach((b) => {
+        b.classList.toggle("active", b.getAttribute("data-ext-kind") === "raw");
+      });
+      await loadExtractorFiles({ append: false, forceGcs: false });
+      showToast(`Uploaded ${res.relative_path} (${Math.max(1, Math.round(res.size_bytes / 1024))} KB) & refreshed GCS.`, "ok");
+    } catch (err) {
+      showToast(`Upload failed: ${err.message}`, "err");
+    } finally {
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Upload to GCS";
+      }
+    }
+  });
+
+  document.getElementById("btn-banner-open-assistant")?.addEventListener("click", () => {
+    document.getElementById("ext-chat-drawer")?.classList.remove("hidden");
+  });
+
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       setInteractiveSyncModalOpen(false);
+      setUploadModalOpen(false);
     }
   });
 
