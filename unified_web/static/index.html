@@ -77,7 +77,6 @@
             </div>
             <div class="wb-search-row">
               <input id="ext-search-input" type="search" class="wb-input" placeholder="Search files or concepts..." autocomplete="off" />
-              <button id="ext-refresh-btn" class="wb-icon-btn" title="Refresh from GCS & rebuild manifest">&#x21bb;</button>
             </div>
             <div class="wb-filter-row" id="ext-filter-chips"></div>
           </div>
@@ -100,31 +99,9 @@
                 Batch Extract + Sync (Job)
               </button>
 
-              <div class="wb-btn-with-info">
-                <button id="btn-interactive-extract-sync" class="wb-btn wb-btn-secondary" title="Immediately extract & sync the selected document in the Assistant chat (no Enter needed)">
-                  Extract + Sync (Interactive)
-                </button>
-                <button id="btn-interactive-info" class="wb-info-btn" type="button" aria-label="About Extract + Sync (Interactive)" aria-expanded="false" aria-controls="interactive-info-popover">?</button>
-                <div id="interactive-info-popover" class="wb-popover hidden" role="dialog" aria-label="About Extract + Sync (Interactive)">
-                  <div class="wb-popover-head">
-                    <strong>Extract + Sync (Interactive)</strong>
-                    <button id="btn-close-interactive-info" class="wb-icon-btn wb-icon-btn-xs" type="button" aria-label="Close">&times;</button>
-                  </div>
-                  <p class="wb-xs wb-muted">
-                    Immediately runs live single-document AI extraction in the <strong>Assistant</strong> drawer
-                    (no need to press Enter) using your selected Gemini 4 model, streaming each tool call, step,
-                    and exact latency in real time.
-                  </p>
-                  <ul class="wb-popover-list wb-xs">
-                    <li><strong>1. Select a file:</strong> Click any raw PDF on the left (or an OKF concept linked to a PDF).</li>
-                    <li><strong>2. Click once:</strong> Auto-opens the Assistant and starts extracting immediately.</li>
-                    <li><strong>3. Auto-sync:</strong> Publishes updated OKF Markdown to GCS and runs an incremental Cloud Spanner sync so the Query tab sees new facts right away.</li>
-                  </ul>
-                  <p class="wb-xs wb-muted" style="margin-bottom:0">
-                    Best for 1 document or quick inspection. For multiple documents or full doc types, use <strong>Batch Extract + Sync (Job)</strong>.
-                  </p>
-                </div>
-              </div>
+              <button id="btn-interactive-extract-sync" class="wb-btn wb-btn-secondary" title="Immediately extract & sync the selected document in the Assistant chat with live tool/latency streaming (no Enter needed)">
+                Extract + Sync (Interactive)
+              </button>
 
               <button id="btn-sync-gcs" class="wb-btn wb-btn-ghost" title="Pull latest raw PDFs & OKF bundles from GCS and rebuild manifest">
                 &#x21bb; Sync GCS

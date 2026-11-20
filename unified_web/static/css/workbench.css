@@ -810,6 +810,38 @@ code, pre {
 
 .wb-dossier { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 
+/* MOC & Spanner Lineage Role Badges */
+.wb-role-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.wb-role-badge.role-moc {
+  background: rgba(52, 211, 153, 0.16);
+  color: var(--emerald);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+.wb-role-badge.role-redraft {
+  background: rgba(251, 191, 36, 0.14);
+  color: var(--amber);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+.wb-role-badge.role-conflict {
+  background: rgba(251, 113, 133, 0.16);
+  color: var(--rose);
+  border: 1px solid rgba(251, 113, 133, 0.4);
+}
+.wb-role-badge.role-primary {
+  background: var(--surface-3);
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+}
+
 /* Tree Nodes (Spanner Lazy Hierarchy) */
 .wb-tree-group {
   border: 1px solid var(--border);

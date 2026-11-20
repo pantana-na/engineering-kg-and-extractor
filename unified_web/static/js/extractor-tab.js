@@ -398,7 +398,6 @@ export function initExtractorTab({ onJumpToGraph, onSpannerMutated, onQuickSyncS
     }, 280);
   });
 
-  document.getElementById("ext-refresh-btn")?.addEventListener("click", () => syncFromGcs());
   document.getElementById("btn-sync-gcs")?.addEventListener("click", () => syncFromGcs());
 
   document.getElementById("ext-load-more-btn")?.addEventListener("click", () => {
@@ -419,28 +418,6 @@ export function initExtractorTab({ onJumpToGraph, onSpannerMutated, onQuickSyncS
       targetPdf,
       syncToSpanner: true,
     });
-  });
-
-  // Explanatory (?) Popover for Extract + Sync (Interactive)
-  const infoBtn = document.getElementById("btn-interactive-info");
-  const infoPop = document.getElementById("interactive-info-popover");
-  const closeInfo = () => {
-    infoPop?.classList.add("hidden");
-    infoBtn?.setAttribute("aria-expanded", "false");
-  };
-  infoBtn?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const isHidden = infoPop?.classList.toggle("hidden");
-    infoBtn.setAttribute("aria-expanded", String(!isHidden));
-  });
-  document.getElementById("btn-close-interactive-info")?.addEventListener("click", closeInfo);
-  document.addEventListener("click", (e) => {
-    if (infoPop && !infoPop.classList.contains("hidden") && !infoPop.contains(e.target) && e.target !== infoBtn) {
-      closeInfo();
-    }
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeInfo();
   });
 
   document.getElementById("btn-toggle-ext-chat")?.addEventListener("click", () => {

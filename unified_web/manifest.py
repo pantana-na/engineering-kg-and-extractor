@@ -23,6 +23,7 @@ from extracter_agent.web_server import (
     list_all_raw_pdfs,
     sync_bundle_from_gcs,
 )
+from unified_web.models import ALLOWED_RAW_SUBFOLDERS
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,8 @@ class BundleManifestStore:
         okf_files = list_all_okf_files(bundle_dir)
         sync_version = self._compute_sync_version(raw_pdfs, okf_files)
 
-        raw_counts: dict[str, int] = {}
+        # Always expose all 6 canonical supported document types in UI even when count is 0
+        raw_counts: dict[str, int] = {sub: 0 for sub in ALLOWED_RAW_SUBFOLDERS}
         for p in raw_pdfs:
             sub = str(p.get("subfolder") or "root")
             raw_counts[sub] = raw_counts.get(sub, 0) + 1

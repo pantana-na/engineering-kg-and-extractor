@@ -281,7 +281,7 @@ def test_gcs_sync_and_extractor_sse_stream_with_latency_and_spanner_sync(
     app = create_unified_app(repo=repo, manifest_store=BundleManifestStore())
     client = TestClient(app)
 
-    # 1. POST /api/gcs/sync refreshes manifest and returns counts + latency
+    # 1. POST /api/gcs/sync refreshes manifest and returns counts + latency + all 6 canonical doc types
     gcs_res = client.post("/api/gcs/sync")
     assert gcs_res.status_code == 200
     gcs_data = gcs_res.json()
@@ -289,6 +289,10 @@ def test_gcs_sync_and_extractor_sse_stream_with_latency_and_spanner_sync(
     assert gcs_data["raw_pdf_count"] == 1
     assert gcs_data["okf_file_count"] == 4
     assert gcs_data["duration_ms"] >= 0
+    for expected_sub in ("data_sheets", "pid", "pfd", "operating_manuals", "standards", "moc"):
+        assert expected_sub in gcs_data["raw_subfolders"]
+    assert gcs_data["raw_subfolders"]["pid"] == 1
+    assert gcs_data["raw_subfolders"]["moc"] == 0
 
     # 2. POST /api/extractor/chat/stream with sync_to_spanner=True streams step + tool latency + sync
     with client.stream(

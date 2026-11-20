@@ -214,9 +214,24 @@ async function loadConceptDossier(tagOrId) {
           `<tr><td>${escapeHtml(p.parameter_name)}</td><td>${escapeHtml(p.parameter_value)} ${escapeHtml(p.parameter_unit || "")}</td><td>${p.has_conflict ? "CONFLICT" : "OK"}</td></tr>`
       )
       .join("");
+    const renderRoleBadge = (role) => {
+      const r = String(role || "PRIMARY").toUpperCase();
+      const cls =
+        r === "MOC_AUTHORITY"
+          ? "role-moc"
+          : r === "PENDING_REDRAFT"
+            ? "role-redraft"
+            : r === "CONFLICTING"
+              ? "role-conflict"
+              : "role-primary";
+      return `<span class="wb-role-badge ${cls}">${escapeHtml(r)}</span>`;
+    };
     const lineageHtml = (data.lineage_traces || [])
       .slice(0, 10)
-      .map((l) => `<li><code>${escapeHtml(l.filename || l.source_id)}</code> (${escapeHtml(l.source_role || "PRIMARY")})</li>`)
+      .map(
+        (l) =>
+          `<li><code>${escapeHtml(l.filename || l.source_id)}</code> ${renderRoleBadge(l.source_role)}</li>`
+      )
       .join("");
 
     el.innerHTML = `

@@ -4,12 +4,12 @@
 
 | Field | Value |
 | :--- | :--- |
-| **Spec ID** | `SPEC-20261120-UNIFIED-WORKBENCH-V2` |
+| **Spec ID** | `SPEC-20261120-UNIFIED-WORKBENCH-V2` *(Consolidated Master Specification & Living Execution Plan — v1 → MOC → v2 → v2.2)* |
 | **Workload Type** | `Hybrid` |
-| **Status** | `Implemented` |
+| **Status** | `Implemented & Deployed` |
 | **Author** | Platform Engineering Team |
 | **Date** | `2026-11-20` |
-| **Version** | `1.0` |
+| **Version** | `2.2` |
 | **Discovery Reference** | `N/A` |
 | **Baseline Reference** | `specs/baseline/system-overview.md` |
 
@@ -400,9 +400,43 @@ sequenceDiagram
 - **Unit & Property-Based Tests (`tests/test_deploy_and_model_config.py`):** Verify unified service & Cloud Run Job config resolution, `NONPROD_*` vs. `PROD_*` isolation invariants, zero `allUsers` bindings in `terraform/main.tf`, and `terraform validate` (if `terraform` CLI is installed).
 - **Completion Criteria:** Zero High/Critical SAST findings, `validate_waf_saif.py` PASS, `validate_sdlc_gate.py --phase execution` PASS, and 100% pytest pass rate.
 
+### Step 7: v2.1–v2.2 Streamlined UX, Live Telemetry, Non-Blocking Worker SSE & MOC Lifecycle Completion
+- **Implementation:**
+  - **Streamlined Persistent Extractor Toolbar (Raw Docs & OKF Bundle Views):** Exactly 2 extract buttons (`Batch Extract + Sync (Job)` with interactive scope/sync launcher modal + Advanced Sync/Purge HITL; zero-Enter `Extract + Sync (Interactive)` executing immediately on click without a `?` popover) + `↻ Sync GCS` (`POST /api/gcs/sync`) + `Assistant` toggle (left-pane small refresh icon removed).
+  - **All 6 Supported Document Types Always Visible:** `unified_web/manifest.py` seeds all 6 canonical `ALLOWED_RAW_SUBFOLDERS` (`data_sheets`, `pid`, `pfd`, `operating_manuals`, `standards`, `moc`) at count `0` so every supported doc type renders in sidebar filter chips and the Batch Job scope selector; `reference/raw/moc/README.md` added.
+  - **Shared Live Execution Trace & Latency Card (`unified_web/static/js/telemetry-card.js`):** Auto-expanded while running in **both** Extractor Assistant (`POST /api/extractor/chat/stream`) and Knowledge Graph & Query (`POST /api/query/chat/stream`), displaying live model badge, elapsed timer, active `RUNNING` → `COMPLETED` tool/step rows, args summary, and exact per-step latency (`ms`) updating in place without duplicates.
+  - **Non-Blocking Worker-Thread ADK SSE & 8x Parallel Vision:** Offloaded synchronous ADK tool execution to `asyncio.to_thread` with thread-safe SSE queueing + 15s `: keepalive` heartbeats; added `multimodal_execution_context` (`ContextVar`) in `extracter_agent/pdf/processor.py` propagating the selected Gemini 4 model across PDFs and standalone images, `max_workers=8`, `180s` per-attempt HTTP timeout, and live per-page `VISION // MULTIMODAL` / `VISION // GCS CACHE` progress events.
+  - **MOC & Document Revision Lifecycle Completion (Consolidating `SPEC-20261005`):** Full `MOCChangeRecord`, `compare_revision_tokens()`, `is_moc_source()`, `superseded_sources`, `removed_instruments`, `removed_connections`, `MOC_AUTHORITY` / `PENDING_REDRAFT` Spanner lineage roles (`11/11` tests in `tests/test_moc_and_revision_lifecycle.py`), explicit `moc/*.pdf` rules in `extracter_agent/agent/orchestrator.py`, and color-coded `MOC_AUTHORITY` / `PENDING_REDRAFT` / `CONFLICTING` badges in `unified_web/static/js/query-tab.js`.
+- **Unit & Property-Based Tests:** `tests/test_v2_ui_contracts.py`, `tests/test_v2_unified_api_and_jobs.py`, `tests/test_moc_and_revision_lifecycle.py`, `tests/test_v2_models_and_spanner.py` (including real PyJWT ES256 JWK Set cryptographic verification & `multimodal_execution_context` thread propagation).
+
 ---
 
-## 10. Plan Progress Tracking & Living Spec Synchronization
-- **Progress Report:** Tracked live in [`specs/plan/PROGRESS_REPORT_20261120.md`](../plan/PROGRESS_REPORT_20261120.md) and indexed in [`specs/README.md`](../README.md).
-- **Living Spec Sync:** Any schema, API contract, or ADR adjustment during Steps 1–6 will be synchronized back into this document in the same commit (**Zero Spec Drift**).
-- **RCA Log (Rule 13):** Any test or eval failure encountered during execution will be logged with root cause, options, and user decision in `specs/plan/PROGRESS_REPORT_20261120.md`.
+## 10. Consolidated Living Execution Plan, Deployment Inventory & Rule 13 RCA Log
+
+*(Consolidates all historical v1/MOC/v2/v2.1/v2.2 plans and progress reports into this single authoritative file; indexed in [`specs/README.md`](../README.md).)*
+
+### 10.1 Master Milestone & Verification Matrix
+
+| Milestone | Scope | Status | Unit + PBT Verification |
+| :--- | :--- | :--- | :--- |
+| **v1 Foundation (2026-09-22 – 2026-10-05)** | OKF Extracter ADK Agent, Spanner Graph-RAG Query Agent (`100%` eval pass, `1.000` groundedness), Repository Sanitization, and MOC Authority / Document Revision Lifecycle (`MOC_AUTHORITY`, `PENDING_REDRAFT`, topological removals, `compare_revision_tokens`) | `Completed` | `PASS` (`test_moc_and_revision_lifecycle.py`: `11/11`, `test_okf_unit.py`, `test_query_agent_unit.py`) |
+| **v2 Phase 1–2 (Steps 1–6)** | `engineering-kg-gc` code sync (zero `reference/` PDF changes), Unified Vanilla ESM Workbench (`okf-engineering-workbench`), Parameterized Cloud Run Job (`okf-pipeline-job`), Selectable Gemini 4 models (`carbon` / `hydrogen` / `argon` / `neon`), Spanner DDL v2 (`OkfTextEmbeddingModel` + `ML.PREDICT` + `idx_okf_chunks_vec` ANN + 9 edge indexes), Pattern 1B Native IAP + PyJWT ES256, Terraform IaC & `engineering-kg-demo` bootstrap | `Completed` | `PASS` (`validate_waf_saif.py`: `10/10 Passed`; `terraform validate`: Valid; `218+ passed`) |
+| **v2.1–v2.2 UX, Telemetry & MOC Polish (Step 7)** | Persistent 2-extract-button toolbar + `Sync GCS` (left-pane refresh & `?` popover removed), all 6 doc types always shown + `reference/raw/moc/`, zero-Enter interactive SSE extraction + shared live `telemetry-card.js` in both chats, worker-thread non-blocking ADK SSE + 8x parallel vision + live per-page cache/vision progress, explicit MOC orchestrator rules + color-coded dossier role badges, consolidated `docs/` & `specs/` | `Completed` | `PASS` (`node --check` all 9 ESM files; full `pytest tests/` `220 passed, 2 skipped`) |
+
+### 10.2 Live GCP Deployment Inventory (`engineering-kg-demo` / `asia-southeast1`)
+
+| Resource | Live Identifier / Endpoint | Posture & Verification |
+| :--- | :--- | :--- |
+| **Unified Cloud Run Service** | `okf-engineering-workbench`<br>- Primary IAP URL: `https://okf-engineering-workbench-435347747480.asia-southeast1.run.app`<br>- Run URL: `https://okf-engineering-workbench-nzqke34jza-as.a.run.app` | Pattern 1B Direct Cloud Run Native IAP (`--iap`, `--invoker-iam-check`, **0 `allUsers`**); PyJWT ES256 JWK Set + `IAP_JWT_AUDIENCE=/projects/435347747480/locations/asia-southeast1/services/okf-engineering-workbench`; Direct VPC (`default`), `4 vCPU / 8Gi`, `min=0..max=3`. |
+| **Cloud Run Pipeline Job** | `okf-pipeline-job` (`4 vCPU / 8Gi / 3600s timeout`, Direct VPC) | Image `asia-southeast1-docker.pkg.dev/engineering-kg-demo/okf-workbench/okf-pipeline-job:latest`; supports `JOB_MODE=extract \| sync \| extract_and_sync` + `GEMINI_MODEL` overrides. |
+| **Cloud Spanner Enterprise DB** | `okf-knowledge-spanner` (`100 PU`, `ENTERPRISE`) / `okf_knowledge_graph` | DDL v2 (`11/11`): `OkfTextEmbeddingModel` (`ML.PREDICT` + Spanner SA `roles/aiplatform.user`), `idx_okf_chunks_vec` ANN `VECTOR INDEX`, and 9 graph/filter secondary indexes. |
+| **GCS Knowledge Bucket** | `gs://engineering-kg-demo-okf-knowledge` (UBLA, `asia-southeast1`) | 11 raw PDFs under `reference/raw/`, OKF bundle under `okf-bundles/engineering-kg-demo/`, and vision cache under `cache/multimodal_v8/`. |
+| **Vertex AI Gemini 4 Models** | `gemini-4-carbon`, `gemini-4-hydrogen`, `gemini-4-argon`, `gemini-4-neon` (`global`) | All 4 verified live on `engineering-kg-demo` (`global`). |
+
+### 10.3 Root Cause Analysis (RCA) Log (Rule 13)
+1. **Idempotency Deadlock (`unified_web/jobs.py`):** Non-reentrant `threading.Lock()` caused deadlock during `submit_job()` idempotency replay → Fixed cleanly with `threading.RLock()` and releasing lock before reading heartbeats.
+2. **Missing Default VPC in New Project (`scripts/bootstrap_gcp_project.sh`):** `engineering-kg-demo` had `compute.skipDefaultNetworkCreation` → Added idempotent VPC `default` + subnet (`10.10.0.0/24`, PGA) + Cloud Router/NAT provisioning.
+3. **Unescaped Commas in `gcloud --set-env-vars` (`deploy.sh`):** `ALLOWED_GEMINI_MODELS` commas split env args → Fixed using `^|^` pipe delimiter syntax.
+4. **Live IAP JWT Verification Failure (`unified_web/security.py`, `pyproject.toml`, `deploy.sh`, `terraform/main.tf`):** `google-auth` required `PyJWT` for RFC 7517 `public_key-jwk` and needed explicit `IAP_JWT_AUDIENCE` → Approved Option 1: added `PyJWT[crypto]>=2.8.0`, thread-safe cached JWK Set ES256 verification, strict `iss`/`aud` checks, and real ES256 JWK cryptographic unit tests.
+5. **Interactive Extraction 900s Timeout & Event-Loop Freeze (`unified_web/server.py`, `extracter_agent/pdf/processor.py`, `scripts/pipeline_job_runner.py`):** Synchronous ADK `process_raw_pdf_tool` ran on FastAPI's asyncio loop (`606s` concurrent latency), `max_workers=4` queued Page 5 behind Pages 1–4, and vision calls hardcoded `cfg.gemini_model` → Offloaded ADK SSE execution to a worker thread (`asyncio.to_thread` + 15s keep-alive heartbeats), added `multimodal_execution_context` propagating the selected Gemini 4 model across PDFs & images, raised concurrency to `max_workers=8` with `180s` per-attempt HTTP timeout, and streamed live per-page vision progress into `telemetry-card.js`.
+6. **GCS Sync Guard When Offline (`unified_web/manifest.py`, `unified_web/server.py`):** `rebuild_manifest(force_gcs=True)` invoked GCS sync even when `USE_GCS_STORAGE=false` → Guarded `sync_bundle_from_gcs` strictly behind `cfg.use_gcs_storage`.

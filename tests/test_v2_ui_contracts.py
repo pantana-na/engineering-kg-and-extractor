@@ -34,11 +34,12 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     for model_id in ALLOWED_GEMINI_MODELS:
         assert f'value="{model_id}"' in index_html
 
-    # Streamlined v2.1 persistent 2-extract-button toolbar, GCS sync, popups & Purge HITL modal
+    # Streamlined v2.2 persistent 2-extract-button toolbar, GCS sync, Batch modal & Purge HITL modal
     assert 'id="btn-open-batch-modal"' in index_html
     assert 'id="btn-interactive-extract-sync"' in index_html
-    assert 'id="btn-interactive-info"' in index_html
-    assert 'id="interactive-info-popover"' in index_html
+    assert 'id="btn-interactive-info"' not in index_html
+    assert 'id="interactive-info-popover"' not in index_html
+    assert 'id="ext-refresh-btn"' not in index_html
     assert 'id="btn-sync-gcs"' in index_html
     assert 'id="batch-job-modal"' in index_html
     assert 'id="batch-scope-select"' in index_html
@@ -47,13 +48,15 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     assert 'id="purge-modal"' in index_html
     assert "PURGE SPANNER" in index_html
 
-    # Verify both Extractor & Query chats use the shared live telemetry-card.js component
+    # Verify both Extractor & Query chats use the shared live telemetry-card.js component & MOC badges
     ext_js = (STATIC_DIR / "js" / "extractor-tab.js").read_text(encoding="utf-8")
     qry_js = (STATIC_DIR / "js" / "query-tab.js").read_text(encoding="utf-8")
     assert "./telemetry-card.js" in ext_js
     assert "./telemetry-card.js" in qry_js
     assert "/api/extractor/chat/stream" in ext_js
     assert "/api/gcs/sync" in ext_js
+    assert "MOC_AUTHORITY" in qry_js
+    assert "PENDING_REDRAFT" in qry_js
 
     # Verify every local ES module import resolves on disk
     js_dir = STATIC_DIR / "js"
