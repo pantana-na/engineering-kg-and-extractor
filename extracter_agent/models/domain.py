@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -39,11 +40,197 @@ def is_nozzle_mark_only(tag: str) -> bool:
     return bool(re.match(r"^[A-Z]\d{2}\b", t))
 
 
+_ISA_EQUIP_TAG_RE = re.compile(
+    r"^(?:[A-Z]{1,5}-\d{2,5}[A-Z0-9_-]*|\d+-[A-Z]{1,5}-\d{2,5}[A-Z0-9_-]*|[A-Z]{1,4}-\d{2}-\d{3,5}[A-Z0-9_-]*)$"
+)
+
+_GENERIC_SINGLE_WORD_EQUIP_NAMES: frozenset[str] = frozenset(
+    {
+        "equipment",
+        "untagged",
+        "unknown",
+        "general",
+        "system",
+        "unit",
+        "plant",
+        "process",
+        "item",
+        "asset",
+    }
+)
+
+
+def _is_isa_equipment_tag(tag_or_stem: str) -> bool:
+    """Return True iff `tag_or_stem` conforms to a numbered plant/ISA equipment tag pattern."""
+    cleaned = sanitize_tag_filename(tag_or_stem).upper()
+    if not cleaned or cleaned == "UNTAGGED":
+        return False
+    return bool(_ISA_EQUIP_TAG_RE.match(cleaned))
+
+
+def _singularize_alias_token(token: str) -> str:
+    """Deterministically singularize lowercase alphabetic English plural nouns of length >= 5."""
+    t = token.lower()
+    if len(t) < 5 or not t.isalpha():
+        return t
+    if len(t) >= 6 and t.endswith("ies"):
+        return f"{t[:-3]}y"
+    if t.endswith(("ches", "shes", "xes", "zes", "ses")):
+        return t[:-2]
+    if t.endswith("s") and not t.endswith(("ss", "us", "is", "as", "os")):
+        return t[:-1]
+    return t
+
+
+def _normalize_alias_key(text: str) -> str:
+    """Normalize an equipment service name or alias into a canonical singularized comparison key."""
+    if not text:
+        return ""
+    unlinked = re.sub(r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", str(text))
+    unparen = re.sub(r"\s*\([^)]*\)", " ", unlinked)
+    tokens = [
+        _singularize_alias_token(tok)
+        for tok in re.findall(r"[a-z0-9]+", unparen.lower())
+        if tok
+    ]
+    return " ".join(tokens)
+
+
+def _extract_unit_number_key(unit_str: str) -> str:
+    """Extract canonical numeric plant unit code (normalizing 4-digit 'XX00' section numbers to 'XX')."""
+    if not unit_str:
+        return ""
+    s = str(unit_str).strip().lower()
+    m_pref = re.search(r"\bunit[-_\s]*(\d{2,4})\b", s)
+    raw_num = m_pref.group(1) if m_pref else ""
+    if not raw_num and re.fullmatch(r"\d{2,4}", s):
+        raw_num = s
+    if not raw_num:
+        m_any = re.search(r"(?<![\d-])(\d{2,4})(?![\d-])", s)
+        if m_any:
+            cand = m_any.group(1)
+            if not cand.startswith(("19", "202")):
+                raw_num = cand
+    if len(raw_num) == 4 and raw_num.endswith("00"):
+        return raw_num[:2]
+    return raw_num
+
+
+def _units_are_compatible(unit_a: str, unit_b: str) -> bool:
+    """Return True when neither unit specifies a conflicting numeric plant unit code."""
+    ka = _extract_unit_number_key(unit_a)
+    kb = _extract_unit_number_key(unit_b)
+    return not ka or not kb or ka == kb
+
+
+def _extract_unit_domain_key(slug_or_id: str) -> tuple[str, str]:
+    """Extract `(core_domain_key, unit_number_key)` from a `units/*` slug or concept ID."""
+    stem = slug_or_id.removesuffix(".md").split("/")[-1].lower().strip("-")
+    if not stem:
+        return "", ""
+    unit_num = ""
+    m_lead = re.match(r"^unit-(\d{2,4})-(.+)$", stem)
+    if m_lead:
+        unit_num = _extract_unit_number_key(m_lead.group(1))
+        stem = m_lead.group(2)
+    else:
+        m_trail = re.match(r"^(.+)-unit-(\d{2,4})$", stem)
+        if m_trail:
+            unit_num = _extract_unit_number_key(m_trail.group(2))
+            stem = m_trail.group(1)
+
+    if re.fullmatch(r"unit-\d{2,4}", stem) or re.fullmatch(r"\d{2,4}", stem):
+        return "", _extract_unit_number_key(stem)
+
+    prev = None
+    cur = stem
+    while prev != cur:
+        prev = cur
+        cur = re.sub(r"^(?:unit|section)-", "", cur)
+        cur = re.sub(r"-(?:unit|section|overview|summary)$", "", cur)
+    cur = cur.strip("-")
+    return cur, unit_num
+
+
+_C_YAML_LOADER: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def _parse_frontmatter_head(head_text: str) -> dict[str, Any]:
+    """Safely parse YAML frontmatter from the leading bytes of an OKF Markdown file."""
+    if not head_text.startswith("---"):
+        return {}
+    end_idx = head_text.find("\n---", 3)
+    if end_idx == -1:
+        return {}
+    yaml_block = head_text[3:end_idx]
+    try:
+        parsed = yaml.load(yaml_block, Loader=_C_YAML_LOADER)  # nosec B506
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _equipment_catalog_alias_keys(item: dict[str, Any]) -> set[str]:
+    """Return normalized service-name / alias keys declared on a catalog equipment item."""
+    keys: set[str] = set()
+    for candidate in (
+        item.get("entity_name") or "",
+        *(item.get("aliases") or []),
+    ):
+        norm = _normalize_alias_key(str(candidate))
+        if norm and norm not in _GENERIC_SINGLE_WORD_EQUIP_NAMES and not _is_isa_equipment_tag(str(candidate)):
+            keys.add(norm)
+    title = str(item.get("title") or "").strip()
+    if title:
+        for sep in ("—", " - ", " – "):
+            if sep in title:
+                rhs = title.split(sep, 1)[1].strip()
+                norm_rhs = _normalize_alias_key(rhs)
+                if norm_rhs and norm_rhs not in _GENERIC_SINGLE_WORD_EQUIP_NAMES and not _is_isa_equipment_tag(rhs):
+                    keys.add(norm_rhs)
+                break
+        else:
+            if not _is_isa_equipment_tag(title):
+                norm_t = _normalize_alias_key(title)
+                if norm_t and norm_t not in _GENERIC_SINGLE_WORD_EQUIP_NAMES:
+                    keys.add(norm_t)
+    return keys
+
+
 _BUNDLE_CATALOG_CACHE: dict[tuple[str, int, int, int], list[dict[str, Any]]] = {}
+_BUNDLE_EQUIP_ALIAS_MAP_CACHE: dict[tuple[str, int, int, int], dict[str, str | None]] = {}
+
+
+def _scan_bundle_md_entries(root_str: str) -> tuple[list[tuple[str, str, str, str]], int]:
+    """Fast os.scandir recursive scan returning sorted `(rel_posix, abs_path, name, stem)` and max child `st_mtime_ns`."""
+    import os
+
+    found: list[tuple[str, str, str, str]] = []
+    max_mtime_ns = 0
+    stack: list[tuple[str, str]] = [(root_str, "")]
+    while stack:
+        abs_dir, rel_prefix = stack.pop()
+        try:
+            with os.scandir(abs_dir) as it:
+                for de in it:
+                    if de.is_dir(follow_symlinks=False):
+                        sub_rel = f"{rel_prefix}/{de.name}" if rel_prefix else de.name
+                        stack.append((de.path, sub_rel))
+                    elif de.name.endswith(".md") and de.is_file(follow_symlinks=False):
+                        st_ns = de.stat(follow_symlinks=False).st_mtime_ns
+                        if st_ns > max_mtime_ns:
+                            max_mtime_ns = st_ns
+                        rel_posix = f"{rel_prefix}/{de.name}" if rel_prefix else de.name
+                        found.append((rel_posix, de.path, de.name, de.name[:-3]))
+        except OSError:
+            continue
+    found.sort(key=lambda item: item[0])
+    return found, max_mtime_ns
 
 
 def _iter_bundle_catalog(bundle_root: Path | None = None) -> list[dict[str, Any]]:
     """Dynamically inspect existing OKF concept files in the output bundle directory."""
+    import os
     from extracter_agent.config import get_config
 
     cfg = get_config()
@@ -51,39 +238,155 @@ def _iter_bundle_catalog(bundle_root: Path | None = None) -> list[dict[str, Any]
     if not root or not root.exists():
         return []
 
-    md_files = sorted(root.rglob("*.md"))
-    latest_child_mtime_ns = max((p.stat().st_mtime_ns for p in md_files), default=0)
+    abs_root = os.path.abspath(root)
+    md_entries, latest_child_mtime_ns = _scan_bundle_md_entries(abs_root)
     cache_key = (
-        str(root.resolve()),
-        root.stat().st_mtime_ns,
-        len(md_files),
+        abs_root,
+        os.stat(abs_root).st_mtime_ns,
+        len(md_entries),
         latest_child_mtime_ns,
     )
     cached = _BUNDLE_CATALOG_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
+    equip_catalog, equip_alias_map = _get_equipment_catalog_and_aliases(Path(abs_root))
+    equip_by_id: dict[str, dict[str, Any]] = {
+        str(item["concept_id"]): item for item in equip_catalog
+    }
+
     catalog: list[dict[str, Any]] = []
-    for md_file in md_files:
-        rel = md_file.relative_to(root).as_posix()
-        if md_file.name == "index.md" and rel != "index.md":
+    for rel, fpath, fname, stem in md_entries:
+        if fname in ("index.md", "log.md") and rel != "index.md":
             continue
-        stem_id = rel.removesuffix(".md")
-        category = stem_id.split("/")[0] if "/" in stem_id else "root"
+        stem_id = rel[:-3]
+        if stem_id in equip_by_id:
+            catalog.append(equip_by_id[stem_id])
+            continue
+        category = stem_id.split("/", 1)[0] if "/" in stem_id else "root"
         try:
-            head = md_file.read_text(encoding="utf-8", errors="ignore")[:2500]
+            with open(fpath, encoding="utf-8", errors="ignore") as fp:
+                head = fp.read(3500)
         except Exception:
             head = ""
-        catalog.append(
-            {
-                "concept_id": stem_id,
-                "category": category,
-                "stem": md_file.stem,
-                "head_lower": head.lower(),
-            }
-        )
+        fm = _parse_frontmatter_head(head)
+        em = fm.get("entity_metadata") if isinstance(fm.get("entity_metadata"), dict) else {}
+        raw_aliases = em.get("aliases") if isinstance(em.get("aliases"), list) else []
+        entry: dict[str, Any] = {
+            "concept_id": stem_id,
+            "category": category,
+            "stem": stem,
+            "stem_upper": stem.upper(),
+            "head_lower": head.lower(),
+            "title": str(fm.get("title") or ""),
+            "entity_tag": str(em.get("tag") or ""),
+            "entity_name": str(em.get("name") or ""),
+            "entity_unit": str(em.get("unit") or ""),
+            "aliases": [str(a).strip() for a in raw_aliases if str(a).strip()],
+        }
+        catalog.append(entry)
+
     _BUNDLE_CATALOG_CACHE[cache_key] = catalog
+    _BUNDLE_EQUIP_ALIAS_MAP_CACHE[cache_key] = dict(equip_alias_map)
     return catalog
+
+
+_EQUIP_ONLY_CATALOG_CACHE: dict[
+    tuple[str, int, int, int],
+    tuple[list[dict[str, Any]], dict[str, str | None]],
+] = {}
+
+
+def _get_equipment_catalog_and_aliases(
+    bundle_root: Path | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, str | None]]:
+    """Fast os.scandir-backed equipment-only catalog and O(1) unique prose alias map."""
+    import os
+    from extracter_agent.config import get_config
+
+    cfg = get_config()
+    root = bundle_root or cfg.output_bundle_dir
+    if not root:
+        return [], {}
+    equip_dir = Path(root) / "equipment"
+    if not equip_dir.is_dir():
+        return [], {}
+
+    entries_meta: list[tuple[str, str, int]] = []
+    max_ns = 0
+    with os.scandir(equip_dir) as it:
+        for de in it:
+            if not de.name.endswith(".md") or de.name in ("index.md", "log.md") or not de.is_file():
+                continue
+            st_ns = de.stat().st_mtime_ns
+            if st_ns > max_ns:
+                max_ns = st_ns
+            entries_meta.append((de.name[:-3], de.path, st_ns))
+
+    cache_key = (
+        os.path.abspath(equip_dir),
+        equip_dir.stat().st_mtime_ns,
+        len(entries_meta),
+        max_ns,
+    )
+    cached_pair = _EQUIP_ONLY_CATALOG_CACHE.get(cache_key)
+    if cached_pair is not None:
+        return cached_pair
+
+    entries_meta.sort(key=lambda x: x[0])
+    c_loader: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    equip_catalog: list[dict[str, Any]] = []
+    alias_hits: dict[str, list[str]] = {}
+
+    for stem, fpath, _ in entries_meta:
+        try:
+            with open(fpath, encoding="utf-8", errors="ignore") as fp:
+                head = fp.read(3500)
+        except Exception:
+            head = ""
+        fm: dict[str, Any] = {}
+        if head.startswith("---"):
+            end_idx = head.find("\n---", 3)
+            if end_idx != -1:
+                try:
+                    parsed = yaml.load(head[3:end_idx], Loader=c_loader)  # nosec B506
+                    if isinstance(parsed, dict):
+                        fm = parsed
+                except Exception:
+                    fm = {}
+        em = fm.get("entity_metadata") if isinstance(fm.get("entity_metadata"), dict) else {}
+        raw_aliases = em.get("aliases") if isinstance(em.get("aliases"), list) else []
+        is_isa = _is_isa_equipment_tag(stem)
+        entry: dict[str, Any] = {
+            "concept_id": f"equipment/{stem}",
+            "category": "equipment",
+            "stem": stem,
+            "stem_upper": stem.upper(),
+            "head_lower": head.lower(),
+            "title": str(fm.get("title") or ""),
+            "entity_tag": str(em.get("tag") or ""),
+            "entity_name": str(em.get("name") or ""),
+            "entity_unit": str(em.get("unit") or ""),
+            "aliases": [str(a).strip() for a in raw_aliases if str(a).strip()],
+            "is_isa_tag": is_isa,
+            "base_id": _extract_equipment_base_id(stem),
+        }
+        if is_isa:
+            a_keys = _equipment_catalog_alias_keys(entry)
+            entry["alias_keys"] = a_keys
+            for ak in a_keys:
+                alias_hits.setdefault(ak, []).append(stem)
+        else:
+            entry["alias_keys"] = set()
+        equip_catalog.append(entry)
+
+    alias_map: dict[str, str | None] = {
+        ak: stems[0] if len(stems) == 1 else None
+        for ak, stems in alias_hits.items()
+    }
+    res_pair = (equip_catalog, alias_map)
+    _EQUIP_ONLY_CATALOG_CACHE[cache_key] = res_pair
+    return res_pair
 
 
 def _extract_equipment_base_id(tag_str: str) -> str:
@@ -106,8 +409,9 @@ def derive_canonical_equipment_tag(
     operating manuals, or connected vessel datasheets never cause cross-entity filename collisions.
     """
     safe = sanitize_tag_filename(tag)
+    safe_upper = safe.upper()
     req_base = _extract_equipment_base_id(safe)
-    catalog = [c for c in _iter_bundle_catalog(bundle_root) if c["category"] == "equipment"]
+    catalog, alias_map = _get_equipment_catalog_and_aliases(bundle_root)
 
     # 1. Extract PS-<TAG> candidates from source_files that share the same base equipment ID
     ps_candidates: list[str] = []
@@ -123,12 +427,17 @@ def derive_canonical_equipment_tag(
                 ps_candidates.append(cand)
 
     for ps_tag in ps_candidates:
-        if any(c["stem"].upper() == ps_tag for c in catalog):
+        if any(c.get("stem_upper", c["stem"].upper()) == ps_tag for c in catalog):
             return ps_tag
 
+    if bundle_root is None and ps_candidates and re.search(r"\d[A-Z]{2}$", safe):
+        if any(" a_b " in (s or "").lower() for s in (source_files or [])):
+            return ps_candidates[0]
+
     # 2. Exact stem match in bundle catalog
-    if any(c["stem"].upper() == safe.upper() for c in catalog):
-        return next(c["stem"] for c in catalog if c["stem"].upper() == safe.upper())
+    for c in catalog:
+        if c.get("stem_upper", c["stem"].upper()) == safe_upper:
+            return str(c["stem"])
 
     # 3. Match existing catalog file only if it shares the exact same base equipment ID
     #    and explicitly declares this exact equipment tag in its frontmatter or dedicated PS-<TAG>
@@ -140,7 +449,7 @@ def derive_canonical_equipment_tag(
     )
     raw_tag_lower = tag.strip().lower()
     for c in catalog:
-        c_base = _extract_equipment_base_id(str(c["stem"]))
+        c_base = c.get("base_id") or _extract_equipment_base_id(str(c["stem"]))
         if c_base != req_base:
             continue
         head = c["head_lower"]
@@ -155,8 +464,16 @@ def derive_canonical_equipment_tag(
         if dedicated_ps_token and dedicated_ps_token in head:
             return str(c["stem"])
 
+    # 3b. Prose service-name -> unique Canonical ISA Tag resolution via O(1) cached frontmatter index
+    if not _is_isa_equipment_tag(safe):
+        probe_key = _normalize_alias_key(tag)
+        if probe_key and probe_key not in _GENERIC_SINGLE_WORD_EQUIP_NAMES:
+            winner = alias_map.get(probe_key)
+            if winner:
+                return winner
+
     # 4. When no catalog entry exists yet, only use PS-<TAG> candidate over a 2-unit paired tag
-    #    if the PS-<TAG> candidate is at least as specific (e.g. PS-X2309AB) or the source title explicitly embeds ' A_B '
+    #    if the PS-<TAG> candidate is at least as specific (e.g. PS-C101AB) or the source title explicitly embeds ' A_B '
     if ps_candidates and re.search(r"\d[A-Z]{2}$", safe):
         has_inline_ab = any(" a_b " in (s or "").lower() for s in (source_files or []))
         if len(ps_candidates[0]) >= len(safe) or has_inline_ab:
@@ -320,6 +637,33 @@ def derive_canonical_concept_id(
             if item["concept_id"].lower() == cand_exact:
                 return str(item["concept_id"])
 
+    # 1b. Unit domain-slug coalescing (before _BOILERPLATE_SLUG_TOKENS strips 'unit'/'section' domain tokens)
+    if req_cat == "units":
+        req_dom, req_unum = _extract_unit_domain_key(raw_slug)
+        if not req_unum and isinstance(entity_metadata, dict):
+            req_unum = _extract_unit_number_key(str(entity_metadata.get("unit") or ""))
+        if req_dom:
+            unit_matches: list[dict[str, Any]] = []
+            for item in catalog:
+                if str(item["category"]).lower() != "units":
+                    continue
+                item_dom, item_unum = _extract_unit_domain_key(str(item["stem"]))
+                if not item_unum:
+                    item_unum = _extract_unit_number_key(str(item.get("entity_unit") or ""))
+                if item_dom == req_dom and _units_are_compatible(req_unum, item_unum):
+                    unit_matches.append(item)
+            if len(unit_matches) == 1:
+                return str(unit_matches[0]["concept_id"])
+            if len(unit_matches) > 1:
+                exact_unum = [
+                    m
+                    for m in unit_matches
+                    if _extract_unit_domain_key(str(m["stem"]))[1] == req_unum
+                ]
+                pool = exact_unum or unit_matches
+                pool_sorted = sorted(pool, key=lambda m: (len(str(m["stem"])), str(m["concept_id"])))
+                return str(pool_sorted[0]["concept_id"])
+
     # 2. Match by target category + boilerplate-free domain token specificity + identifier guard
     slug_tokens = set(re.findall(r"[a-z0-9]{2,}", core_slug.lower()))
     core_slug_tokens = slug_tokens - _BOILERPLATE_SLUG_TOKENS
@@ -349,10 +693,8 @@ def derive_canonical_concept_id(
         item_id_tokens = _extract_distinct_id_tokens(item_stem_tokens)
 
         # Guard A: Never merge two concepts that carry different numeric/code identifiers
-        # (e.g., '0003' vs '0004', 'ch1' vs 'ch2', '98-82-8' vs '98-86-2', 'a6-2-2' vs 'a6-2-3')
-        if slug_id_tokens and item_id_tokens and slug_id_tokens != item_id_tokens:
-            continue
-        if item_cat == req_cat and bool(slug_id_tokens) != bool(item_id_tokens):
+        # (e.g., '0003' vs '0004', 'ch1' vs 'ch2', '98-82-8' vs '98-86-2', 'std-pha-001' vs unnumbered chapter)
+        if slug_id_tokens != item_id_tokens:
             continue
 
         # Guard B: Direct strict-subset guard between requested tokens and catalog item tokens
@@ -586,6 +928,24 @@ class InstrumentLoop(BaseModel):
         return out
 
 
+class MOCChangeRecord(BaseModel):
+    moc_id: str = Field(..., description="MOC, ECN, or FCR identifier or filename")
+    date: str = Field(default="", description="Approval or implementation date (YYYY-MM-DD)")
+    change_type: str = Field(
+        default="PARAMETER_OVERRIDE",
+        description="PARAMETER_OVERRIDE, TOPOLOGY_ REROUTE, INSTRUMENT_CHANGE, DECOMMISSION, or REVISION_UPDATE",
+    )
+    summary: str = Field(..., description="Engineering description of the authorized modification")
+    affected_items: list[str] = Field(
+        default_factory=list,
+        description="List of modified parameters, stream IDs, or instrument loop tags",
+    )
+    pending_redraft_drawings: list[str] = Field(
+        default_factory=list,
+        description="Base drawings/datasheets overridden by this MOC that are awaiting master redraft",
+    )
+
+
 class EquipmentEntity(BaseModel):
     tag: str = Field(..., description="Unique equipment plant identifier tag")
     name: str = Field(..., description="Descriptive equipment title")
@@ -593,6 +953,10 @@ class EquipmentEntity(BaseModel):
         ..., description="Equipment class (e.g. Column, Heat Exchanger, Pump, Vessel)"
     )
     unit: str = Field(..., description="Plant unit or process section code")
+    aliases: list[str] = Field(
+        default_factory=list,
+        description="Prior equipment tags, superseded train identifiers, or alternate tag aliases",
+    )
     tags: list[str] = Field(default_factory=list)
     function_summary: str
     design_data: list[EngineeringParameter] = Field(default_factory=list)
@@ -604,6 +968,23 @@ class EquipmentEntity(BaseModel):
     connections: list[ConnectionStream] = Field(default_factory=list)
     hazards: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
+    superseded_sources: list[str] = Field(
+        default_factory=list,
+        description="Document filenames or revision citations retired/superseded by newer revisions or MOCs",
+    )
+    removed_instruments: list[str] = Field(
+        default_factory=list,
+        description="Instrument loop tags decommissioned or removed by a newer drawing revision or MOC",
+    )
+    removed_connections: list[str] = Field(
+        default_factory=list,
+        description="Stream or piping line IDs decommissioned or removed by a newer drawing revision or MOC",
+    )
+    moc_history: list[MOCChangeRecord] = Field(
+        default_factory=list,
+        description="Chronological log of Management of Change (MOC) and Engineering Change Notices (ECN)",
+    )
+
 
 
 class HazardEntity(BaseModel):

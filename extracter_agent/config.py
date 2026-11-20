@@ -23,7 +23,7 @@ class AppConfig(BaseModel):
     )
     git_repo_url: str = Field(
         default_factory=lambda: os.getenv(
-            "GIT_REPO_URL", "https://github.com/pantana-na/engineering-kg-and-extractor.git"
+            "GIT_REPO_URL", "https://github.com/pantana-na/engineering-kg-gc.git"
         )
     )
     google_cloud_project: str = Field(
@@ -38,7 +38,7 @@ class AppConfig(BaseModel):
         default_factory=lambda: os.getenv("GEMINI_LOCATION", "global")
     )
     gemini_model: str = Field(
-        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-4-argon")
     )
     deployment_target: str = Field(
         default_factory=lambda: os.getenv("DEPLOYMENT_TARGET", "agent_runtime")

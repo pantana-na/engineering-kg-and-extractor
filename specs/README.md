@@ -43,9 +43,10 @@ All work in this repository is governed by the rules codified in [`_agents/rules
 ## Active Specifications Registry
 
 ### 1. Baseline Specifications ([`specs/baseline/`](./baseline/))
-- [`BASELINE-20260922-EXTRACTER-AGENT-SYSTEM`](./baseline/system-overview.md): Full baseline architecture, immutable reference data sources, environment parameters, and core invariants.
+- [`BASELINE-20261120-EXTRACTER-AGENT-SYSTEM`](./baseline/system-overview.md): Full v2 brownfield baseline architecture, upstream `engineering-kg-gc` delta, Spanner/Dataplex bottlenecks, immutable reference data invariants, and WAF/SAIF gap assessment.
 
 ### 2. Feature Specifications ([`specs/features/`](./features/))
+- [`SPEC-20261120-UNIFIED-WORKBENCH-V2`](./features/SPEC-20261120-UNIFIED-WORKBENCH-V2.md): Unified Engineering OKF Workbench v2 (merged Extractor + Query tabbed Vanilla ESM UI, parameterized `okf-pipeline-job` Cloud Run Job, selectable Gemini 4 models, Spanner native `ML.PREDICT` embeddings + ANN Vector & edge secondary indexes, and WAF/SAIF 2.0 hardening).
 - [`SPEC-20260922-OKF-EXTRACTER-AGENT`](./features/SPEC-20260922-OKF-EXTRACTER-AGENT.md): Autonomous OKF Extracter Agent on Google ADK, Gemini Enterprise Agent Platform, PDF processing, and GCS publication.
 - [`SPEC-20260929-OKF-SPANNER-GRAPH-RAG-AGENT`](./features/SPEC-20260929-OKF-SPANNER-GRAPH-RAG-AGENT.md): Separate ADK OKF Spanner Graph-RAG & Automated Data Lineage Query Agent (`query_agent`) on Gemini Enterprise Agent Platform (`agent_runtime`) backed by Cloud Spanner (`Spanner Graph` ISO GQL + Vector Search + Full-Text Keyword Search).
 - [`SPEC-20260929-QUERY-AGENT-RETRIEVAL-WORKBENCH-UI`](./features/SPEC-20260929-QUERY-AGENT-RETRIEVAL-WORKBENCH-UI.md): 3-Pane Interactive Spanner Graph & Retrieval Workbench UI deployed as a separate Cloud Run service (`okf-query-agent-web`).
@@ -53,6 +54,7 @@ All work in this repository is governed by the rules codified in [`_agents/rules
 - [`SPEC-20261005-MOC-AND-DOCUMENT-UPDATE-LIFECYCLE`](./features/SPEC-20261005-MOC-AND-DOCUMENT-UPDATE-LIFECYCLE.md): Management of Change (MOC) authority (`MOC_AUTHORITY` / `PENDING_REDRAFT`), topological removals/reroutes (`removed_instruments`, `removed_connections`), cross-filename supersession (`superseded_sources`), deterministic revision rank comparator (`compare_revision_tokens`), auto-clearing resolved conflicts, and `reference/raw/moc/` synthetic MOC fixture.
 
 ### 3. Plan Progress Reports ([`specs/plan/`](./plan/))
+- [`PROGRESS_REPORT_20261120`](./plan/PROGRESS_REPORT_20261120.md): Unified Engineering OKF Workbench v2 (`upgrade-v2`) execution tracker, unit/PBT pass metrics, and RCA log.
 - [`PROGRESS_REPORT_20260922`](./plan/PROGRESS_REPORT_20260922.md): Implementation milestone tracking, unit & property-based test verification, and CodeMender security audit.
 - [`PROGRESS_REPORT_20260929`](./plan/PROGRESS_REPORT_20260929.md): OKF Spanner Graph-RAG Query Agent (`100%` live eval pass rate on `gemini-3.8-flash`), Dataplex Universal Catalog (`dataplex_v1`) migration, 3-Pane Retrieval Workbench UI (`okf-query-agent-web`) Cloud Run deployment, and consolidated 100% `.md`-only Spanner ingestion & lifecycle sync (`Step 7` completed).
 - [`PROGRESS_REPORT_20261001`](./plan/PROGRESS_REPORT_20261001.md): Repository sanitization, 20 synthetic engineering PDFs (`reference/raw/`), zero application logic changes (`143/143` tests passing), and Phase 3 isolated deployment runbook.

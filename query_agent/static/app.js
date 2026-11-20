@@ -20,6 +20,7 @@
 
   const state = {
     theme: localStorage.getItem("okf_query_theme") || "light",
+    geminiModel: "gemini-4-argon",
     focusTag: "",
     focusConceptId: "",
     focusKind: "equipment",
@@ -252,8 +253,11 @@
       const res = await fetch("/api/status");
       if (!res.ok) return;
       const data = await res.json();
-      if (el.headerModelBadge && data.gemini_model) {
-        el.headerModelBadge.textContent = data.gemini_model;
+      if (data.gemini_model) {
+        state.geminiModel = data.gemini_model;
+        if (el.headerModelBadge) {
+          el.headerModelBadge.textContent = data.gemini_model;
+        }
       }
       if (el.statSpannerDb && data.spanner_instance) {
         el.statSpannerDb.textContent = `${data.spanner_instance} / ${data.spanner_database}`;
@@ -1277,7 +1281,7 @@
       trust_tier: "human-reviewed",
       approved_by: ["human:expert-chemical-engineer", "process:okf-validation-suite"],
       approved_at: "2026-09-30T02:03:13Z",
-      extracted_by: "extracter_agent/gemini-3.8-flash",
+      extracted_by: `extracter_agent/${state.geminiModel || "gemini-4-argon"}`,
       extracted_at: "2026-09-30T02:03:13Z",
       bundle_version: "v5-by-equipment",
       content_md5: "",
@@ -1602,7 +1606,7 @@
     if (el.telemetryStatusPill) el.telemetryStatusPill.textContent = "RUNNING";
     if (el.telemetryTotalMs) el.telemetryTotalMs.textContent = "Running...";
     if (el.telemetryBody) {
-      el.telemetryBody.innerHTML = `<div class="telemetry-empty">Dispatching query to ADK Query Agent (<code>gemini-3.8-flash</code>)...</div>`;
+      el.telemetryBody.innerHTML = `<div class="telemetry-empty">Dispatching query to ADK Query Agent (<code>${escapeHtml(state.geminiModel || "gemini-4-argon")}</code>)...</div>`;
     }
 
     try {

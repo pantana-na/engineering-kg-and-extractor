@@ -14,7 +14,11 @@ _FRONTMATTER_DELIM = "---"
 REQUIRED_FRONTMATTER_KEYS = ("type",)
 
 
-class _TimestampPreservingLoader(yaml.SafeLoader):
+_BaseSafeLoader: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_BaseSafeDumper: Any = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+
+
+class _TimestampPreservingLoader(_BaseSafeLoader):  # type: ignore[misc]
     """SafeLoader preserving timestamps as strings matching YAML 1.2 core schema."""
 
 
@@ -25,11 +29,11 @@ _TimestampPreservingLoader.yaml_implicit_resolvers = {
         for tag, regexp in resolvers
         if tag != "tag:yaml.org,2002:timestamp"
     ]
-    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    for ch, resolvers in _BaseSafeLoader.yaml_implicit_resolvers.items()
 }
 
 
-class _OKFSafeDumper(yaml.SafeDumper):
+class _OKFSafeDumper(_BaseSafeDumper):  # type: ignore[misc]
     """SafeDumper guaranteeing round-trip string integrity without unintentional scalar coercion."""
 
 

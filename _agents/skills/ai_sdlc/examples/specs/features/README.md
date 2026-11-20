@@ -1,27 +1,23 @@
 # Feature Specifications (`specs/features/`)
 
-This directory contains formal **Feature Specifications** and architectural change proposals authored prior to implementation.
+This directory contains formal **Enterprise Solution Design & Feature Specifications** authored prior to implementation using [`specs/templates/sdd-template.md`](../templates/sdd-template.md) under [`_agents/rules/ai_sdlc_and_sdd_standards.md`](../../_agents/rules/ai_sdlc_and_sdd_standards.md).
 
-## Feature Authoring Guidelines
+## Workload Modes (`Regular App` vs. `AI Agent` / `Hybrid`)
+- **`Regular App`:** Standard web, REST/gRPC API, microservice, or data pipeline workloads on `cloud_run` / GCP native services. Omit or mark `N/A` all **`[AI-Agent Only]`** subsections; enforces **Google Cloud WAF (6 Pillars)** and **Rules 1–10 & Rule 13**.
+- **`AI Agent` / `Hybrid`:** Dual-Runtime workloads (`cloud_run` + `agent_runtime`). Enforces **Google Cloud WAF (6 Pillars)**, **Google SAIF / SAIF 2.0**, and **all Rules 1–13**.
 
-Every feature document in this directory must be created using the official template at [`specs/templates/sdd-template.md`](../templates/sdd-template.md) and adhere to the **Spec-Driven Development (SDD)** standard ([`_agents/rules/ai_sdlc_and_sdd_standards.md`](../../_agents/rules/ai_sdlc_and_sdd_standards.md)).
-
-### Required Document Sections
-1. **Problem Statement & Objectives:** Context, Goals, and explicit Non-Goals.
-2. **System Architecture & Component Interaction:**
-   - Explicit runtime allocation (Agent Platform `agent_runtime` vs Cloud Run `cloud_run`).
-   - Sequence/flow diagram showing client, proxy, ADK orchestrator, and data stores.
-3. **Data Models & Type Contracts:** Single source of truth TypeScript types, Pydantic schemas, or SQL DDL.
-4. **API Contracts & Integrations:** Endpoints, request/response bodies, HTTP status codes, error models.
-5. **UI/UX & Behavioral Specifications:** Client state transitions, loading states, error boundaries.
-6. **DevOps, Security & Governance Checklist:** Alignment with the 13 repository standards (CodeMender SAST, Cloud Run `/healthz`, ADK agent platform runtime, etc.).
-7. **Step-by-Step Implementation Plan & Test Design:**
-   - Granular steps from foundational models to UI.
-   - **Deterministic Unit Tests** for every step.
-   - **Generative Property-Based Tests (PBT)** for every step.
-   - **Live Environment Evaluation (`agents-cli eval`)** for all agent reasoning flows.
-   - Enforcement of the **4-Step RCA Protocol** if any test fails (zero quick fixes or regex patches).
-8. **Plan Progress Tracking & Living Spec Synchronization:** Linkage to `specs/plan/` and zero spec drift.
+## Required Document Sections (`sdd-template.md`)
+- **Document Control:** `Spec ID`, `Workload Type`, `Status`, `Author`, `Date`, `Version`, `Baseline Reference`.
+1. **Executive Summary & Problem Framing:** Context & Goals (§1.1), Scope & Operational / `[AI-Agent Only]` Autonomy Boundaries (§1.2), and Acceptance Criteria & SLAs (§1.3).
+2. **System Architecture, Topology & Code Contracts:** Architecture Diagram (§2.1), Service Flow & `[AI-Agent Only]` Agent Topology (§2.2), Compute Runtime, WAF 6 Pillars & `[AI-Agent Only]` Model Selection (§2.3), and Data Models, API Contracts & UI State Schemas (§2.4).
+3. **Security, Privacy, Compliance & `[AI-Agent Only]` SAIF Alignment:** Guardrails & Injection Defenses (§3.1), Identity, Auth & Sandboxing (§3.2), Network Perimeter, VPC-SC & CMEK (§3.3), and Rules 1–13 + `[AI-Agent Only]` SAIF 15-Risk Matrix (§3.4).
+4. **Resiliency, Reliability & State Integrity:** Timeouts & `[AI-Agent Only]` Anti-Loop Safeguards (§4.1), Idempotency & Transactions (§4.2), and HA, Graceful Degradation & `[AI-Agent Only]` Model Fallbacks (§4.3).
+5. **Observability, Operations & `[AI-Agent Only]` AgentOps:** `/healthz` Probes, SLOs & OpenTelemetry Span Hierarchy (§5.1), Structured Logging (§5.2), and CI/CD, Unit/PBT Testing & `[AI-Agent Only]` Live `agents-cli eval` (§5.3).
+6. **Performance Optimization, FinOps & Sustainability:** Latency & Caching (§6.1) and Unit-Cost Modeling, Sustainability (`CFE %`) & `[AI-Agent Only]` Token Economics (§6.2).
+7. **Architectural Decision Records (ADRs):** Cross-pillar WAF trade-offs (`ADR-01`, `ADR-02`, ...).
+8. **Failure Mode & Effects Analysis (FMEA):** Component failure modes, blast radius, detection signals, and automated mitigations.
+9. **Step-by-Step Implementation Plan & Test Design:** Sequential steps with **Deterministic Unit Tests** + **Generative Property-Based Tests (PBT)** *(+ `[AI-Agent Only]` live `agents-cli eval`)* and **Rule 13 4-Step RCA** enforcement.
+10. **Plan Progress Tracking & Living Spec Synchronization:** Linkage to `specs/plan/` with zero spec drift.
 
 ## Document Naming Convention
-- `SPEC-<YYYYMMDD>-<FEATURE_NAME>.md` (e.g. `SPEC-20260920-STREAMING-VOICE-GATEWAY.md`)
+- `SPEC-<YYYYMMDD>-<FEATURE_NAME>.md` (e.g., `SPEC-20261104-ORDER-SERVICE.md`)

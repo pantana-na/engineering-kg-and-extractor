@@ -21,12 +21,30 @@ def calculate_bom(bom_data: Dict[str, Any]) -> Dict[str, Any]:
     assumptions = bom_data.get("assumptions", [])
 
     total_monthly_ondemand = 0.0
-    categories = {}
+    categories: Dict[str, float] = {}
+    environments: Dict[str, float] = {}
+    compute_db_base = 0.0
 
     processed_items = []
 
+    cud_keywords = (
+        "compute",
+        "container",
+        "cloud run",
+        "cloud_run",
+        "gke",
+        "gce",
+        "database",
+        "db",
+        "cloud sql",
+        "cloudsql",
+        "spanner",
+        "memorystore",
+    )
+
     for item in items:
         name = item.get("name") or item.get("component", "Unnamed Resource")
+        environment = str(item.get("environment", "SHARED")).upper()
         category = item.get("category", "General")
         service = item.get("service", "GCP")
         sku = item.get("sku") or item.get("sku_id", "")
@@ -43,8 +61,17 @@ def calculate_bom(bom_data: Dict[str, Any]) -> Dict[str, Any]:
 
         total_monthly_ondemand += monthly_cost
         categories[category] = categories.get(category, 0.0) + monthly_cost
+        environments[environment] = environments.get(environment, 0.0) + monthly_cost
+
+        cud_eligible = item.get("cud_eligible")
+        if cud_eligible is None:
+            cat_svc = f"{category} {service}".lower()
+            cud_eligible = any(k in cat_svc for k in cud_keywords) and "storage" not in service.lower()
+        if cud_eligible:
+            compute_db_base += monthly_cost
 
         processed_items.append({
+            "environment": environment,
             "name": name,
             "category": category,
             "service": service,
@@ -57,11 +84,11 @@ def calculate_bom(bom_data: Dict[str, Any]) -> Dict[str, Any]:
             "billable_usage": billable_usage,
             "monthly_cost": monthly_cost,
             "annual_cost": monthly_cost * 12.0,
+            "cud_eligible": bool(cud_eligible),
             "notes": notes
         })
 
-    # CUD estimates (applied primarily to Compute / Cloud SQL / GKE baseline)
-    compute_db_base = categories.get("Compute", 0.0) + categories.get("Database", 0.0)
+    # CUD estimates (applied to eligible Compute / Cloud Run / Cloud SQL / GKE / Spanner baseline)
     cud_1yr_savings = compute_db_base * 0.28
     cud_3yr_savings = compute_db_base * 0.52
 
@@ -77,6 +104,7 @@ def calculate_bom(bom_data: Dict[str, Any]) -> Dict[str, Any]:
         "annual_1yr_cud": monthly_1yr_cud * 12.0,
         "monthly_3yr_cud": monthly_3yr_cud,
         "annual_3yr_cud": monthly_3yr_cud * 12.0,
+        "environment_breakdown": environments,
         "category_breakdown": categories,
         "items": processed_items,
         "assumptions": assumptions
@@ -92,6 +120,7 @@ def generate_markdown_report(result: Dict[str, Any]) -> str:
     total_yr = result.get("total_annual_ondemand", 0.0)
     mo_1yr = result.get("monthly_1yr_cud", 0.0)
     mo_3yr = result.get("monthly_3yr_cud", 0.0)
+    environments = result.get("environment_breakdown", {})
 
     md.append(f"# GCP Cloud Cost Estimate: {pname}\n")
     md.append("## 📊 Executive Summary\n")
@@ -100,6 +129,15 @@ def generate_markdown_report(result: Dict[str, Any]) -> str:
     md.append(f"| **On-Demand / Pay-as-you-go** | **${total_mo:,.2f} {curr}** | **${total_yr:,.2f} {curr}** | Baseline |")
     md.append(f"| **1-Year Committed Use (CUD)** | ${mo_1yr:,.2f} {curr} | ${mo_1yr*12:,.2f} {curr} | ~28% on eligible compute/DB |")
     md.append(f"| **3-Year Committed Use (CUD)** | ${mo_3yr:,.2f} {curr} | ${mo_3yr*12:,.2f} {curr} | ~52% on eligible compute/DB |\n")
+
+    if len(environments) > 1 or ("NONPROD" in environments or "PROD" in environments):
+        md.append("### Environment Breakdown (`NONPROD` vs `PROD`)\n")
+        md.append("| Environment | Monthly Cost | Annual Cost | % of Total |")
+        md.append("| :--- | :--- | :--- | :--- |")
+        for env_name, cost in sorted(environments.items()):
+            pct = (cost / total_mo * 100.0) if total_mo > 0 else 0.0
+            md.append(f"| **`{env_name}`** | ${cost:,.2f} {curr} | ${cost*12:,.2f} {curr} | {pct:,.1f}% |")
+        md.append("\n")
 
     md.append("## 🧩 Cost Distribution by Category\n")
     categories = result.get("category_breakdown", {})
@@ -111,9 +149,10 @@ def generate_markdown_report(result: Dict[str, Any]) -> str:
     md.append("\n")
 
     md.append("## 📋 Itemized Bill of Materials (BoM)\n")
-    md.append("| Component / Service | SKU / Configuration | Monthly Usage | Unit Price | Rate Source | Monthly Cost | Notes / Specifications |")
-    md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+    md.append("| Env | Component / Service | SKU / Configuration | Monthly Usage | Unit Price | Rate Source | Monthly Cost | Notes / Specifications |")
+    md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
     for it in result.get("items", []):
+        env_label = it.get("environment", "SHARED")
         name = it["name"]
         sku = it["sku"]
         usage = f"{it['usage_per_month']:,.2f}".rstrip("0").rstrip(".") + f" {it['unit']}"
@@ -121,7 +160,7 @@ def generate_markdown_report(result: Dict[str, Any]) -> str:
         rate_src = it.get("rate_source", "Live API / Web")
         mo_c = f"${it['monthly_cost']:,.2f}"
         notes = it["notes"]
-        md.append(f"| **{name}** ({it['service']}) | {sku} | {usage} | {unit_p} | {rate_src} | **{mo_c}** | {notes} |")
+        md.append(f"| `{env_label}` | **{name}** ({it['service']}) | {sku} | {usage} | {unit_p} | {rate_src} | **{mo_c}** | {notes} |")
     md.append("\n")
 
     assumptions = result.get("assumptions", [])

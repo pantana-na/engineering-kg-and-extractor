@@ -172,7 +172,7 @@ def build_static_data() -> dict[str, Any]:
             "project_id": "ut-interaction-demo",
             "region": "asia-southeast1",
             "gemini_location": "global",
-            "gemini_model": "gemini-3.8-flash",
+            "gemini_model": "gemini-4-argon",
             "gcs_bucket": "gs://ut-interaction-demo-okf-knowledge",
             "gcs_prefix": "okf-bundles/phenol-plant",
             "raw_pdf_count": len(raw_pdfs),
@@ -634,7 +634,7 @@ def build_static_data() -> dict[str, Any]:
                 "code_lang": "Python 3.13 // Google ADK + Gemini 3.8 Flash (Global)",
                 "code": (
                     "llm_model = Gemini(\n"
-                    "    model='gemini-3.8-flash',\n"
+                    "    model='gemini-4-argon',\n"
                     "    retry_options=HttpRetryOptions(attempts=5, initial_delay=2.0),\n"
                     "    client_kwargs={'location': 'global'},\n"
                     ")\n"
@@ -850,7 +850,7 @@ def build_static_data() -> dict[str, Any]:
                 "band": "LAYER 04 // COGNITION",
                 "name": "CognitiveClassifier & Gemini 3.8 Flash (Global Endpoint)",
                 "blurb": "Routes intents across 7 canonical classes and executes multi-turn ADK tool reasoning and 300 DPI multimodal vision on GEMINI_LOCATION=global.",
-                "chips": ["gemini-3.8-flash", "GEMINI_LOCATION=global", "5x HttpRetryOptions"],
+                "chips": ["gemini-4-argon", "GEMINI_LOCATION=global", "5x HttpRetryOptions"],
                 "down": "Structured Tool Calls (8 ADK FunctionTools)",
                 "up": "Extracted Tables, Nozzle Schedules, Loops & Discrepancies",
             },

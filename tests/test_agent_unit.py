@@ -415,3 +415,106 @@ def test_incremental_concept_markdown_table_and_section_merge(tmp_path):
     assert "DWG-23-0005_Rev0.pdf" in src_titles
 
 
+def test_inspect_existing_okf_concept_tool_bounds_large_concepts_without_data_loss(tmp_path):
+    """Verify >16 KB concepts return a bounded context digest while disk Read-Merge-Upsert stays 100% lossless."""
+    import json
+
+    bundle_dir = str(tmp_path)
+    huge_rows = "\n".join(
+        f"| TAG-{i:04d} | 0–100 kg/cm²g | High-Pressure Process Service Loop {i} | DWG-23-0001 Rev 0 |"
+        for i in range(600)
+    )
+    huge_body = (
+        "# CDN Unit Master Concept\n\n"
+        "## Process Overview\n\n"
+        + ("Detailed unit operating philosophy and reaction kinetics. " * 120)
+        + "\n\n## Master Instrument & Loop Table\n\n"
+        "| Tag | Range | Service | Source |\n"
+        "| --- | --- | --- | --- |\n"
+        f"{huge_rows}\n\n"
+        "## Safety Interlocks\n\n"
+        "- Emergency depressuring interlock ESD-2301.\n"
+    )
+    assert len(huge_body) > 50_000
+
+    generate_okf_concept_tool(
+        concept_id="units/cdn-section",
+        concept_type="Process Unit",
+        title="CDN Section",
+        description="Cumene Decomposition & Neutralization Unit.",
+        tags=[f"tag-{i}" for i in range(60)],
+        sources=[f"pid/DWG-{i:04d}.pdf" for i in range(55)],
+        body_markdown=huge_body,
+        entity_metadata={
+            "design_data": [{"parameter": f"Param-{i}", "value": str(i), "unit": "bar"} for i in range(90)],
+            "connections": [{"stream_id": f"STR-{i:03d}"} for i in range(70)],
+        },
+        output_bundle_dir=bundle_dir,
+    )
+
+    insp = inspect_existing_okf_concept_tool(
+        concept_id="units/cdn-section",
+        output_bundle_dir=bundle_dir,
+    )
+    assert insp["status"] == "found"
+    assert insp["context_digest_applied"] is True
+    assert insp["total_disk_chars"] > 50_000
+    assert len(insp["body_markdown"]) <= 10_000
+    assert len(json.dumps(insp)) < 25_000
+    assert "## Process Overview" in insp["section_headings"]
+    assert "## Master Instrument & Loop Table" in insp["section_headings"]
+    assert "## Safety Interlocks" in insp["section_headings"]
+    assert insp["frontmatter"]["entity_metadata"]["design_data_count"] == 90
+
+    # Incremental upsert on top of the >50 KB concept must still preserve all 600 rows on disk!
+    generate_okf_concept_tool(
+        concept_id="units/cdn-section",
+        concept_type="Process Unit",
+        title="CDN Section",
+        description="Updated summary.",
+        tags=["pid-enrichment"],
+        sources=["pid/DWG-9999.pdf"],
+        body_markdown="# CDN Unit Master Concept\n\n## Safety Interlocks\n\n- Added trip ESD-2399.\n",
+        output_bundle_dir=bundle_dir,
+    )
+    on_disk = (tmp_path / "units" / "cdn-section.md").read_text(encoding="utf-8")
+    assert "| TAG-0000 |" in on_disk
+    assert "| TAG-0599 |" in on_disk
+    assert "ESD-2301" in on_disk
+    assert "ESD-2399" in on_disk
+
+
+def test_pbt_bounded_body_digest_never_exceeds_max_chars():
+    """Property-Based Test: _build_bounded_body_digest strictly honors max_chars across arbitrary multi-section bodies."""
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
+
+    from extracter_agent.tools.okf_tools import _build_bounded_body_digest
+
+    section_st = st.lists(
+        st.tuples(
+            st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789 -_", min_size=1, max_size=40),
+            st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789 |.-_\n", min_size=0, max_size=4000),
+        ),
+        min_size=1,
+        max_size=20,
+    )
+
+    @given(sections=section_st, max_chars=st.integers(min_value=800, max_value=12000))
+    @settings(max_examples=50)
+    def _check(sections, max_chars):
+        body = "\n\n".join(f"## {hdr.strip() or 'Sec'}\n{txt}" for hdr, txt in sections)
+        digest, headings, truncated = _build_bounded_body_digest(body, max_chars=max_chars)
+        assert len(digest) <= max_chars
+        assert len(headings) >= len(sections)
+        if len(body) <= max_chars:
+            assert truncated is False
+            assert digest == body
+        else:
+            assert truncated is True
+            assert "[Context Digest:" in digest
+
+    _check()
+
+
+

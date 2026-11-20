@@ -321,6 +321,8 @@ During verification, CodeMender synthesized an isolated proof-of-concept (PoC) e
 """
     report_file = Path(docs_dir) / f"codemender-02-verification-{finding_id}-report.md"
     write_report(report_file, report)
+    canonical_file = Path(docs_dir) / "codemender-02-verification-report.md"
+    write_report(canonical_file, report)
     return is_confirmed, str(report_file)
 
 
@@ -375,7 +377,7 @@ CodeMender analyzed the verified vulnerability, refactored the vulnerable source
 ## 4. Verification & Validation Steps
 
 1. **Review Diff:** Inspect the code diff above to ensure application logic and architecture requirements are preserved.
-2. **Execute Local Tests:** Run your project test suite (`npm test`, `pytest`, `go test`, `mvn test`) to ensure zero regressions.
+2. **Execute Local Tests:** Run your project test suite (`npm test`, `pytest`, `go test`, `mvn test`) and Property-Based Tests (PBT) to ensure zero regressions.
 3. **Commit & Deploy:** Stage and commit the validated patch:
    ```bash
    git add -A
@@ -397,7 +399,45 @@ CodeMender analyzed the verified vulnerability, refactored the vulnerable source
 """
     report_file = Path(docs_dir) / f"codemender-03-remediation-{finding_id}-report.md"
     write_report(report_file, report)
+    canonical_file = Path(docs_dir) / "codemender-03-remediation-report.md"
+    write_report(canonical_file, report)
     return str(report_file)
+
+
+def execute_summary(docs_dir, project_id=None):
+    """Generate consolidated docs/codemender-security-audit-summary.md."""
+    docs_path = Path(docs_dir)
+    now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    findings = get_state_db_findings()
+    scan_reports = sorted(p.name for p in docs_path.glob("codemender-01-*.md")) if docs_path.exists() else []
+    verify_reports = sorted(p.name for p in docs_path.glob("codemender-02-*.md")) if docs_path.exists() else []
+    fix_reports = sorted(p.name for p in docs_path.glob("codemender-03-*.md")) if docs_path.exists() else []
+
+    report = f"""# CodeMender Consolidated Security Audit Summary
+
+> **Execution Date:** {now_str}  
+> **Google Cloud Project:** `{project_id or 'N/A'}`  
+> **Discovered Findings in State DB:** `{len(findings)}`  
+
+---
+
+## 1. Executive Security Posture
+
+- **Discovery Reports (`Phase 1`):** {', '.join(f'[`{r}`](./{r})' for r in scan_reports) or 'None'}
+- **Verification Reports (`Phase 2`):** {', '.join(f'[`{r}`](./{r})' for r in verify_reports) or 'None'}
+- **Remediation Reports (`Phase 3`):** {', '.join(f'[`{r}`](./{r})' for r in fix_reports) or 'None'}
+
+---
+
+## 2. Canonical Phase Report Links
+
+- `docs/codemender-01-vulnerability-scan-report.md`
+- `docs/codemender-02-verification-report.md`
+- `docs/codemender-03-remediation-report.md`
+"""
+    summary_file = docs_path / "codemender-security-audit-summary.md"
+    write_report(summary_file, report)
+    return str(summary_file)
 
 
 def main():
@@ -426,6 +466,11 @@ def main():
     p_fix.add_argument("--project", default=None, help="GCP Project ID")
     p_fix.add_argument("--docs-dir", default="docs", help="Directory to save report")
 
+    # summary
+    p_sum = subparsers.add_parser("summary", help="Generate consolidated security audit summary")
+    p_sum.add_argument("--project", default=None, help="GCP Project ID")
+    p_sum.add_argument("--docs-dir", default="docs", help="Directory to save report")
+
     args = parser.parse_args()
 
     if args.command == "preflight":
@@ -444,6 +489,10 @@ def main():
     elif args.command == "fix":
         rfile = execute_fix(args.finding_id, args.project, args.docs_dir)
         print(f"SUCCESS: Remediated {args.finding_id}. Report: {rfile}")
+
+    elif args.command == "summary":
+        rfile = execute_summary(args.docs_dir, args.project)
+        print(f"SUCCESS: Generated summary report. Report: {rfile}")
 
 
 if __name__ == "__main__":

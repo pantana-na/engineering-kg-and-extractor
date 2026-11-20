@@ -12,10 +12,16 @@ from google.adk.agents import Agent
 from google.adk.apps import App
 
 from query_agent.config import get_config
-from query_agent.guardrails import query_agent_before_callback
+from query_agent.guardrails import (
+    query_agent_after_model_callback,
+    query_agent_after_tool_callback,
+    query_agent_before_callback,
+    query_agent_before_model_callback,
+)
 from query_agent.tools.spanner_rag_tools import (
     ALL_QUERY_AGENT_TOOLS,
 )
+from unified_web.models import get_default_query_model, validate_gemini_model
 
 QUERY_ORCHESTRATOR_INSTRUCTIONS = """You are the autonomous OKF Spanner Graph-RAG & Data Lineage Query Agent running on the Gemini Enterprise Agent Platform.
 
@@ -62,12 +68,16 @@ At query time, you rely 100% on Cloud Spanner (`Zero GCS reads at query time`) a
 """
 
 
-def create_query_agent() -> Agent:
-    """Factory to construct the Separate ADK OKF Spanner Graph-RAG Query Agent."""
+def create_query_agent(model_name: str | None = None) -> Agent:
+    """Factory to construct the Separate ADK OKF Spanner Graph-RAG Query Agent with 4-point SAIF 2.0 hooks."""
     from google.adk.models.google_llm import Gemini
     from google.genai import types
 
     cfg = get_config()
+    if model_name is not None:
+        resolved_model = validate_gemini_model(model_name, default=get_default_query_model())
+    else:
+        resolved_model = os.getenv("QUERY_DEFAULT_MODEL", "").strip() or cfg.gemini_model
     retry_opts = types.HttpRetryOptions(
         attempts=5,
         initial_delay=2.0,
@@ -80,7 +90,7 @@ def create_query_agent() -> Agent:
     )
     client_kwargs = {"location": cfg.gemini_location} if use_vertex else None
     llm_model = Gemini(
-        model=cfg.gemini_model,
+        model=resolved_model,
         retry_options=retry_opts,
         client_kwargs=client_kwargs,
     )
@@ -94,6 +104,9 @@ def create_query_agent() -> Agent:
         instruction=QUERY_ORCHESTRATOR_INSTRUCTIONS,
         tools=list(ALL_QUERY_AGENT_TOOLS),
         before_agent_callback=query_agent_before_callback,
+        before_model_callback=query_agent_before_model_callback,
+        after_tool_callback=query_agent_after_tool_callback,
+        after_model_callback=query_agent_after_model_callback,
     )
 
 

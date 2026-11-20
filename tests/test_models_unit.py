@@ -88,6 +88,6 @@ def test_app_config_defaults(monkeypatch):
     monkeypatch.delenv("DEPLOYMENT_TARGET", raising=False)
     cfg = get_config()
     assert cfg.google_cloud_project == "your-gcp-project-id"
-    assert cfg.git_repo_url == "https://github.com/pantana-na/engineering-kg-and-extractor.git"
+    assert cfg.git_repo_url == "https://github.com/pantana-na/engineering-kg-gc.git"
     assert cfg.deployment_target == "agent_runtime"
 

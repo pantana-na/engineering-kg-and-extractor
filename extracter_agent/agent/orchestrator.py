@@ -9,8 +9,14 @@ from __future__ import annotations
 from google.adk.agents import Agent
 from google.adk.apps import App
 
-from extracter_agent.agent.guardrails import before_agent_callback
+from extracter_agent.agent.guardrails import (
+    after_model_callback,
+    after_tool_callback,
+    before_agent_callback,
+    before_model_callback,
+)
 from extracter_agent.config import get_config
+from unified_web.models import get_default_extracter_model, validate_gemini_model
 from extracter_agent.tools.gcs_tools import export_bundle_to_gcs_tool
 from extracter_agent.tools.okf_tools import (
     build_okf_indexes_and_validate_tool,
@@ -120,14 +126,18 @@ When fulfilling an extraction or bundle construction request (Mode A or Mode B),
 """
 
 
-def create_extracter_agent() -> Agent:
-    """Factory to construct the ADK Root Extracter Agent."""
+def create_extracter_agent(model_name: str | None = None) -> Agent:
+    """Factory to construct the ADK Root Extracter Agent with allowlisted Gemini 4 model & 4-point SAIF 2.0 hooks."""
     import os
 
     from google.adk.models.google_llm import Gemini
     from google.genai import types
 
     cfg = get_config()
+    if model_name is not None:
+        resolved_model = validate_gemini_model(model_name, default=get_default_extracter_model())
+    else:
+        resolved_model = os.getenv("EXTRACTER_DEFAULT_MODEL", "").strip() or cfg.gemini_model
     retry_opts = types.HttpRetryOptions(
         attempts=5,
         initial_delay=2.0,
@@ -140,7 +150,7 @@ def create_extracter_agent() -> Agent:
     )
     client_kwargs = {"location": cfg.gemini_location} if use_vertex else None
     llm_model = Gemini(
-        model=cfg.gemini_model,
+        model=resolved_model,
         retry_options=retry_opts,
         client_kwargs=client_kwargs,
     )
@@ -160,6 +170,9 @@ def create_extracter_agent() -> Agent:
             export_bundle_to_gcs_tool,
         ],
         before_agent_callback=before_agent_callback,
+        before_model_callback=before_model_callback,
+        after_tool_callback=after_tool_callback,
+        after_model_callback=after_model_callback,
     )
 
 

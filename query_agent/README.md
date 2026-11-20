@@ -1,6 +1,6 @@
 # Agent 2: OKF Spanner Graph-RAG, Vector, FTS & Data Lineage Query Agent (`query_agent`)
 
-Official **Google Agent Development Kit (`google-adk`)** Graph-RAG, hybrid search, 5-stage HAZOP, and data lineage retrieval agent powered by **`gemini-3.8-flash`** (`GEMINI_LOCATION=global`), backed **100% by Google Cloud Spanner (`okf-knowledge-spanner / okf_knowledge_graph`)** and **Google Cloud Dataplex Universal Catalog (`dataplex_v1`)**, and paired with the **3-Pane Spanner Graph & Retrieval Workbench UI (`okf-query-agent-web`)** on Google Cloud Run.
+Official **Google Agent Development Kit (`google-adk`)** Graph-RAG, hybrid search, 5-stage HAZOP, and data lineage retrieval agent powered by **`gemini-4-argon`** (`GEMINI_LOCATION=global`), backed **100% by Google Cloud Spanner (`okf-knowledge-spanner / okf_knowledge_graph`)** and **Google Cloud Dataplex Universal Catalog (`dataplex_v1`)**, and paired with the **3-Pane Spanner Graph & Retrieval Workbench UI (`okf-query-agent-web`)** on Google Cloud Run.
 
 - **Root Documentation & Architecture:** [`../README.md`](../README.md)
 - **Feature Specifications (SDD):**

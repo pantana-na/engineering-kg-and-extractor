@@ -1,6 +1,8 @@
-"""PDF processing pipeline for chemical engineering documents.
+"""Multi-format processing pipeline for chemical engineering documents.
 
-Extracts text, metadata, and structural sections from raw engineering PDFs.
+Extracts text, structured tables, metadata, and multimodal visual interpretations
+from raw engineering PDFs, OOXML spreadsheets/documents (.xlsx, .xlsm, .docx),
+CSV tables, and standalone raster diagrams (.png, .jpg, .jpeg, .webp).
 """
 
 from __future__ import annotations
@@ -9,21 +11,125 @@ import hashlib
 import logging
 import os
 import re
+import struct
 from pathlib import Path
 from typing import Any
 
 import pypdf
 
+from extracter_agent.pdf.ooxml_parser import (
+    OOXMLProcessingError,
+    extract_csv_pages,
+    extract_docx_pages,
+    extract_xlsx_pages,
+    get_csv_metadata,
+    get_docx_metadata,
+    get_xlsx_metadata,
+)
+
+SUPPORTED_RAW_EXTENSIONS: tuple[str, ...] = (
+    ".pdf",
+    ".xlsx",
+    ".xlsm",
+    ".csv",
+    ".docx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+)
+IMAGE_RAW_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp")
+TABULAR_OR_DOCX_RAW_EXTENSIONS: tuple[str, ...] = (".xlsx", ".xlsm", ".csv", ".docx")
+
+RAW_MIME_TYPES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ".csv": "text/csv",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
 
 class PDFProcessingError(Exception):
-    """Raised when a PDF cannot be parsed or processed."""
+    """Raised when a raw engineering document cannot be parsed or processed."""
+
+
+def is_supported_raw_file(path: Path | str) -> bool:
+    """Return True if path has a supported raw engineering extension and is not a README or dotfile."""
+    p = Path(path)
+    if not p.name or p.name.startswith(".") or p.name.lower() == "readme.md":
+        return False
+    return p.suffix.lower() in SUPPORTED_RAW_EXTENSIONS
+
+
+def get_raw_mime_type(file_path: Path | str) -> str:
+    """Return the canonical MIME media type for a supported raw engineering file."""
+    ext = Path(file_path).suffix.lower()
+    return RAW_MIME_TYPES.get(ext, "application/octet-stream")
+
+
+def get_image_dimensions(img_bytes: bytes) -> tuple[int, int] | None:
+    """Extract (width, height) in pixels from PNG, JPEG, or WEBP headers using pure stdlib."""
+    if len(img_bytes) >= 24 and img_bytes[:8] == b"\x89PNG\r\n\x1a\n" and img_bytes[12:16] == b"IHDR":
+        w, h = struct.unpack(">II", img_bytes[16:24])
+        return int(w), int(h)
+
+    if len(img_bytes) >= 4 and img_bytes[:2] == b"\xff\xd8":
+        idx = 2
+        n = len(img_bytes)
+        sof_markers = {
+            0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+            0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+        }
+        while idx + 4 <= n:
+            if img_bytes[idx] != 0xFF:
+                idx += 1
+                continue
+            while idx < n and img_bytes[idx] == 0xFF:
+                idx += 1
+            if idx >= n:
+                break
+            marker = img_bytes[idx]
+            idx += 1
+            if marker in (0xD8, 0xD9) or (0xD0 <= marker <= 0xD7):
+                continue
+            if idx + 2 > n:
+                break
+            seg_len = struct.unpack(">H", img_bytes[idx : idx + 2])[0]
+            if seg_len < 2 or idx + seg_len > n:
+                break
+            if marker in sof_markers and idx + 7 <= n:
+                h, w = struct.unpack(">HH", img_bytes[idx + 3 : idx + 7])
+                return int(w), int(h)
+            idx += seg_len
+
+    if len(img_bytes) >= 30 and img_bytes[:4] == b"RIFF" and img_bytes[8:12] == b"WEBP":
+        chunk_tag = img_bytes[12:16]
+        if chunk_tag == b"VP8X" and len(img_bytes) >= 30:
+            w = 1 + int.from_bytes(img_bytes[24:27], "little")
+            h = 1 + int.from_bytes(img_bytes[27:30], "little")
+            return w, h
+        if chunk_tag == b"VP8L" and len(img_bytes) >= 25 and img_bytes[20] == 0x2F:
+            bits = int.from_bytes(img_bytes[21:25], "little")
+            w = (bits & 0x3FFF) + 1
+            h = ((bits >> 14) & 0x3FFF) + 1
+            return w, h
+        if chunk_tag == b"VP8 " and len(img_bytes) >= 30 and img_bytes[23:26] == b"\x9d\x01\x2a":
+            w, h = struct.unpack("<HH", img_bytes[26:30])
+            return int(w & 0x3FFF), int(h & 0x3FFF)
+
+    return None
 
 
 def extract_pdf_pages(file_path: Path | str) -> list[dict[str, Any]]:
-    """Extract text and metadata from each page of a PDF document.
+    """Extract text/Markdown pages from a supported raw engineering file (.pdf, .xlsx, .xlsm, .csv, .docx, or image).
 
     Args:
-        file_path: Path to the PDF file.
+        file_path: Path to the raw engineering file.
 
     Returns:
         A list of dictionaries, each containing page_number (1-indexed), text,
@@ -32,6 +138,32 @@ def extract_pdf_pages(file_path: Path | str) -> list[dict[str, Any]]:
     path = Path(file_path)
     if not path.exists():
         raise PDFProcessingError(f"PDF file does not exist: {path}")
+
+    ext = path.suffix.lower()
+    if ext in (".xlsx", ".xlsm"):
+        try:
+            return extract_xlsx_pages(path)
+        except OOXMLProcessingError as exc:
+            raise PDFProcessingError(str(exc)) from exc
+    if ext == ".csv":
+        try:
+            return extract_csv_pages(path)
+        except OOXMLProcessingError as exc:
+            raise PDFProcessingError(str(exc)) from exc
+    if ext == ".docx":
+        try:
+            return extract_docx_pages(path)
+        except OOXMLProcessingError as exc:
+            raise PDFProcessingError(str(exc)) from exc
+    if ext in IMAGE_RAW_EXTENSIONS:
+        return [
+            {
+                "page_number": 1,
+                "text": "",
+                "char_count": 0,
+                "word_count": 0,
+            }
+        ]
 
     try:
         reader = pypdf.PdfReader(str(path))
@@ -58,10 +190,43 @@ def extract_pdf_pages(file_path: Path | str) -> list[dict[str, Any]]:
 
 
 def get_pdf_metadata(file_path: Path | str) -> dict[str, Any]:
-    """Retrieve document-level metadata and summary metrics."""
+    """Retrieve document-level metadata and summary metrics across all supported raw formats."""
     path = Path(file_path)
     if not path.exists():
         raise PDFProcessingError(f"PDF file does not exist: {path}")
+
+    ext = path.suffix.lower()
+    if ext in (".xlsx", ".xlsm"):
+        try:
+            return get_xlsx_metadata(path)
+        except OOXMLProcessingError as exc:
+            raise PDFProcessingError(str(exc)) from exc
+    if ext == ".csv":
+        try:
+            return get_csv_metadata(path)
+        except OOXMLProcessingError as exc:
+            raise PDFProcessingError(str(exc)) from exc
+    if ext == ".docx":
+        try:
+            return get_docx_metadata(path)
+        except OOXMLProcessingError as exc:
+            raise PDFProcessingError(str(exc)) from exc
+    if ext in IMAGE_RAW_EXTENSIONS:
+        raw_bytes = path.read_bytes()
+        dims = get_image_dimensions(raw_bytes)
+        meta_img: dict[str, Any] = {
+            "file_name": path.name,
+            "file_size_bytes": len(raw_bytes),
+            "page_count": 1,
+            "title": path.stem,
+            "author": None,
+            "creator": None,
+            "mime_type": get_raw_mime_type(path),
+        }
+        if dims is not None:
+            meta_img["image_width"] = dims[0]
+            meta_img["image_height"] = dims[1]
+        return meta_img
 
     try:
         reader = pypdf.PdfReader(str(path))
@@ -166,7 +331,7 @@ def extract_equipment_tag_candidates(text: str) -> list[str]:
 def is_vector_drawing(file_path: Path | str) -> bool:
     """Determine if a PDF is an AutoCAD or vector drawing lacking text streams."""
     path = Path(file_path)
-    if not path.exists():
+    if not path.exists() or path.suffix.lower() != ".pdf":
         return False
     try:
         reader = pypdf.PdfReader(str(path))
@@ -183,7 +348,7 @@ def search_raw_documents(
     raw_dir: Path | str,
     subfolder: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Search reference/raw directory for PDF documents matching a query or entity tag."""
+    """Search reference/raw directory for supported engineering documents matching a query or entity tag."""
     base = Path(raw_dir)
     target = base / subfolder if subfolder else base
     if not target.exists():
@@ -198,28 +363,31 @@ def search_raw_documents(
         if len(t.strip()) >= 2
     ]
 
-    for pdf in target.rglob("*.pdf"):
-        name_lower = pdf.name.lower()
+    for doc_path in target.rglob("*"):
+        if not doc_path.is_file() or not is_supported_raw_file(doc_path):
+            continue
+        name_lower = doc_path.name.lower()
         name_compact = re.sub(r"[^a-z0-9]", "", name_lower)
         is_exact = bool(
             (q_lower and q_lower in name_lower)
             or (len(q_compact) >= 3 and q_compact in name_compact)
+            or not q_lower
         )
         if is_exact or any(tok in name_lower for tok in tokens):
             try:
-                rel = pdf.relative_to(base)
+                rel = doc_path.relative_to(base)
             except ValueError:
-                rel = pdf
-            subf = pdf.parent.name if pdf.parent != base else "root"
+                rel = doc_path
+            subf = doc_path.parent.name if doc_path.parent != base else "root"
             priority = 0 if is_exact else 1
             results.append(
                 (
                     priority,
                     {
-                        "file_name": pdf.name,
+                        "file_name": doc_path.name,
                         "subfolder": subf,
                         "relative_path": str(rel),
-                        "size_bytes": pdf.stat().st_size,
+                        "size_bytes": doc_path.stat().st_size,
                     },
                 )
             )
@@ -229,15 +397,15 @@ def search_raw_documents(
 
 
 def extract_pdf_multimodal_part(file_path: Path | str) -> Any:
-    """Create a google.genai types.Part representation for multimodal PDF processing."""
+    """Create a google.genai types.Part representation for multimodal document/image processing."""
     path = Path(file_path)
     if not path.exists():
         raise PDFProcessingError(f"PDF file does not exist: {path}")
 
     from google.genai import types
 
-    pdf_bytes = path.read_bytes()
-    return types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+    raw_bytes = path.read_bytes()
+    return types.Part.from_bytes(data=raw_bytes, mime_type=get_raw_mime_type(path))
 
 
 def _build_multimodal_prompt(
@@ -266,12 +434,123 @@ def _build_multimodal_prompt(
 
 
 def _compute_multimodal_cache_digest(pdf_bytes: bytes, prompt_text: str) -> str:
-    """Compute a deterministic 24-hex SHA-256 cache digest over both PDF bytes and the resolved prompt."""
+    """Compute a deterministic 24-hex SHA-256 cache digest over both document bytes and the resolved prompt."""
     hasher = hashlib.sha256()
     hasher.update(pdf_bytes)
     hasher.update(b"\x00PROMPT_V8_SPANNER_GRAPH_3X2\x00")
     hasher.update(prompt_text.encode("utf-8"))
     return hasher.hexdigest()[:24]
+
+
+def extract_image_multimodal_summary(
+    file_path: Path | str,
+    prompt_hint: str | None = None,
+) -> str:
+    """Extract tables, axes, color bands, legends, and tags from a standalone raster image (.png, .jpg, .webp) via Gemini multimodal vision."""
+    import tempfile
+    import time
+
+    from google import genai
+    from google.genai import types
+
+    from extracter_agent.config import get_config
+
+    path = Path(file_path)
+    if not path.exists():
+        raise PDFProcessingError(f"Image file does not exist: {path}")
+
+    img_bytes = path.read_bytes()
+    mime_type = get_raw_mime_type(path)
+    cfg = get_config()
+    effective_hint = prompt_hint or (
+        f"Transcribe every cell, row, column, axis label, threshold value, color/severity band, "
+        f"and legend in engineering diagram/matrix {path.name} into structured GitHub-Flavored Markdown tables."
+    )
+    base_prompt = _build_multimodal_prompt(prompt_hint=effective_hint)
+    img_sha = _compute_multimodal_cache_digest(img_bytes, base_prompt)
+    cache_dir = Path(tempfile.gettempdir()) / "extracter_multimodal_cache_v8"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{path.stem}_{img_sha}.md"
+
+    if cache_file.exists() and cache_file.stat().st_size > 100:
+        return cache_file.read_text(encoding="utf-8")
+
+    if cfg.use_gcs_storage:
+        try:
+            from google.cloud import storage
+
+            st_client = storage.Client(project=cfg.google_cloud_project)
+            bucket = st_client.bucket(cfg.destination_gcs_bucket)
+            cache_blob = bucket.blob(f"cache/multimodal_v8/{path.stem}_{img_sha}.md")
+            if cache_blob.exists():
+                cached_text = cache_blob.download_as_text(encoding="utf-8")
+                if len(cached_text) > 100:
+                    cache_file.write_text(cached_text, encoding="utf-8")
+                    return cached_text
+        except Exception as exc:
+            logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
+
+    http_opts = types.HttpOptions(
+        retry_options=types.HttpRetryOptions(
+            attempts=5,
+            initial_delay=2.0,
+            exp_base=2.0,
+            http_status_codes=[429, 500, 502, 503, 504],
+        )
+    )
+    use_vertex = (
+        os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() in ("true", "1")
+        or os.getenv("GOOGLE_GENAI_USE_ENTERPRISE", "").lower() in ("true", "1")
+    )
+    img_part = types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
+
+    gen_cfg_kwargs: dict[str, Any] = {
+        "max_output_tokens": 65536,
+        "temperature": 0.0,
+    }
+    media_res_enum = getattr(types, "MediaResolution", None)
+    if media_res_enum is not None and hasattr(media_res_enum, "MEDIA_RESOLUTION_HIGH"):
+        gen_cfg_kwargs["media_resolution"] = media_res_enum.MEDIA_RESOLUTION_HIGH
+    gen_cfg = types.GenerateContentConfig(**gen_cfg_kwargs)
+
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            if use_vertex:
+                client = genai.Client(
+                    vertexai=True,
+                    project=cfg.google_cloud_project,
+                    location=cfg.gemini_location,
+                    http_options=http_opts,
+                )
+            else:
+                client = genai.Client(http_options=http_opts)
+            resp = client.models.generate_content(
+                model=cfg.gemini_model,
+                contents=[img_part, base_prompt],
+                config=gen_cfg,
+            )
+            text_out = resp.text or ""
+            if len(text_out) > 100:
+                try:
+                    cache_file.write_text(text_out, encoding="utf-8")
+                    if cfg.use_gcs_storage:
+                        from google.cloud import storage
+
+                        st_client = storage.Client(project=cfg.google_cloud_project)
+                        bucket = st_client.bucket(cfg.destination_gcs_bucket)
+                        bucket.blob(
+                            f"cache/multimodal_v8/{path.stem}_{img_sha}.md"
+                        ).upload_from_string(text_out, content_type="text/markdown")
+                except Exception as exc:
+                    logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
+            return text_out
+        except Exception as exc:
+            last_err = exc
+            if attempt < 2:
+                time.sleep(2.0 * (2**attempt))
+    return f"[Multimodal extraction error: {last_err}]"
+
 
 
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:

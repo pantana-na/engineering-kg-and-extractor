@@ -12,6 +12,13 @@ description: >-
 
 You are an expert Application Security (AppSec) Principal Architect and Cloud Security Specialist. Your objective is to orchestrate **Google Cloud CodeMender (`cm`)** to find, verify, and remediate deep software vulnerabilities in codebases, generating executive and technical reports in the `docs/` directory at each milestone with human-in-the-loop approvals.
 
+## AI-SDLC Master Hub & Governance Rules Wiring
+- **Master Orchestrator Hub:** Wired into the **[`ai-sdlc` master skill (`../ai_sdlc/SKILL.md`)](../ai_sdlc/SKILL.md)** at **Phase 1 (Step 1.4 Brownfield Baseline SAST)**, **Phase 2 (SDD Step 2.5 Verification)**, and **Phase 3 (Step 3.1 Mandatory Pre-Merge SAST Gate)**, and remains invocable **standalone** for on-demand AppSec audits.
+- **Governance & SAIF Alignment:** Enforces **[`gcp-well-architected-saif`](../gcp_well_architected_saif/SKILL.md)** (WAF Pillar 2 Shift-Left Security & SAIF 15-Risk Taxonomy) and the 3 consolidated governance rules:
+  - [`devops_security_and_quality_standards.md`](../../rules/devops_security_and_quality_standards.md) (**Rule 3**: Mandatory Pre-Build CodeMender SAST Gate — Zero High/Critical vulnerabilities before build/deploy; **Rules 4, 8, 10**)
+  - [`google_adk_and_agent_runtime.md`](../../rules/google_adk_and_agent_runtime.md) (**Rules 11–12**: Audits ADK `FunctionTool` validation, 4-point Model Armor/DLP callbacks, `User Auth` OAuth2 propagation, and Externalized HITL gates)
+  - [`ai_sdlc_and_sdd_standards.md`](../../rules/ai_sdlc_and_sdd_standards.md) (**Rule 13**: Sustainable root-cause remediation with zero synthetic mockup or regex workarounds)
+
 ---
 
 ## Workflow Overview
@@ -72,9 +79,9 @@ Before initiating security scans, ensure the workstation and Google Cloud projec
 
 ---
 
-## Phase 1: Vulnerability Discovery (`cm find`)
+## Phase 1: Vulnerability Discovery (`cm find` — WAF Pillar 2 & SAIF Alignment)
 
-Scan the codebase to discover potential security weaknesses (e.g., SQLi, Command Injection, SSRF, IDOR, XSS, Path Traversal, Insecure Deserialization, Prompt Injection / Missing Model Armor hooks, and IAM misconfigurations).
+Scan the codebase to discover potential security weaknesses across classic AppSec (SQLi, Command Injection, SSRF, IDOR, XSS, Path Traversal, Insecure Deserialization) and **Google Secure AI Framework (SAIF / SAIF 2.0)** threat categories ([`gcp-well-architected-saif`](../gcp_well_architected_saif/SKILL.md)).
 
 ### 1. Execution & Architecture-Specific Steering Presets (`-c`):
 Run a non-interactive scan on the target path or directory:
@@ -82,13 +89,13 @@ Run a non-interactive scan on the target path or directory:
 cm find <target_path> -y --bypass-warning --verbose
 ```
 Use `-c "<context>"` to steer CodeMender based on the workload track:
-- **Preset A — Google ADK Agents & `FunctionTool` Registries (`agent_runtime`):**
+- **Preset A — Google ADK Agents, SAIF 2.0 Guardrails & `FunctionTool` Registries (`agent_runtime`):**
   ```bash
-  cm find app/ -y --bypass-warning -c "Focus on ADK FunctionTool input validation, SQLi/SSRF in tool callables, missing before_agent_callback Model Armor interception, and unvalidated external API responses"
+  cm find app/ -y --bypass-warning -c "Focus on SAIF risks: ADK FunctionTool input validation (IIC/IMO), SQLi/SSRF in tool callables, missing 4-point Model Armor/DLP callbacks (before_agent, before_model, after_tool, after_model for PIJ/EDH/SDD/IMO), missing User Auth OAuth2 propagation or missing externalized HITL confirmation on mutating tools (RAC), and unbounded agent loops (DMS)"
   ```
-- **Preset B — Cloud Run Web UI, Streaming Proxy & Terraform IaC (`cloud_run`):**
+- **Preset B — Cloud Run Web UI, Streaming Proxy & Terraform IaC (`cloud_run` / WAF Pillar 2):**
   ```bash
-  cm find . -y --bypass-warning -c "Focus on Cloud Run streaming proxy auth token verification, CORS/XSS, hardcoded secrets outside .env, and prohibited allUsers/allAuthenticatedUsers in terraform/*.tf"
+  cm find . -y --bypass-warning -c "Focus on WAF Pillar 2 & Zero-Trust: Cloud Run streaming proxy auth token verification, CORS/XSS, hardcoded secrets outside .env, prohibited allUsers/allAuthenticatedUsers in terraform/*.tf, and unauthorized invoker-iam-disabled on internal/AI services"
   ```
 - **Preset C — Brownfield Legacy Enterprise (`.NET Framework` / 3-Tier / SQL Stored Procs):**
   ```bash
@@ -98,8 +105,8 @@ Use `-c "<context>"` to steer CodeMender based on the workload track:
 ### 2. Mandatory Report Generation:
 Generate or update **`docs/codemender-01-vulnerability-scan-report.md`** containing:
 - **Scan Metadata**: Timestamp, target directory, scanned files count, Google Cloud project ID.
-- **Executive Summary**: Overview of total findings categorized by severity (CRITICAL, HIGH, MEDIUM, LOW).
-- **Itemized Findings Table**: Finding ID, Severity Badge, Vulnerability Type, Affected File, Line Numbers, Title/Description.
+- **Executive Summary**: Overview of total findings categorized by severity (CRITICAL, HIGH, MEDIUM, LOW) and mapped to **OWASP / CWE** and **Google SAIF Risk IDs** (`DP`, `UTD`, `EDH`, `MST`, `MXF`, `MDT`, `DMS`, `MRE`, `IIC`, `PIJ`, `MEV`, `SDD`, `ISD`, `IMO`, `RAC`).
+- **Itemized Findings Table**: Finding ID, Severity Badge, Vulnerability Type, OWASP/CWE + SAIF Risk ID, Affected File, Line Numbers, Title/Description.
 - **Recommended Next Actions**.
 
 ### 3. Human-in-the-Loop Confirmation:
@@ -181,10 +188,10 @@ Once remediation steps are completed, generate a single master document:
 This consolidated report aggregates:
 1. **Executive Security Dashboard**: Pre-scan vs Post-remediation vulnerability posture (enforcing **Zero Critical/High Vulnerabilities** before deployment).
 2. **Audit Trail**: Chronological record of scans, verifications, patches applied, and Unit/PBT regression pass rates.
-3. **Links to Detailed Phase Reports**:
-   - [01: Vulnerability Scan Report](./codemender-01-vulnerability-scan-report.md)
-   - [02: Verification & Triage Report](./codemender-02-verification-report.md)
-   - [03: Remediation & Patch Report](./codemender-03-remediation-report.md)
+3. **Links to Detailed Phase Reports (in `docs/`)**:
+   - `docs/codemender-01-vulnerability-scan-report.md` (`01: Vulnerability Scan Report`)
+   - `docs/codemender-02-verification-report.md` (`02: Verification & Triage Report`)
+   - `docs/codemender-03-remediation-report.md` (`03: Remediation & Patch Report`)
 4. **Residual Risk & Architecture Hardening Recommendations**: Additional defense-in-depth guidance (Model Armor policies, Cloud Armor WAF rules, IAP, IAM least-privilege, CI/CD automated scanning).
 
 ---
@@ -204,6 +211,9 @@ python3 _agents/skills/codemender/scripts/run_codemender_stage.py verify <findin
 
 # Fix finding
 python3 _agents/skills/codemender/scripts/run_codemender_stage.py fix <finding_id> --project <PROJECT_ID> --docs-dir docs
+
+# Generate consolidated summary report
+python3 _agents/skills/codemender/scripts/run_codemender_stage.py summary --project <PROJECT_ID> --docs-dir docs
 ```
 
 ---

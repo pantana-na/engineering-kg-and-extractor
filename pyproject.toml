@@ -29,7 +29,7 @@ testpaths = ["tests", "evals"]
 python_files = ["test_*.py"]
 
 [tool.setuptools.packages.find]
-include = ["extracter_agent*", "query_agent*"]
+include = ["extracter_agent*", "query_agent*", "unified_web*"]
 
 [tool.ruff]
 exclude = ["_agents", ".agents", "build", "reference"]

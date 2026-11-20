@@ -143,6 +143,37 @@ CREATE INDEX idx_fact_lineage_by_source ON FactLineageEdges(source_id, concept_i
 
 CREATE INDEX idx_fact_lineage_by_concept ON FactLineageEdges(concept_id, source_id);
 
+-- ============================================================================
+-- v2 Performance & Native Embedding Optimizations (SPEC-20261120-UNIFIED-WORKBENCH-V2)
+-- Note: Remote embedding model `OkfTextEmbeddingModel` is registered idempotently
+-- via `SpannerGraphRepository.build_native_embedding_model_ddl(...)` / `ensure_schema_v2()`
+-- because Vertex AI model endpoint paths contain the active GCP project and region.
+-- ============================================================================
+
+CREATE VECTOR INDEX IF NOT EXISTS idx_okf_chunks_vec
+  ON OkfSectionChunks(embedding)
+  STORING (concept_id, category, unit, section_heading, has_conflict)
+  WHERE embedding IS NOT NULL
+  OPTIONS (distance_type = 'COSINE');
+
+CREATE INDEX IF NOT EXISTS idx_okf_concepts_cat_unit ON OkfConcepts(category, unit, concept_id);
+
+CREATE INDEX IF NOT EXISTS idx_engineering_entities_concept ON EngineeringEntities(concept_id, canonical_tag);
+
+CREATE INDEX IF NOT EXISTS idx_fact_assertions_entity ON FactAssertions(entity_id, has_conflict);
+
+CREATE INDEX IF NOT EXISTS idx_process_conn_from ON ProcessConnections(from_entity_id, to_entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_process_conn_to ON ProcessConnections(to_entity_id, from_entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_inst_ctrl_inst ON InstrumentControlEdges(instrument_entity_id, target_entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_inst_ctrl_target ON InstrumentControlEdges(target_entity_id, instrument_entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_inst_ctrl_source_concept ON InstrumentControlEdges(source_concept_id);
+
+CREATE INDEX IF NOT EXISTS idx_concept_wikilinks_from ON ConceptWikiLinks(from_concept_id, to_concept_id);
+
 CREATE OR REPLACE PROPERTY GRAPH OkfKnowledgeGraph
   NODE TABLES (
     EngineeringEntities AS Entity

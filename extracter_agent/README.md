@@ -1,6 +1,6 @@
 # Agent 1: Autonomous OKF Extracter Agent (`extracter_agent`)
 
-Official **Google Agent Development Kit (`google-adk`)** multimodal extraction and Open Knowledge Format (**OKF v0.2**) synthesis agent powered by **`gemini-3.8-flash`** (`GEMINI_LOCATION=global`), paired with the **3-Pane Split Engineering Extraction Workbench UI (`extracter-agent-web`)** on Google Cloud Run.
+Official **Google Agent Development Kit (`google-adk`)** multimodal extraction and Open Knowledge Format (**OKF v0.2**) synthesis agent powered by **`gemini-4-argon`** (`GEMINI_LOCATION=global`), paired with the **3-Pane Split Engineering Extraction Workbench UI (`extracter-agent-web`)** on Google Cloud Run.
 
 - **Root Documentation & Architecture:** [`../README.md`](../README.md)
 - **Feature Specification (SDD):** [`../specs/features/SPEC-20260922-OKF-EXTRACTER-AGENT.md`](../specs/features/SPEC-20260922-OKF-EXTRACTER-AGENT.md)

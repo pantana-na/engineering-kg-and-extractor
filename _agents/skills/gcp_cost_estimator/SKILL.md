@@ -14,6 +14,13 @@ description: >-
 
 You are an expert Google Cloud Principal Architect and FinOps Specialist. Your objective is to analyze technical design documents, architecture diagrams, Infrastructure-as-Code (Terraform, Pulumi, K8s), and application code to produce an accurate, transparent, and actionable running cost estimate for Google Cloud workloads.
 
+## AI-SDLC Master Hub & Governance Rules Wiring
+- **Master Orchestrator Hub:** Wired into the **[`ai-sdlc` master skill (`../ai_sdlc/SKILL.md`)](../ai_sdlc/SKILL.md)** during **Phase 1: Inception (Step 1.4)** and **Phase 3: Operation (Pre-Deploy FinOps Validation)** (`docs/gcp_cost_estimate_<project>.md`), and remains invocable **standalone** for independent FinOps BoM modeling.
+- **WAF, SAIF & Governance Alignment:** Enforces **[`gcp-well-architected-saif`](../gcp_well_architected_saif/SKILL.md)** (WAF Pillar 4 FinOps Unit Economics, Pillar 3 Provisioned Throughput + PayGo spillover, Pillar 6 Sustainability `CFE %`) and the 3 consolidated governance rules:
+  - [`devops_security_and_quality_standards.md`](../../rules/devops_security_and_quality_standards.md) (**Rules 8–10**: Multi-env `NONPROD_*`/`PROD_*` scale-to-zero vs. HA sizing, CMEK/VPC-SC/Cloud Armor SKUs, Zero-Trust IAM/Ingress Patterns 1–2)
+  - [`google_adk_and_agent_runtime.md`](../../rules/google_adk_and_agent_runtime.md) (**Rules 11–12**: `agent_runtime` multi-hop ADK token sizing, 4-point Model Armor + Cloud DLP inspection volume, Context Caching, and `agents-cli eval` run costs)
+  - [`ai_sdlc_and_sdd_standards.md`](../../rules/ai_sdlc_and_sdd_standards.md) (*Zero Silent Assumptions `ask_question` mandate*)
+
 ---
 
 ## Core Mandates: Zero Assumptions & Strictly Live Pricing
@@ -54,21 +61,24 @@ Scan the project workspace to identify all provisioned and planned GCP services:
 
 ## Phase 2: Component Inventory & Bill of Materials (BoM) Mapping
 
-Categorize every discovered component across our **Dual-Runtime Architecture** (`agent_runtime` + `cloud_run`) and supporting GCP service domains:
+Categorize every discovered component across our **Dual-Runtime Architecture** (`agent_runtime` + `cloud_run`), aligned with **[`gcp-well-architected-saif`](../gcp_well_architected_saif/SKILL.md)** (WAF Pillar 4: Cost Optimization & Pillar 6: Sustainability):
 - **Conversational AI & Gemini Enterprise Agent Platform (`agent_runtime`)**:
-  - **Multi-Hop Agent Trajectory Tokens**: Root `OrchestratorAgent` intent classification + Domain Subagent dispatch + `FunctionTool` schema/response payload tokens per user turn.
-  - **Google Cloud Model Armor**: Pre-flight prompt & post-model response security screening invocations (`before_agent_callback` / `before_model_callback`).
+  - **Multi-Hop Agent Trajectory Tokens & Model Routing**: Tiered routing across Gemini 2.5 Flash-Lite / Flash (high-frequency intent classification & routine subagents) vs. Gemini 2.5 Pro (complex synthesis/reasoning), plus `FunctionTool` schema/response payload tokens per user turn.
+  - **Provisioned Throughput (PT) vs. Pay-As-You-Go (PayGo) Spillover**: Baseline predictable capacity via Provisioned Throughput (with 1-yr/3-yr commitments) vs. burst spillover to PayGo.
+  - **Vertex AI Context Caching & Batch API**: Explicit/implicit context caching (50%–90% input token savings on large system prompts, policy manuals, and tool declarations) and asynchronous Batch API (-50% discount for offline evaluations/backfills).
+  - **Google Cloud Model Armor & Sensitive Data Protection (Cloud DLP)**: 4-point security & PII/PCI screening invocations (`before_agent_callback`, `before_model_callback`, `after_tool_callback`, `after_model_callback`) plus DLP inspection/de-identification volume.
   - **Continuous Live Agent Evaluation (`agents-cli eval`)**: Monthly evaluation dataset execution token volume across CI/CD and pre-release runs.
-  - **Vertex AI Vector Search & Embeddings**: Text embedding generation + Vector Search index endpoint replicas.
+  - **Vertex AI Search / Vector Search & Embeddings**: Text embedding generation + Vector Search index endpoint replicas.
 - **Web Frontend, API Gateway & Streaming Proxies (`cloud_run`)**:
   - **Cloud Run Services (`NONPROD` & `PROD`)**: Separate profiles for Non-Prod (`NONPROD_MIN_INSTANCES=0`, scale-to-zero) and Prod (`PROD_MIN_INSTANCES>=1`, warm instances, vCPU, RAM, SSE/WebSocket streaming concurrency).
   - **GKE / Compute Engine (if applicable or in Brownfield "As-Is")**: Node machine types, persistent disks, licensing (e.g., Windows Server / SQL Server for legacy `.NET` workloads).
 - **Databases & Caching**: Cloud SQL (PostgreSQL/MySQL/SQL Server engine, vCPU/RAM, HA multi-zone, storage, backups), Cloud Spanner (PUs/nodes), Firestore, Memorystore for Redis.
-- **Storage**: Cloud Storage buckets (Standard, Nearline, Coldline, Archive), Persistent Disks (`pd-balanced`, `pd-ssd`, `hyperdisk`).
-- **Analytics & Event Streaming**: BigQuery (on-demand vs capacity slots), Pub/Sub, Datastream, Dataflow.
-- **Networking, IAM Ingress & DevSecOps Toolchain**:
-  - **IAM Ingress Pattern**: Pattern 1 External HTTPS Application Load Balancer + Serverless NEG + IAP (forwarding rules + data processed) vs. Pattern 2/3 Direct Cloud Run Ingress.
-  - **DevSecOps & Observability**: Google Cloud Build (build minutes), Artifact Registry (container image storage) + **Artifact Analysis** (automated container vulnerability scanning), Secret Manager (active secret versions + access operations), Cloud Logging & Cloud Monitoring ingestion.
+- **Storage**: Cloud Storage buckets (Standard, Nearline, Coldline, Archive, Autoclass lifecycle), Persistent Disks (`pd-balanced`, `pd-ssd`, `hyperdisk`).
+- **Analytics & Event Streaming**: BigQuery (on-demand vs capacity/editions slots), Pub/Sub, Datastream, Dataflow.
+- **Networking, Zero-Trust IAM Ingress, KMS & DevSecOps Toolchain**:
+  - **IAM Ingress Pattern (Rule 10 / WAF Pillar 2)**: Pattern 1A External HTTPS Application Load Balancer + Cloud Armor WAF + Serverless NEG + IAP (forwarding rules + L7 policies + data processed) vs. Pattern 1B Direct Cloud Run IAP (`--iap`, `$0` fixed Load Balancer / Cloud Armor baseline for internal single-region apps) vs. Pattern 2 (Cloud Armor + Direct OAuth 2.0 Ingress) vs. Pattern 3 (Direct Ingress `invoker-iam-disabled` strictly for public static pages).
+  - **Encryption & Secrets**: Cloud KMS (`CMEK` / Cloud HSM / Cloud EKM active key versions & crypto operations) and Secret Manager (active secret versions + access operations).
+  - **DevSecOps & Observability**: Google Cloud Build (build minutes), Artifact Registry (container image storage) + **Artifact Analysis** (automated container vulnerability scanning), Cloud Logging & Cloud Monitoring ingestion.
 
 ---
 
@@ -81,8 +91,8 @@ Identify every unknown runtime variable that cannot be determined with 100% cert
 
 ### Service-by-Service Questionnaire Checklist:
 
-1. **General, Multi-Environment (`NONPROD` vs `PROD`) & Brownfield Baseline:**
-   - What is the target deployment Google Cloud region(s) (`GCP_REGION` / `GENAI_LOCATION`)?
+1. **General, Multi-Environment (`NONPROD` vs `PROD`), Sustainability & Brownfield Baseline:**
+   - What is the target deployment Google Cloud region(s) (`GCP_REGION` / `GENAI_LOCATION`) and its Carbon-Free Energy (`CFE %`) profile (WAF Pillar 6: Sustainability)?
    - Should we model **both Non-Prod (`main`/`develop`) and Production (`prod`) environments** (aligned with our unified `.env` `NONPROD_*` and `PROD_*` blocks)?
    - What is the operational schedule for Prod vs Non-Prod (e.g., Prod 24/7 = 730 hrs/month with `PROD_MIN_INSTANCES>=1`; Non-Prod business hours / scale-to-zero `NONPROD_MIN_INSTANCES=0`)?
    - **If Brownfield Modernization:** Would you like a **Current ("As-Is" Legacy .NET/VM/On-Prem) vs. Target (Dual-Runtime GCP) TCO Comparison**? If so, what are the current VM/SQL Server/license specs?
@@ -106,19 +116,22 @@ Identify every unknown runtime variable that cannot be determined with 100% cert
    - For BigQuery: On-Demand (TB scanned/month) vs Capacity/Editions slots, plus active/long-term storage volume?
    - For Pub/Sub & Datastream: Monthly message/CDC throughput (GB/TB)?
 
-6. **Generative AI, ADK Agents (`agent_runtime`), Model Armor & Live Evaluation:**
-   - Which foundation model(s) are used for the ADK `OrchestratorAgent` and domain subagents (e.g., Gemini 2.5 Pro, Gemini 2.5 Flash)?
-   - How many user conversation turns occur per day/month?
-   - **Agentic Multi-Hop Multiplier:** On average, how many LLM reasoning calls + `FunctionTool` invocations occur per user turn (e.g., 1 Orchestrator intent classification + 1–2 Subagent/Tool hops)?
-   - What is the average input token context length (system instructions + `FunctionTool` declarations + retrieved tool data) and output token length per hop?
-   - **Model Armor Guardrails:** Are both input prompts (`before_agent_callback`) and model outputs screened by Google Cloud Model Armor?
+6. **Generative AI, ADK Agents (`agent_runtime`), 4-Point Model Armor/DLP & Live Evaluation:**
+   - Which foundation model(s) are used for the ADK `OrchestratorAgent` and domain subagents (e.g., Gemini 2.5 Flash-Lite / Flash for routing vs. Gemini 2.5 Pro for deep reasoning)?
+   - Are we using **Pay-As-You-Go (PayGo)**, **Provisioned Throughput (PT)**, or **Hybrid PT + PayGo spillover**?
+   - What percentage of input context (system instructions, policy manuals, `FunctionTool` declarations) benefits from **Vertex AI Context Caching**?
+   - How many user conversation turns occur per day/month, and what is the **Agentic Multi-Hop Multiplier** (average LLM calls + `FunctionTool` invocations per turn)?
+   - What is the average input token context length and output token length per hop?
+   - **4-Point Model Armor & Cloud DLP Guardrails:** Are input prompts (`before_agent`/`before_model`), tool outputs (`after_tool`), and model outputs (`after_model`) screened by Google Cloud Model Armor and Sensitive Data Protection (Cloud DLP)?
    - **Live Agent Evaluation (`agents-cli eval`):** How many test cases are in `evals/datasets/*.jsonl`, and how many `agents-cli eval run` executions occur per month in CI/CD?
-   - For Vector Search: What is the embedding dimension, vector count, and deployed endpoint replica count?
+   - For Vertex AI Search / Vector Search: What is the document/chunk count, embedding dimension, vector count, and deployed endpoint replica count?
 
-7. **Networking, IAM Ingress Pattern & DevSecOps Toolchain:**
-   - **IAM Ingress Pattern (Rule 10):** Which pattern is selected?
-     - *Pattern 1 (IAP + External HTTPS Load Balancer + Serverless NEG)* $\rightarrow$ How many forwarding rules and GB processed?
-     - *Pattern 2 (App-Level OAuth 2.0)* or *Pattern 3 (Direct Ingress `invoker-iam-disabled`)* $\rightarrow$ Zero Load Balancer base fee.
+7. **Networking, Zero-Trust IAM Ingress Pattern, KMS & DevSecOps Toolchain:**
+   - **IAM Ingress Pattern (Rule 10 / WAF Pillar 2):** Which pattern is selected?
+     - *Pattern 1A (IAP + Cloud Armor + External HTTPS Load Balancer + Serverless NEG)* $\rightarrow$ Default for Tier-1 / regulated / external workloads; how many forwarding rules, Cloud Armor policies, and GB processed?
+     - *Pattern 1B (Direct Cloud Run IAP `--iap`, No Load Balancer)* $\rightarrow$ Permitted for internal single-region / Non-Prod cost-optimized apps (`$0` fixed ALB & Cloud Armor baseline; only standard Cloud Run & egress charges apply).
+     - *Pattern 2 (App-Level OAuth 2.0 + Cloud Armor)* or *Pattern 3 (Direct Ingress `invoker-iam-disabled` strictly for public static pages)*.
+   - **Cloud KMS (`CMEK` / HSM / EKM):** How many active CMEK keys and monthly cryptographic operations?
    - How much outbound internet network egress (GB/TB) and which tier (Premium vs Standard) is expected?
    - **DevSecOps CI/CD:** How many Cloud Build deployments/month, container images stored/scanned in Artifact Registry, and active secrets in Secret Manager?
 
@@ -170,10 +183,11 @@ python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service
 ```
 
 ### 2. Live Official Google Cloud Web Documentation:
-For services with specialized rates, model token pricing, or emerging features (e.g. Vertex AI Gemini model token pricing, Model Armor, Artifact Analysis):
+For services with specialized rates, model token pricing, or emerging features (e.g. Vertex AI Gemini model token pricing, Model Armor, Cloud DLP, Artifact Analysis):
 - Query official Google Cloud pricing web pages in real time via `search_web` or `read_url_content`:
   - Vertex AI Gemini & Agent pricing: `https://cloud.google.com/vertex-ai/generative-ai/pricing`
   - Model Armor pricing: `https://cloud.google.com/security-command-center/pricing`
+  - Sensitive Data Protection (Cloud DLP) pricing: `https://cloud.google.com/sensitive-data-protection/pricing`
   - Cloud Run pricing: `https://cloud.google.com/run/pricing`
   - Cloud Storage pricing: `https://cloud.google.com/storage/pricing`
   - Network & Load Balancing pricing: `https://cloud.google.com/vpc/network-pricing`
@@ -202,12 +216,12 @@ Follow the template structure in:
 [cost_report_template.md](./references/cost_report_template.md)
 
 ### Required Report Sections:
-1. **Executive Summary Table (Non-Prod + Prod + Total)**: Monthly & Annual Run-Rates broken down by **Non-Prod (`NONPROD_*`)** and **Prod (`PROD_*`)** for On-Demand, 1-Year CUD (~28% discount), and 3-Year CUD (~52% discount), plus **Brownfield TCO Comparison** (if modernizing a legacy system).
-2. **Visual Cost Distribution**: Mermaid pie chart and percentage breakdown across `agent_runtime` (Gemini/ADK/Model Armor/Evals), `cloud_run` (UI/Streaming Proxy), Databases, Storage, Networking/IAP, and DevSecOps CI/CD.
+1. **Executive Summary Table (Non-Prod + Prod + Total & Unit Economics)**: Monthly & Annual Run-Rates broken down by **Non-Prod (`NONPROD_*`)** and **Prod (`PROD_*`)** for On-Demand, 1-Year CUD (~28% discount), and 3-Year CUD (~52% discount), **WAF Pillar 4 Unit Economics KPIs** (`cost per 1,000 requests`, `cost per resolved agent session`), and **Brownfield TCO Comparison** (if modernizing a legacy system).
+2. **Visual Cost Distribution**: Mermaid pie chart and percentage breakdown across `agent_runtime` (Gemini/ADK/Model Armor/DLP/Evals), `cloud_run` (UI/Streaming Proxy), Databases, Storage, Networking/IAP/Cloud Armor, and DevSecOps CI/CD.
 3. **Itemized Bill of Materials (BoM)**: Environment (`NONPROD`/`PROD`), Service name, SKU, sizing, monthly quantity, live unit rate, rate source (API SKU ID or live URL), monthly cost, and rationale.
 4. **Confirmed Workload Parameters**: Exhaustive list of all parameters explicitly confirmed with the user (zero unverified assumptions).
 5. **Sensitivity & Scale Analysis**: Cost progression at 0.5×, 1.0×, 2.0×, and 5.0× traffic.
-6. **FinOps & Dual-Runtime Optimization Recommendations**: Actionable architectural recommendations (Gemini context caching, `NONPROD_MIN_INSTANCES=0` scale-to-zero, Cloud Run streaming concurrency tuning, CUD commitments, GCS lifecycle rules).
+6. **WAF Pillar 4 (FinOps) & Pillar 6 (Sustainability) Recommendations**: Actionable architectural recommendations (Vertex AI Context Caching 50%–90% savings, Model Routing Flash-Lite/Flash vs Pro, Batch API -50% discount, Provisioned Throughput + PayGo spillover, `NONPROD_MIN_INSTANCES=0` scale-to-zero, Cloud Run streaming concurrency tuning, CUD commitments, GCS Autoclass lifecycle rules, and low-carbon region `CFE %` alignment).
 
 ---
 
@@ -215,3 +229,4 @@ Follow the template structure in:
 
 To inspect a complete end-to-end example walkthrough:
 [sample_cost_analysis.md](./examples/sample_cost_analysis.md)
+

@@ -29,7 +29,7 @@ class QueryAgentConfig(BaseModel):
         default_factory=lambda: os.getenv("GEMINI_LOCATION", "global")
     )
     gemini_model: str = Field(
-        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-4-argon")
     )
     destination_gcs_bucket: str = Field(
         default_factory=lambda: os.getenv(

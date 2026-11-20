@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OKF Engineering Knowledge Workbench v2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/workbench.css" />
+</head>
+<body>
+  <div id="app" class="wb-shell">
+    <!-- Top Unified Navigation Bar -->
+    <header class="wb-topbar">
+      <div class="wb-brand">
+        <div class="wb-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+        </div>
+        <div class="wb-brand-text">
+          <span class="wb-brand-title">OKF Engineering Workbench</span>
+          <span class="wb-brand-sub" id="topbar-project-meta">Loading project...</span>
+        </div>
+      </div>
+
+      <!-- Segmented Primary Tab Switcher -->
+      <nav class="wb-tabs" role="tablist" aria-label="Workspace Mode">
+        <button id="tab-btn-extractor" class="wb-tab active" role="tab" aria-selected="true" data-tab="extractor">
+          <span class="wb-tab-dot cyan"></span>
+          Extractor Studio
+        </button>
+        <button id="tab-btn-query" class="wb-tab" role="tab" aria-selected="false" data-tab="query">
+          <span class="wb-tab-dot emerald"></span>
+          Knowledge Graph &amp; Query
+        </button>
+      </nav>
+
+      <!-- Context-Aware Gemini 4 Model Selector + Pipeline Jobs Drawer Trigger -->
+      <div class="wb-controls">
+        <div class="wb-model-picker" title="Select Gemini 4 Model (remembered per tab)">
+          <label for="model-select" class="wb-model-label" id="model-context-label">Extractor Model</label>
+          <select id="model-select" class="wb-select" aria-label="Gemini 4 Model Selector">
+            <option value="gemini-4-carbon">Gemini 4 Carbon</option>
+            <option value="gemini-4-hydrogen">Gemini 4 Hydrogen</option>
+            <option value="gemini-4-argon">Gemini 4 Argon</option>
+            <option value="gemini-4-neon">Gemini 4 Neon</option>
+          </select>
+        </div>
+
+        <button id="btn-open-jobs" class="wb-btn wb-btn-ghost" title="Open Cloud Run Pipeline Jobs Drawer">
+          <span id="jobs-pulse-dot" class="wb-status-dot idle"></span>
+          <span>Jobs</span>
+          <span id="jobs-badge" class="wb-pill">0</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Tab Views -->
+    <main class="wb-main">
+      <!-- ================================================================ -->
+      <!-- TAB 1: EXTRACTOR STUDIO                                          -->
+      <!-- ================================================================ -->
+      <section id="panel-extractor" class="wb-panel active" role="tabpanel" aria-labelledby="tab-btn-extractor">
+        <aside class="wb-sidebar">
+          <div class="wb-sidebar-head">
+            <div class="wb-segmented" role="group" aria-label="Document List Kind">
+              <button class="wb-seg-btn active" data-ext-kind="raw" id="ext-kind-raw">
+                Raw Docs <span class="wb-count" id="ext-raw-count">0</span>
+              </button>
+              <button class="wb-seg-btn" data-ext-kind="okf" id="ext-kind-okf">
+                OKF Bundle <span class="wb-count" id="ext-okf-count">0</span>
+              </button>
+            </div>
+            <div class="wb-search-row">
+              <input id="ext-search-input" type="search" class="wb-input" placeholder="Search files or concepts..." autocomplete="off" />
+              <button id="ext-refresh-btn" class="wb-icon-btn" title="Refresh from GCS & rebuild manifest">&#x21bb;</button>
+            </div>
+            <div class="wb-filter-row" id="ext-filter-chips"></div>
+          </div>
+
+          <div id="ext-file-list" class="wb-list" role="list">
+            <div class="wb-empty">Loading documents...</div>
+          </div>
+
+          <div class="wb-sidebar-foot">
+            <span id="ext-page-meta" class="wb-muted">0 items</span>
+            <button id="ext-load-more-btn" class="wb-btn wb-btn-sm wb-btn-ghost hidden">Load more</button>
+          </div>
+        </aside>
+
+        <div class="wb-workspace">
+          <!-- Pipeline Actions Bar (Cloud Run Job Triggers) -->
+          <div class="wb-action-bar">
+            <div class="wb-action-group">
+              <button id="btn-job-sync" class="wb-btn wb-btn-primary">
+                Sync OKF &rarr; Spanner
+              </button>
+              <button id="btn-job-extract" class="wb-btn wb-btn-secondary">
+                Batch Extract (Job)
+              </button>
+              <button id="btn-job-extract-sync" class="wb-btn wb-btn-secondary">
+                Extract + Sync
+              </button>
+            </div>
+
+            <div class="wb-action-group">
+              <select id="sync-mode-select" class="wb-select wb-select-sm" title="Spanner Sync Mode">
+                <option value="FULL_MIRROR">Mode: Full Mirror</option>
+                <option value="INCREMENTAL">Mode: Incremental</option>
+              </select>
+              <button id="btn-job-purge-modal" class="wb-btn wb-btn-danger-ghost" title="Destructive Spanner Purge & Reload (requires typed HITL confirmation)">
+                Purge &amp; Reload
+              </button>
+              <button id="btn-toggle-ext-chat" class="wb-btn wb-btn-ghost">
+                Assistant
+              </button>
+            </div>
+          </div>
+
+          <!-- Center Viewer + Collapsible Assistant Drawer -->
+          <div class="wb-split">
+            <div class="wb-viewer" id="ext-viewer">
+              <div class="wb-viewer-header" id="ext-viewer-header">
+                <div>
+                  <h2 id="ext-viewer-title" class="wb-viewer-title">Select a Raw Document or OKF Concept</h2>
+                  <p id="ext-viewer-subtitle" class="wb-muted">Browse engineering PDFs/DOCX/XLSX or compiled OKF v0.2 Markdown files.</p>
+                </div>
+                <div class="wb-viewer-actions" id="ext-viewer-actions"></div>
+              </div>
+              <div class="wb-viewer-body" id="ext-viewer-body">
+                <div class="wb-welcome-card">
+                  <h3>Extractor Studio &amp; Cloud Run Pipeline</h3>
+                  <p>
+                    Inspect raw engineering documents on the left, trigger single-document AI extraction via the
+                    <strong>Assistant</strong> drawer, or launch timeout-free <strong>Cloud Run Jobs</strong>
+                    (<code>okf-pipeline-job</code>) for batch extraction and Cloud Spanner synchronization with
+                    native <code>ML.PREDICT</code> embeddings.
+                  </p>
+                  <div class="wb-kpi-grid" id="ext-kpi-grid">
+                    <div class="wb-kpi"><span class="wb-kpi-val" id="kpi-raw">—</span><span class="wb-kpi-lbl">Raw Documents</span></div>
+                    <div class="wb-kpi"><span class="wb-kpi-val" id="kpi-okf">—</span><span class="wb-kpi-lbl">OKF Concepts</span></div>
+                    <div class="wb-kpi"><span class="wb-kpi-val" id="kpi-conflicts">—</span><span class="wb-kpi-lbl">Active Conflicts</span></div>
+                    <div class="wb-kpi"><span class="wb-kpi-val" id="kpi-sync-ver">—</span><span class="wb-kpi-lbl">Bundle Digest</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Collapsible Single-Doc Extraction Assistant -->
+            <aside id="ext-chat-drawer" class="wb-side-drawer hidden">
+              <div class="wb-drawer-head">
+                <div>
+                  <strong>Extraction Assistant</strong>
+                  <span class="wb-muted wb-xs" id="ext-chat-model-pill">gemini-4-carbon</span>
+                </div>
+                <button id="btn-close-ext-chat" class="wb-icon-btn" aria-label="Close Assistant">&times;</button>
+              </div>
+              <div id="ext-chat-log" class="wb-chat-log">
+                <div class="wb-msg assistant">
+                  Select a document or ask me to extract an equipment tag or audit the OKF bundle.
+                </div>
+              </div>
+              <form id="ext-chat-form" class="wb-chat-form">
+                <textarea id="ext-chat-input" class="wb-textarea" rows="2" placeholder="Extract equipment specs or audit log.md..."></textarea>
+                <div class="wb-chat-form-foot">
+                  <label class="wb-check">
+                    <input type="checkbox" id="ext-live-llm-toggle" checked />
+                    <span>Invoke Vertex LLM</span>
+                  </label>
+                  <button type="submit" class="wb-btn wb-btn-primary wb-btn-sm">Send</button>
+                </div>
+              </form>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <!-- TAB 2: KNOWLEDGE GRAPH & QUERY                                   -->
+      <!-- ================================================================ -->
+      <section id="panel-query" class="wb-panel" role="tabpanel" aria-labelledby="tab-btn-query">
+        <aside class="wb-sidebar">
+          <div class="wb-sidebar-head">
+            <div class="wb-search-row">
+              <input id="qry-search-input" type="search" class="wb-input" placeholder="Search Spanner tags or concepts..." autocomplete="off" />
+              <button id="qry-refresh-btn" class="wb-icon-btn" title="Refresh Spanner hierarchy">&#x21bb;</button>
+            </div>
+            <div class="wb-filter-row">
+              <button id="qry-conflicts-toggle" class="wb-chip">Conflicts Only</button>
+              <span class="wb-muted wb-xs" id="qry-summary-stats">Lazy Spanner Tree</span>
+            </div>
+          </div>
+
+          <div id="qry-hierarchy-tree" class="wb-list">
+            <div class="wb-empty">Open this tab to load Spanner hierarchy...</div>
+          </div>
+        </aside>
+
+        <!-- Center Conversational SSE Query Pane -->
+        <div class="wb-query-center">
+          <div class="wb-query-head">
+            <div class="wb-prompt-strip" id="qry-prompt-chips"></div>
+            <div class="wb-query-head-right">
+              <span class="wb-pill" id="qry-focus-pill">Focus: All</span>
+              <button id="qry-new-session-btn" class="wb-btn wb-btn-ghost wb-btn-sm">New Chat</button>
+            </div>
+          </div>
+
+          <div id="qry-chat-messages" class="wb-chat-log wb-chat-log-main">
+            <div class="wb-msg assistant">
+              <h3>Spanner Graph-RAG &amp; Lineage Assistant</h3>
+              <p>
+                Ask about equipment parameters, multi-hop P&amp;ID connectivity, cross-document conflicts,
+                or 5-stage HAZOP assessments. Powered by Cloud Spanner Graph + native <code>ML.PREDICT</code>
+                embeddings + SSE streaming.
+              </p>
+            </div>
+          </div>
+
+          <form id="qry-chat-form" class="wb-chat-composer">
+            <textarea id="qry-chat-input" class="wb-textarea" rows="2" placeholder="Ask an engineering, graph traversal, lineage, or HAZOP question..."></textarea>
+            <div class="wb-composer-foot">
+              <span class="wb-muted wb-xs" id="qry-stream-status">Ready · SSE Streaming enabled</span>
+              <button id="qry-send-btn" type="submit" class="wb-btn wb-btn-primary">Ask Agent</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Right Interactive Inspector (Graph | Dossier | Dataplex Catalog) -->
+        <aside class="wb-inspector">
+          <div class="wb-inspector-head">
+            <div class="wb-segmented" role="group" aria-label="Inspector View">
+              <button class="wb-seg-btn active" data-insp="graph">Graph</button>
+              <button class="wb-seg-btn" data-insp="dossier">Dossier</button>
+              <button class="wb-seg-btn" data-insp="catalog">Dataplex</button>
+            </div>
+            <div class="wb-graph-toolbar" id="graph-toolbar">
+              <select id="graph-hops-select" class="wb-select wb-select-sm" title="Graph Hops">
+                <option value="1">1-Hop</option>
+                <option value="2" selected>2-Hop</option>
+                <option value="3">3-Hop</option>
+              </select>
+              <label class="wb-check wb-xs">
+                <input type="checkbox" id="graph-lineage-toggle" checked />
+                <span>Lineage</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="insp-pane-graph" class="wb-inspector-body active">
+            <div id="graph-canvas-wrap" class="wb-graph-wrap">
+              <svg id="graph-svg" class="wb-graph-svg"></svg>
+              <div id="graph-status-pill" class="wb-graph-pill">Select a tag to visualize graph</div>
+            </div>
+          </div>
+
+          <div id="insp-pane-dossier" class="wb-inspector-body">
+            <div id="dossier-content" class="wb-dossier">
+              <div class="wb-empty">Select an equipment tag or concept to inspect parameters &amp; PDF lineage.</div>
+            </div>
+          </div>
+
+          <div id="insp-pane-catalog" class="wb-inspector-body">
+            <div id="catalog-content" class="wb-dossier">
+              <div class="wb-empty">Loading Dataplex Universal Catalog governance metadata...</div>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <!-- Slide-Over Cloud Run Pipeline Jobs Drawer -->
+    <div id="jobs-drawer-backdrop" class="wb-backdrop hidden"></div>
+    <aside id="jobs-drawer" class="wb-modal-drawer hidden" aria-label="Cloud Run Pipeline Jobs">
+      <div class="wb-drawer-head">
+        <div>
+          <strong>Cloud Run Pipeline Jobs</strong>
+          <span class="wb-muted wb-xs" id="jobs-drawer-subtitle">okf-pipeline-job</span>
+        </div>
+        <div class="wb-action-group">
+          <button id="btn-refresh-jobs" class="wb-icon-btn" title="Refresh jobs">&#x21bb;</button>
+          <button id="btn-close-jobs" class="wb-icon-btn" aria-label="Close Jobs Drawer">&times;</button>
+        </div>
+      </div>
+      <div id="jobs-list" class="wb-jobs-list">
+        <div class="wb-empty">No pipeline jobs triggered in this session yet.</div>
+      </div>
+    </aside>
+
+    <!-- Deterministic SAIF RAC HITL Confirmation Modal for Destructive Spanner Purge -->
+    <div id="purge-modal-backdrop" class="wb-backdrop hidden"></div>
+    <div id="purge-modal" class="wb-modal hidden" role="dialog" aria-modal="true" aria-labelledby="purge-modal-title">
+      <h3 id="purge-modal-title">Confirm Destructive Spanner Purge &amp; Reload</h3>
+      <p class="wb-muted">
+        This action triggers <code>okf-pipeline-job</code> with <code>PURGE=true</code>, deleting all existing rows
+        across all 9 Cloud Spanner tables and Dataplex entries before reloading from the GCS OKF bundle.
+      </p>
+      <label class="wb-field-label" for="purge-confirm-input">
+        Type <code>PURGE SPANNER</code> to confirm (externalized HITL safeguard):
+      </label>
+      <input id="purge-confirm-input" type="text" class="wb-input" placeholder="PURGE SPANNER" autocomplete="off" />
+      <div class="wb-modal-actions">
+        <button id="btn-cancel-purge" class="wb-btn wb-btn-ghost">Cancel</button>
+        <button id="btn-confirm-purge" class="wb-btn wb-btn-danger" disabled>Execute Purge &amp; Reload</button>
+      </div>
+    </div>
+
+    <!-- Subtle Toast Notification Stack -->
+    <div id="toast-container" class="wb-toasts" aria-live="polite"></div>
+  </div>
+
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

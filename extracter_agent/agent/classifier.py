@@ -35,9 +35,18 @@ You MUST provide your reasoning and extract any explicit entity tags or raw PDF 
 class CognitiveClassifier:
     """Cognitive intent classifier powered by Vertex AI / Gemini."""
 
-    def __init__(self, client: genai.Client | None = None) -> None:
+    def __init__(
+        self,
+        client: genai.Client | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        from unified_web.models import get_default_extracter_model, validate_gemini_model
+
         cfg = get_config()
-        self.model_name = cfg.gemini_model
+        if model_name is not None:
+            self.model_name = validate_gemini_model(model_name, default=get_default_extracter_model())
+        else:
+            self.model_name = os.getenv("EXTRACTER_DEFAULT_MODEL", "").strip() or cfg.gemini_model
         self._client = client
 
     @property

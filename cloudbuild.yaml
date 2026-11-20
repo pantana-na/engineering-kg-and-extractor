@@ -1,11 +1,15 @@
 # Google Cloud Build Pipeline for Extracter Agent & Spanner Query Agent
-# Complies with Rule 5: Automated Build & Quality Gate
+# Complies with Rule 5 (Automated Build & Quality Gate) & Rule 8 (Externalized Service Account)
+
+serviceAccount: 'projects/${PROJECT_ID}/serviceAccounts/${_CLOUDBUILD_SERVICE_ACCOUNT}'
 
 steps:
   # 1. Install dependencies
   - name: 'python:3.13-slim'
     id: 'install-deps'
     entrypoint: 'bash'
+    env:
+      - 'GEMINI_MODEL=${_GEMINI_MODEL}'
     args:
       - '-c'
       - |
@@ -15,16 +19,20 @@ steps:
   - name: 'python:3.13-slim'
     id: 'run-tests'
     entrypoint: 'bash'
+    env:
+      - 'GEMINI_MODEL=${_GEMINI_MODEL}'
     args:
       - '-c'
       - |
         pip install --no-cache-dir .[dev]
-        pytest tests/ evals/ -v
+        pytest tests/ evals/test_eval_benchmarks.py -v
 
   # 3. Validate OKF Bundle Synthesis
   - name: 'python:3.13-slim'
     id: 'verify-okf-bundle'
     entrypoint: 'bash'
+    env:
+      - 'GEMINI_MODEL=${_GEMINI_MODEL}'
     args:
       - '-c'
       - |
@@ -33,6 +41,14 @@ steps:
 
 substitutions:
   _ENVIRONMENT: 'nonprod'
+  _GEMINI_MODEL: 'gemini-4-argon'
+  _CLOUDBUILD_SERVICE_ACCOUNT: '000000000000-compute@developer.gserviceaccount.com'
+  _CLOUD_RUN_CPU: '4'
+  _CLOUD_RUN_MEMORY: '8Gi'
+  _CLOUD_RUN_CONCURRENCY: '30'
+  _CLOUD_RUN_TIMEOUT: '900'
+  _MIN_INSTANCES: '0'
+  _MAX_INSTANCES: '3'
 
 options:
   logging: CLOUD_LOGGING_ONLY

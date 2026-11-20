@@ -294,10 +294,13 @@ def sample_populated_repo() -> SpannerGraphRepository:
     return repo
 
 
-def test_config_and_schema_ddl_loaded() -> None:
+def test_config_and_schema_ddl_loaded(monkeypatch) -> None:
+    monkeypatch.delenv("SPANNER_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("SPANNER_DATABASE_ID", raising=False)
+    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
     cfg = get_config()
-    assert cfg.spanner_instance_id in ("okf-knowledge-spanner", "okf-demo-spanner")
-    assert cfg.spanner_database_id in ("okf_knowledge_graph", "okf_demo_graph")
+    assert cfg.spanner_instance_id == "okf-knowledge-spanner"
+    assert cfg.spanner_database_id == "okf_knowledge_graph"
     assert cfg.embedding_model == "text-embedding-005"
 
     ddl_path = Path("query_agent/spanner/schema.sql")

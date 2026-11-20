@@ -30,7 +30,11 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from query_agent.guardrails import check_query_prompt_security
+from query_agent.guardrails import (
+    QuerySecurityGuardrailError,
+    check_query_prompt_security,
+    query_agent_before_callback,
+)
 from query_agent.orchestrator import QUERY_ORCHESTRATOR_INSTRUCTIONS
 from query_agent.spanner.catalog_sync import DataplexCatalogAndLineageSync
 from query_agent.spanner.repository import SpannerGraphRepository
@@ -373,6 +377,9 @@ def _extract_referenced_tags(text: str) -> list[str]:
     return ordered[:10]
 
 
+_FOCUS_TAG_SAFE_RE = re.compile(r"^[A-Za-z0-9_./:\- ()]{1,128}$")
+
+
 async def _execute_query_job(
     job_id: str,
     session_id: str,
@@ -387,11 +394,35 @@ async def _execute_query_job(
     t_phase_cursor = t_job_start
 
     try:
-        # STEP 0: Pre-flight Security Guardrail
-        sec = check_query_prompt_security(question)
-        allowed = sec.get("filterMatchState") != "MATCH_FOUND"
-        threat_cat = sec.get("violation_type") or "POLICY_VIOLATION"
-        reason = sec.get("matched_pattern") or "Adversarial directive detected"
+        # STEP 0: Pre-flight Security Guardrail across focus_tag, category, and question
+        raw_focus = focus_tag if isinstance(focus_tag, str) else ""
+        has_ctrl = any(ch in raw_focus for ch in ("\r", "\n", "\x00"))
+        clean_focus = raw_focus.strip() or None
+        focus_format_ok = not has_ctrl and (
+            clean_focus is None or bool(_FOCUS_TAG_SAFE_RE.match(clean_focus))
+        )
+        focus_tag = clean_focus if focus_format_ok else None
+        prompt_with_context = (
+            f"[Active Equipment/Concept Selection in Workbench: {clean_focus}]\n{question}"
+            if clean_focus
+            else question
+        )
+        combined_security_input = (
+            f"{raw_focus}\n{category or ''}\n{prompt_with_context}"
+        )
+        sec = check_query_prompt_security(combined_security_input)
+        if sec.get("filterMatchState") == "MATCH_FOUND":
+            allowed = False
+            threat_cat = sec.get("violation_type") or "POLICY_VIOLATION"
+            reason = sec.get("matched_pattern") or "Adversarial directive detected"
+        elif not focus_format_ok:
+            allowed = False
+            threat_cat = "INVALID_FOCUS_TAG"
+            reason = "focus_tag contains disallowed control characters or exceeds safe identifier syntax"
+        else:
+            allowed = True
+            threat_cat = "POLICY_VIOLATION"
+            reason = "Adversarial directive detected"
         t_after_step0 = time.perf_counter()
         step0_ms = round((t_after_step0 - t_phase_cursor) * 1000, 1)
         t_phase_cursor = t_after_step0
@@ -522,7 +553,7 @@ async def _execute_query_job(
             return
 
         # STEP 1: Initialize ADK Runner with shared persistent _SESSION_SERVICE
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-4-argon")
         if os.environ.get("GEMINI_LOCATION"):
             os.environ["GOOGLE_CLOUD_LOCATION"] = os.environ["GEMINI_LOCATION"]
 
@@ -635,6 +666,7 @@ async def _execute_query_job(
                 _wrap_tool(execute_multistage_risk_and_hazop_query),
                 _wrap_tool(sync_or_inspect_knowledge_catalog),
             ],
+            before_agent_callback=query_agent_before_callback,
         )
 
         runner = Runner(
@@ -646,11 +678,6 @@ async def _execute_query_job(
         # Ensure session exists in _SESSION_SERVICE
         await _get_or_create_session(session_id, force_new=False)
 
-        prompt_with_context = (
-            f"[Active Equipment/Concept Selection in Workbench: {focus_tag}]\n{question}"
-            if focus_tag
-            else question
-        )
         content = types.Content(
             role="user",
             parts=[types.Part.from_text(text=prompt_with_context)],
@@ -718,6 +745,26 @@ async def _execute_query_job(
         job["steps_sum_ms"] = steps_sum_ms
         job["total_duration_ms"] = total_ms
         job["status"] = "COMPLETED"
+        job["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+    except QuerySecurityGuardrailError as sec_exc:
+        t_err_end = time.perf_counter()
+        if routing_step_list := [s for s in job["steps"] if s.get("status") == "RUNNING"]:
+            for s in routing_step_list:
+                s["status"] = "BLOCKED"
+                s["duration_ms"] = 0.0
+        steps_sum_ms, total_ms = compute_telemetry_totals(
+            job["steps"], t_err_end - t_job_start
+        )
+        job["status"] = "COMPLETED"
+        job["blocked_by_guardrail"] = True
+        job["answer_markdown"] = (
+            "### Security Guardrail Intervention\n\n"
+            f"Your request was blocked by the ADK pre-flight security callback.\n\n"
+            f"- **Reason:** {sec_exc}"
+        )
+        job["steps_sum_ms"] = steps_sum_ms
+        job["total_duration_ms"] = total_ms
         job["completed_at"] = datetime.now(timezone.utc).isoformat()
 
     except Exception as exc:
@@ -856,7 +903,7 @@ def create_app() -> FastAPI:
             "status": "ok",
             "service": "okf-query-agent-web",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
+            "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-4-argon"),
             "spanner_instance": repo.instance_id,
             "spanner_database": repo.database_id,
             "use_in_memory": repo.use_in_memory,
@@ -865,13 +912,25 @@ def create_app() -> FastAPI:
     @app.get("/api/status")
     async def api_status() -> dict[str, Any]:
         repo = get_repo()
+        try:
+            from extracter_agent.deploy_config import get_safe_cloud_run_posture
+
+            posture = get_safe_cloud_run_posture("QUERY_WEB")
+        except Exception:
+            posture = {
+                "ingress": os.environ.get("CLOUD_RUN_INGRESS", "all"),
+                "security_mode": os.environ.get("CLOUD_RUN_SECURITY_MODE", "iap"),
+                "vpc_mode": os.environ.get("CLOUD_RUN_VPC_MODE", "direct"),
+                "vpc_egress": os.environ.get("CLOUD_RUN_VPC_EGRESS", "all-traffic"),
+            }
         return {
             "status": "online",
             "service": "okf-query-agent-web",
             "project_id": repo.project_id,
             "location": os.environ.get("GOOGLE_CLOUD_LOCATION", "asia-southeast1"),
-            "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
+            "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-4-argon"),
             "gemini_location": os.environ.get("GEMINI_LOCATION", "global"),
+            "cloud_run_posture": posture,
             "spanner_instance": repo.instance_id,
             "spanner_database": repo.database_id,
             "spanner_graph": "OkfKnowledgeGraph",
@@ -1081,7 +1140,7 @@ def create_app() -> FastAPI:
             "question": question,
             "focus_tag": req.focus_tag,
             "category": req.category,
-            "model": os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
+            "model": os.environ.get("GEMINI_MODEL", "gemini-4-argon"),
             "status": "RUNNING",
             "blocked_by_guardrail": False,
             "created_at": datetime.now(timezone.utc).isoformat(),

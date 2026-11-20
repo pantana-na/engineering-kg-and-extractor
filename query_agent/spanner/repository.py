@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,6 +90,19 @@ class SpannerGraphRepository:
         self.database_id = database_id or cfg.spanner_database_id
         self.embedding_model = cfg.embedding_model
         self.embedding_dimension = 768
+        self.embedding_location = os.getenv(
+            "SPANNER_EMBEDDING_LOCATION",
+            "us-central1" if self.region == "global" else self.region,
+        ).strip() or "asia-southeast1"
+        self.native_embedding_mode = (
+            os.getenv("SPANNER_NATIVE_EMBEDDING_MODE", "native_ml_predict")
+            .strip()
+            .lower()
+            or "native_ml_predict"
+        )
+        self.embedding_model_name = "OkfTextEmbeddingModel"
+        self.last_vector_search_mode = "INIT"
+        self.last_embedding_mode = "INIT"
         self.use_in_memory = use_in_memory
 
         self._spanner_client: Any = None
@@ -172,6 +186,110 @@ class SpannerGraphRepository:
         vecs = self.embed_texts_batch([query], task_type="RETRIEVAL_QUERY", batch_size=1)
         return vecs[0] if vecs else deterministic_hash_embedding(query, self.embedding_dimension)
 
+    def build_native_embedding_model_ddl(self) -> str:
+        """Build idempotent Spanner GoogleSQL DDL registering Vertex AI text-embedding-005 as a remote model."""
+        endpoint = (
+            f"//aiplatform.googleapis.com/projects/{self.project_id}"
+            f"/locations/{self.embedding_location}/publishers/google/models/{self.embedding_model}"
+        )
+        return (
+            f"CREATE OR REPLACE MODEL {self.embedding_model_name}\n"
+            "INPUT(\n"
+            "  content STRING(MAX)\n"
+            ")\n"
+            "OUTPUT(\n"
+            "  embeddings STRUCT<\n"
+            "    statistics STRUCT<truncated BOOL, token_count FLOAT64>,\n"
+            "    values ARRAY<FLOAT64>\n"
+            "  >\n"
+            ")\n"
+            "REMOTE OPTIONS (\n"
+            f"  endpoint = '{endpoint}'\n"
+            ")"
+        )
+
+    @staticmethod
+    def build_v2_index_ddls() -> list[str]:
+        """Return idempotent v2 ANN vector index and graph edge/filter secondary index DDLs."""
+        return [
+            (
+                "CREATE VECTOR INDEX IF NOT EXISTS idx_okf_chunks_vec "
+                "ON OkfSectionChunks(embedding) "
+                "STORING (concept_id, category, unit, section_heading, has_conflict) "
+                "WHERE embedding IS NOT NULL "
+                "OPTIONS (distance_type = 'COSINE')"
+            ),
+            "CREATE INDEX IF NOT EXISTS idx_okf_concepts_cat_unit ON OkfConcepts(category, unit, concept_id)",
+            "CREATE INDEX IF NOT EXISTS idx_engineering_entities_concept ON EngineeringEntities(concept_id, canonical_tag)",
+            "CREATE INDEX IF NOT EXISTS idx_fact_assertions_entity ON FactAssertions(entity_id, has_conflict)",
+            "CREATE INDEX IF NOT EXISTS idx_process_conn_from ON ProcessConnections(from_entity_id, to_entity_id)",
+            "CREATE INDEX IF NOT EXISTS idx_process_conn_to ON ProcessConnections(to_entity_id, from_entity_id)",
+            "CREATE INDEX IF NOT EXISTS idx_inst_ctrl_inst ON InstrumentControlEdges(instrument_entity_id, target_entity_id)",
+            "CREATE INDEX IF NOT EXISTS idx_inst_ctrl_target ON InstrumentControlEdges(target_entity_id, instrument_entity_id)",
+            "CREATE INDEX IF NOT EXISTS idx_inst_ctrl_source_concept ON InstrumentControlEdges(source_concept_id)",
+            "CREATE INDEX IF NOT EXISTS idx_concept_wikilinks_from ON ConceptWikiLinks(from_concept_id, to_concept_id)",
+        ]
+
+    def ensure_schema_v2(self, *, timeout_seconds: int = 300) -> dict[str, Any]:
+        """Idempotently apply v2 Spanner remote embedding model and ANN/graph secondary indexes."""
+        ddls = [self.build_native_embedding_model_ddl(), *self.build_v2_index_ddls()]
+        if self.use_in_memory:
+            return {"status": "DRY_RUN_IN_MEMORY", "ddl_count": len(ddls), "ddls": ddls}
+
+        db = self._get_database()
+        op = db.update_ddl(ddls)
+        op.result(timeout=timeout_seconds)
+        return {"status": "APPLIED", "ddl_count": len(ddls)}
+
+    def populate_chunk_embeddings_native(
+        self,
+        chunk_ids: list[str],
+        *,
+        batch_size: int = 100,
+    ) -> int:
+        """Compute and populate OkfSectionChunks.embedding inside Spanner via native ML.PREDICT."""
+        if not chunk_ids or self.use_in_memory:
+            return 0
+        db = self._get_database()
+        from google.cloud.spanner_v1 import param_types
+
+        updated_total = 0
+        dml = (
+            "UPDATE OkfSectionChunks AS target "
+            "SET embedding = ARRAY("
+            "  SELECT CAST(v AS FLOAT32) "
+            "  FROM UNNEST(pred.embeddings.values) AS v WITH OFFSET pos "
+            "  ORDER BY pos"
+            ") "
+            "FROM ("
+            f"  SELECT chunk_id, embeddings FROM ML.PREDICT("
+            f"    MODEL {self.embedding_model_name}, "
+            "    ("
+            "      SELECT chunk_id, "
+            "             SUBSTR(CONCAT(concept_id, ' | ', section_heading, '\\n', header_preserved_markdown), 1, 3500) AS content "
+            "      FROM OkfSectionChunks "
+            "      WHERE chunk_id IN UNNEST(@batch_ids)"
+            "    )"
+            "  )"
+            ") AS pred "
+            "WHERE target.chunk_id = pred.chunk_id"
+        )
+        for start in range(0, len(chunk_ids), batch_size):
+            batch = chunk_ids[start : start + batch_size]
+
+            def _run_update(txn: Any, b: list[str] = batch) -> int:
+                return int(
+                    txn.execute_update(
+                        dml,
+                        params={"batch_ids": b},
+                        param_types={"batch_ids": param_types.Array(param_types.STRING)},
+                    )
+                )
+
+            updated_total += int(db.run_in_transaction(_run_update))
+        self.last_embedding_mode = "NATIVE_ML_PREDICT"
+        return updated_total
+
     def upsert_bundle_graph(
         self,
         extracted: BundleGraphExtractionResult | dict[str, list[Any]],
@@ -202,6 +320,13 @@ class SpannerGraphRepository:
             wiki_links = list(extracted.get("wikilink_edges") or extracted.get("concept_links") or [])
             lineage_edges = list(extracted.get("lineage_edges") or [])
 
+        use_native_spanner_embed = (
+            compute_embeddings
+            and not self.use_in_memory
+            and self.native_embedding_mode == "native_ml_predict"
+        )
+        native_chunk_ids_pending: list[str] = []
+
         if compute_embeddings and chunks:
             missing_indices = [
                 i
@@ -209,13 +334,17 @@ class SpannerGraphRepository:
                 if not c.embedding or len(c.embedding) != self.embedding_dimension
             ]
             if missing_indices:
-                texts_to_embed = [
-                    f"{chunks[i].concept_id} | {chunks[i].section_heading}\n{chunks[i].header_preserved_markdown}"
-                    for i in missing_indices
-                ]
-                vectors = self.embed_texts_batch(texts_to_embed, task_type="RETRIEVAL_DOCUMENT")
-                for idx, vec in zip(missing_indices, vectors):
-                    chunks[idx].embedding = vec
+                if use_native_spanner_embed:
+                    native_chunk_ids_pending = [chunks[i].chunk_id for i in missing_indices]
+                else:
+                    texts_to_embed = [
+                        f"{chunks[i].concept_id} | {chunks[i].section_heading}\n{chunks[i].header_preserved_markdown}"
+                        for i in missing_indices
+                    ]
+                    vectors = self.embed_texts_batch(texts_to_embed, task_type="RETRIEVAL_DOCUMENT")
+                    for idx, vec in zip(missing_indices, vectors):
+                        chunks[idx].embedding = vec
+                    self.last_embedding_mode = "IN_MEMORY" if self.use_in_memory else "CLIENT_SDK"
 
         valid_source_ids = set(self._mem_source_docs.keys()) | set(existing_source_ids or ())
         for doc in source_docs:
@@ -285,6 +414,53 @@ class SpannerGraphRepository:
                 wiki_links=valid_wiki_links,
                 lineage_edges=valid_lineage_edges,
             )
+            if native_chunk_ids_pending:
+                try:
+                    self.populate_chunk_embeddings_native(native_chunk_ids_pending)
+                except Exception as exc:
+                    logger.warning(
+                        "Native Spanner ML.PREDICT embedding failed (%s); falling back to client SDK embedding batch.",
+                        exc,
+                    )
+                    by_id = {c.chunk_id: c for c in chunks}
+                    pending_chunks = [by_id[cid] for cid in native_chunk_ids_pending if cid in by_id]
+                    if pending_chunks:
+                        texts = [
+                            f"{c.concept_id} | {c.section_heading}\n{c.header_preserved_markdown}"
+                            for c in pending_chunks
+                        ]
+                        vectors = self.embed_texts_batch(texts, task_type="RETRIEVAL_DOCUMENT")
+                        for c, vec in zip(pending_chunks, vectors):
+                            c.embedding = vec
+                        self._batch_insert_or_update(
+                            table="OkfSectionChunks",
+                            columns=[
+                                "chunk_id",
+                                "concept_id",
+                                "category",
+                                "unit",
+                                "section_heading",
+                                "chunk_index",
+                                "header_preserved_markdown",
+                                "has_conflict",
+                                "embedding",
+                            ],
+                            values=[
+                                (
+                                    c.chunk_id,
+                                    c.concept_id,
+                                    c.category,
+                                    c.unit,
+                                    c.section_heading,
+                                    c.chunk_index,
+                                    c.header_preserved_markdown,
+                                    c.has_conflict,
+                                    c.embedding,
+                                )
+                                for c in pending_chunks
+                            ],
+                        )
+                        self.last_embedding_mode = "CLIENT_SDK_FALLBACK"
 
         return {
             "source_documents": len(source_docs),
@@ -468,120 +644,166 @@ class SpannerGraphRepository:
         db = self._get_database()
         from google.cloud.spanner_v1 import param_types
 
-        cids_param = {"cids": list(cid_set)}
         cids_type = {"cids": param_types.Array(param_types.STRING)}
+        cid_list = sorted(cid_set)
+        batch_size = 5
+        totals: dict[str, int] = {
+            "concepts": 0,
+            "section_chunks": 0,
+            "entities": 0,
+            "assertions": 0,
+            "process_connections": 0,
+            "instrument_controls": 0,
+            "concept_links": 0,
+            "lineage_edges": 0,
+            "source_documents": 0,
+        }
 
-        def _tx_cascade(transaction: Any) -> dict[str, int]:
-            c_lin = transaction.execute_update(
-                "DELETE FROM FactLineageEdges WHERE concept_id IN UNNEST(@cids)",
-                params=cids_param,
-                param_types=cids_type,
-            )
-            if delete_concept_row:
-                c_wl = transaction.execute_update(
-                    "DELETE FROM ConceptWikiLinks WHERE from_concept_id IN UNNEST(@cids) OR to_concept_id IN UNNEST(@cids)",
-                    params=cids_param,
-                    param_types=cids_type,
-                )
-                c_ctrl = transaction.execute_update(
-                    """
-                    DELETE FROM InstrumentControlEdges
-                    WHERE source_concept_id IN UNNEST(@cids)
-                       OR instrument_entity_id IN (SELECT entity_id FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids))
-                       OR target_entity_id IN (SELECT entity_id FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids))
-                    """,
-                    params=cids_param,
-                    param_types=cids_type,
-                )
-                c_conn = transaction.execute_update(
-                    """
-                    DELETE FROM ProcessConnections
-                    WHERE source_concept_id IN UNNEST(@cids)
-                       OR from_entity_id IN (SELECT entity_id FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids))
-                       OR to_entity_id IN (SELECT entity_id FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids))
-                    """,
-                    params=cids_param,
-                    param_types=cids_type,
-                )
-            else:
-                c_wl = transaction.execute_update(
-                    "DELETE FROM ConceptWikiLinks WHERE from_concept_id IN UNNEST(@cids)",
-                    params=cids_param,
-                    param_types=cids_type,
-                )
-                c_ctrl = transaction.execute_update(
-                    "DELETE FROM InstrumentControlEdges WHERE source_concept_id IN UNNEST(@cids)",
-                    params=cids_param,
-                    param_types=cids_type,
-                )
-                c_conn = transaction.execute_update(
-                    "DELETE FROM ProcessConnections WHERE source_concept_id IN UNNEST(@cids)",
-                    params=cids_param,
-                    param_types=cids_type,
-                )
+        for i in range(0, len(cid_list), batch_size):
+            batch_cids = cid_list[i : i + batch_size]
+            cids_param = {"cids": batch_cids}
+            is_last_batch = (i + batch_size) >= len(cid_list)
 
-            c_chunks = transaction.execute_update(
-                "DELETE FROM OkfSectionChunks WHERE concept_id IN UNNEST(@cids)",
-                params=cids_param,
-                param_types=cids_type,
-            )
-            c_facts = transaction.execute_update(
-                "DELETE FROM FactAssertions WHERE concept_id IN UNNEST(@cids)",
-                params=cids_param,
-                param_types=cids_type,
-            )
-            if delete_concept_row:
-                c_ents = transaction.execute_update(
-                    "DELETE FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids)",
-                    params=cids_param,
-                    param_types=cids_type,
-                )
-                c_concepts = transaction.execute_update(
-                    "DELETE FROM OkfConcepts WHERE concept_id IN UNNEST(@cids)",
-                    params=cids_param,
-                    param_types=cids_type,
-                )
-            else:
-                c_ents = transaction.execute_update(
-                    """
-                    DELETE FROM EngineeringEntities
-                    WHERE concept_id IN UNNEST(@cids)
-                      AND entity_id NOT IN (
-                          SELECT from_entity_id FROM ProcessConnections
-                          UNION DISTINCT
-                          SELECT to_entity_id FROM ProcessConnections
-                          UNION DISTINCT
-                          SELECT instrument_entity_id FROM InstrumentControlEdges
-                          UNION DISTINCT
-                          SELECT target_entity_id FROM InstrumentControlEdges
-                      )
-                    """,
-                    params=cids_param,
-                    param_types=cids_type,
-                )
-                c_concepts = 0
+            # Use Partitioned DML for FactLineageEdges when supported by db so large concepts never exceed 80,000 mutations
+            pdml_lin_deleted: int | None = None
+            if hasattr(db, "execute_partitioned_dml"):
+                try:
+                    pdml_lin_deleted = int(
+                        db.execute_partitioned_dml(
+                            "DELETE FROM FactLineageEdges WHERE concept_id IN UNNEST(@cids)",
+                            params=cids_param,
+                            param_types=cids_type,
+                        )
+                        or 0
+                    )
+                except Exception:
+                    pdml_lin_deleted = None
 
-            c_srcs = transaction.execute_update(
-                """
-                DELETE FROM RawSourceDocuments
-                WHERE source_id NOT IN (
-                    SELECT DISTINCT source_id FROM FactLineageEdges WHERE source_id IS NOT NULL
-                )
-                """
-            )
-            return {
-                "concepts": int(c_concepts or 0),
-                "section_chunks": int(c_chunks or 0),
-                "entities": int(c_ents or 0),
-                "assertions": int(c_facts or 0),
-                "process_connections": int(c_conn or 0),
-                "instrument_controls": int(c_ctrl or 0),
-                "concept_links": int(c_wl or 0),
-                "lineage_edges": int(c_lin or 0),
-                "source_documents": int(c_srcs or 0),
-            }
+            def _tx_cascade(
+                transaction: Any,
+                _param: dict[str, Any] = cids_param,
+                _last: bool = is_last_batch,
+                _pdml_lin: int | None = pdml_lin_deleted,
+            ) -> dict[str, int]:
+                if _pdml_lin is not None:
+                    c_lin = _pdml_lin
+                else:
+                    c_lin = transaction.execute_update(
+                        "DELETE FROM FactLineageEdges WHERE concept_id IN UNNEST(@cids)",
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                if delete_concept_row:
+                    c_wl = transaction.execute_update(
+                        "DELETE FROM ConceptWikiLinks WHERE from_concept_id IN UNNEST(@cids) OR to_concept_id IN UNNEST(@cids)",
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                    c_ctrl = transaction.execute_update(
+                        """
+                        DELETE FROM InstrumentControlEdges
+                        WHERE source_concept_id IN UNNEST(@cids)
+                           OR instrument_entity_id IN (SELECT entity_id FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids))
+                           OR target_entity_id IN (SELECT entity_id FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids))
+                        """,
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                    c_conn = transaction.execute_update(
+                        """
+                        DELETE FROM ProcessConnections
+                        WHERE source_concept_id IN UNNEST(@cids)
+                           OR from_entity_id IN (SELECT entity_id FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids))
+                           OR to_entity_id IN (SELECT entity_id FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids))
+                        """,
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                else:
+                    c_wl = transaction.execute_update(
+                        "DELETE FROM ConceptWikiLinks WHERE from_concept_id IN UNNEST(@cids)",
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                    c_ctrl = transaction.execute_update(
+                        "DELETE FROM InstrumentControlEdges WHERE source_concept_id IN UNNEST(@cids)",
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                    c_conn = transaction.execute_update(
+                        "DELETE FROM ProcessConnections WHERE source_concept_id IN UNNEST(@cids)",
+                        params=_param,
+                        param_types=cids_type,
+                    )
 
-        return db.run_in_transaction(_tx_cascade)
+                c_chunks = transaction.execute_update(
+                    "DELETE FROM OkfSectionChunks WHERE concept_id IN UNNEST(@cids)",
+                    params=_param,
+                    param_types=cids_type,
+                )
+                c_facts = transaction.execute_update(
+                    "DELETE FROM FactAssertions WHERE concept_id IN UNNEST(@cids)",
+                    params=_param,
+                    param_types=cids_type,
+                )
+                if delete_concept_row:
+                    c_ents = transaction.execute_update(
+                        "DELETE FROM EngineeringEntities WHERE concept_id IN UNNEST(@cids)",
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                    c_concepts = transaction.execute_update(
+                        "DELETE FROM OkfConcepts WHERE concept_id IN UNNEST(@cids)",
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                else:
+                    c_ents = transaction.execute_update(
+                        """
+                        DELETE FROM EngineeringEntities
+                        WHERE concept_id IN UNNEST(@cids)
+                          AND entity_id NOT IN (
+                              SELECT from_entity_id FROM ProcessConnections
+                              UNION DISTINCT
+                              SELECT to_entity_id FROM ProcessConnections
+                              UNION DISTINCT
+                              SELECT instrument_entity_id FROM InstrumentControlEdges
+                              UNION DISTINCT
+                              SELECT target_entity_id FROM InstrumentControlEdges
+                          )
+                        """,
+                        params=_param,
+                        param_types=cids_type,
+                    )
+                    c_concepts = 0
+
+                c_srcs = 0
+                if _last:
+                    c_srcs = transaction.execute_update(
+                        """
+                        DELETE FROM RawSourceDocuments
+                        WHERE source_id NOT IN (
+                            SELECT DISTINCT source_id FROM FactLineageEdges WHERE source_id IS NOT NULL
+                        )
+                        """
+                    )
+                return {
+                    "concepts": int(c_concepts or 0),
+                    "section_chunks": int(c_chunks or 0),
+                    "entities": int(c_ents or 0),
+                    "assertions": int(c_facts or 0),
+                    "process_connections": int(c_conn or 0),
+                    "instrument_controls": int(c_ctrl or 0),
+                    "concept_links": int(c_wl or 0),
+                    "lineage_edges": int(c_lin or 0),
+                    "source_documents": int(c_srcs or 0),
+                }
+
+            batch_res = db.run_in_transaction(_tx_cascade)
+            for k, v in batch_res.items():
+                totals[k] = totals.get(k, 0) + v
+
+        return totals
 
     def sync_markdown_bundle_to_spanner(
         self,
@@ -1308,11 +1530,12 @@ class SpannerGraphRepository:
         domain_filter: str | None = None,
         top_k: int = 10,
     ) -> list[HybridSearchResult]:
-        """Execute Hybrid Vector (COSINE_DISTANCE) + Full-Text (SEARCH/TOKENLIST) Reciprocal Rank Fusion."""
+        """Execute Hybrid Vector (Spanner Native ML.PREDICT + ANN APPROX_COSINE_DISTANCE with exact fallback) + FTS RRF."""
         top_k = max(1, min(50, top_k))
-        query_vec = self.embed_query(query)
 
         if self.use_in_memory or self._mem_chunks:
+            self.last_vector_search_mode = "IN_MEMORY"
+            query_vec = self.embed_query(query)
             return self._hybrid_rrf_in_memory(query, query_vec, domain_filter, top_k)
 
         db = self._get_database()
@@ -1320,57 +1543,134 @@ class SpannerGraphRepository:
 
         tokens = [t for t in re.findall(r"[A-Za-z0-9\-]+", query) if len(t) >= 2]
         fts_query = " OR ".join(tokens[:12]) if tokens else query.strip()
+        clean_domain = (domain_filter or "").strip()
 
         vec_ranks: dict[str, tuple[int, float, dict[str, Any]]] = {}
         fts_ranks: dict[str, tuple[int, dict[str, Any]]] = {}
 
         with db.snapshot(multi_use=True) as snap:
-            # 1. Dense Vector Search (COSINE_DISTANCE)
-            sql_vec = """
-                SELECT
-                    s.chunk_id,
-                    s.concept_id,
-                    c.name,
-                    s.category,
-                    s.unit,
-                    s.section_heading,
-                    s.header_preserved_markdown,
-                    s.has_conflict,
-                    COSINE_DISTANCE(s.embedding, @qvec) AS cosine_dist
-                FROM OkfSectionChunks s
-                JOIN OkfConcepts c ON s.concept_id = c.concept_id
-                WHERE s.embedding IS NOT NULL
-                  AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
-                ORDER BY cosine_dist ASC
-                LIMIT 30
-            """
-            for rank_idx, row in enumerate(
-                snap.execute_sql(
-                    sql_vec,
-                    params={
-                        "qvec": query_vec,
-                        "domain_filter": (domain_filter or "").strip(),
-                    },
-                    param_types={
-                        "qvec": param_types.Array(param_types.FLOAT32),
-                        "domain_filter": param_types.STRING,
-                    },
-                ),
-                start=1,
-            ):
-                dist = float(row[8]) if row[8] is not None else 1.0
-                sim = max(-1.0, min(1.0, 1.0 - dist))
-                meta = {
-                    "chunk_id": row[0],
-                    "concept_id": row[1],
-                    "concept_title": row[2],
-                    "category": row[3] or "",
-                    "unit": row[4] or "",
-                    "section_heading": row[5],
-                    "chunk_markdown": row[6],
-                    "has_conflict": bool(row[7]),
-                }
-                vec_ranks[row[0]] = (rank_idx, sim, meta)
+            # 1. Dense Vector Search: prefer native Spanner ML.PREDICT + ANN APPROX_COSINE_DISTANCE
+            native_ann_ok = False
+            if self.native_embedding_mode == "native_ml_predict":
+                sql_native_ann = f"""
+                    WITH q AS (
+                        SELECT ARRAY(
+                            SELECT CAST(v AS FLOAT32)
+                            FROM UNNEST(embeddings.values) AS v WITH OFFSET pos
+                            ORDER BY pos
+                        ) AS qvec
+                        FROM ML.PREDICT(
+                            MODEL {self.embedding_model_name},
+                            (SELECT @query_text AS content)
+                        )
+                    )
+                    SELECT
+                        s.chunk_id,
+                        s.concept_id,
+                        c.name,
+                        s.category,
+                        s.unit,
+                        s.section_heading,
+                        s.header_preserved_markdown,
+                        s.has_conflict,
+                        APPROX_COSINE_DISTANCE(
+                            s.embedding,
+                            q.qvec,
+                            OPTIONS => '{{"num_leaves_to_search": 50}}'
+                        ) AS cosine_dist
+                    FROM OkfSectionChunks s
+                    CROSS JOIN q
+                    JOIN OkfConcepts c ON s.concept_id = c.concept_id
+                    WHERE s.embedding IS NOT NULL
+                      AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
+                    ORDER BY cosine_dist ASC
+                    LIMIT 30
+                """
+                try:
+                    for rank_idx, row in enumerate(
+                        snap.execute_sql(
+                            sql_native_ann,
+                            params={
+                                "query_text": query[:3500],
+                                "domain_filter": clean_domain,
+                            },
+                            param_types={
+                                "query_text": param_types.STRING,
+                                "domain_filter": param_types.STRING,
+                            },
+                        ),
+                        start=1,
+                    ):
+                        dist = float(row[8]) if row[8] is not None else 1.0
+                        sim = max(-1.0, min(1.0, 1.0 - dist))
+                        meta = {
+                            "chunk_id": row[0],
+                            "concept_id": row[1],
+                            "concept_title": row[2],
+                            "category": row[3] or "",
+                            "unit": row[4] or "",
+                            "section_heading": row[5],
+                            "chunk_markdown": row[6],
+                            "has_conflict": bool(row[7]),
+                        }
+                        vec_ranks[row[0]] = (rank_idx, sim, meta)
+                    native_ann_ok = True
+                    self.last_vector_search_mode = "NATIVE_ML_PREDICT_ANN"
+                except Exception as exc:
+                    logger.warning(
+                        "Spanner native ML.PREDICT/ANN vector search fallback to exact COSINE_DISTANCE: %s",
+                        exc,
+                    )
+                    vec_ranks.clear()
+
+            if not native_ann_ok:
+                query_vec = self.embed_query(query)
+                sql_vec = """
+                    SELECT
+                        s.chunk_id,
+                        s.concept_id,
+                        c.name,
+                        s.category,
+                        s.unit,
+                        s.section_heading,
+                        s.header_preserved_markdown,
+                        s.has_conflict,
+                        COSINE_DISTANCE(s.embedding, @qvec) AS cosine_dist
+                    FROM OkfSectionChunks s
+                    JOIN OkfConcepts c ON s.concept_id = c.concept_id
+                    WHERE s.embedding IS NOT NULL
+                      AND (@domain_filter = '' OR LOWER(s.category) = LOWER(@domain_filter) OR LOWER(IFNULL(s.unit, '')) = LOWER(@domain_filter))
+                    ORDER BY cosine_dist ASC
+                    LIMIT 30
+                """
+                for rank_idx, row in enumerate(
+                    snap.execute_sql(
+                        sql_vec,
+                        params={
+                            "qvec": query_vec,
+                            "domain_filter": clean_domain,
+                        },
+                        param_types={
+                            "qvec": param_types.Array(param_types.FLOAT32),
+                            "domain_filter": param_types.STRING,
+                        },
+                    ),
+                    start=1,
+                ):
+                    dist = float(row[8]) if row[8] is not None else 1.0
+                    sim = max(-1.0, min(1.0, 1.0 - dist))
+                    meta = {
+                        "chunk_id": row[0],
+                        "concept_id": row[1],
+                        "concept_title": row[2],
+                        "category": row[3] or "",
+                        "unit": row[4] or "",
+                        "section_heading": row[5],
+                        "chunk_markdown": row[6],
+                        "has_conflict": bool(row[7]),
+                    }
+                    vec_ranks[row[0]] = (rank_idx, sim, meta)
+                self.last_vector_search_mode = "EXACT_COSINE_FALLBACK"
 
             # 2. Full-Text Search (SEARCH on ChunkTokens)
             sql_fts = """
@@ -2285,23 +2585,42 @@ class SpannerGraphRepository:
             }
 
         db = self._get_database()
-        counts: dict[str, int] = {}
-        queries = {
-            "total_source_docs": "SELECT COUNT(*) FROM RawSourceDocuments",
-            "total_concepts": "SELECT COUNT(*) FROM OkfConcepts",
-            "total_chunks": "SELECT COUNT(*) FROM OkfSectionChunks",
-            "total_entities": "SELECT COUNT(*) FROM EngineeringEntities",
-            "total_assertions": "SELECT COUNT(*) FROM FactAssertions",
-            "total_conflicts": "SELECT COUNT(*) FROM FactAssertions WHERE has_conflict = TRUE",
-            "total_connections": "SELECT COUNT(*) FROM ProcessConnections",
-            "total_controls": "SELECT COUNT(*) FROM InstrumentControlEdges",
-            "total_lineage_edges": "SELECT COUNT(*) FROM FactLineageEdges",
+        consolidated_sql = """
+            SELECT
+                (SELECT COUNT(*) FROM RawSourceDocuments) AS total_source_docs,
+                (SELECT COUNT(*) FROM OkfConcepts) AS total_concepts,
+                (SELECT COUNT(*) FROM OkfSectionChunks) AS total_chunks,
+                (SELECT COUNT(*) FROM EngineeringEntities) AS total_entities,
+                (SELECT COUNT(*) FROM FactAssertions) AS total_assertions,
+                (SELECT COUNT(*) FROM FactAssertions WHERE has_conflict = TRUE) AS total_conflicts,
+                (SELECT COUNT(*) FROM ProcessConnections) AS total_connections,
+                (SELECT COUNT(*) FROM InstrumentControlEdges) AS total_controls,
+                (SELECT COUNT(*) FROM FactLineageEdges) AS total_lineage_edges
+        """
+        with db.snapshot() as snap:
+            for row in snap.execute_sql(consolidated_sql):
+                return {
+                    "total_source_docs": int(row[0] or 0),
+                    "total_concepts": int(row[1] or 0),
+                    "total_chunks": int(row[2] or 0),
+                    "total_entities": int(row[3] or 0),
+                    "total_assertions": int(row[4] or 0),
+                    "total_conflicts": int(row[5] or 0),
+                    "total_connections": int(row[6] or 0),
+                    "total_controls": int(row[7] or 0),
+                    "total_lineage_edges": int(row[8] or 0),
+                }
+        return {
+            "total_source_docs": 0,
+            "total_concepts": 0,
+            "total_chunks": 0,
+            "total_entities": 0,
+            "total_assertions": 0,
+            "total_conflicts": 0,
+            "total_connections": 0,
+            "total_controls": 0,
+            "total_lineage_edges": 0,
         }
-        with db.snapshot(multi_use=True) as snap:
-            for key, q in queries.items():
-                for row in snap.execute_sql(q):
-                    counts[key] = int(row[0])
-        return counts
 
     @staticmethod
     def _classify_equipment_group(tag: str, eq_class: str = "") -> str:
@@ -2569,7 +2888,8 @@ class SpannerGraphRepository:
                 approved_by = ["process:okf-validation-suite"]
 
         gen_raw = fm.get("generated") if isinstance(fm.get("generated"), dict) else {}
-        extracted_by = str(gen_raw.get("by") or "extracter_agent/gemini-3.8-flash")
+        default_model = get_config().gemini_model
+        extracted_by = str(gen_raw.get("by") or f"extracter_agent/{default_model}")
         extracted_at = str(gen_raw.get("at") or approved_at or "2026-09-30T02:03:13Z")
         if not approved_at:
             approved_at = extracted_at
@@ -2940,6 +3260,109 @@ class SpannerGraphRepository:
             "units": units_tree,
             "knowledge_categories": cats_list,
             "concept_categories": cats_list,
+        }
+
+    def get_equipment_hierarchy_summary(self) -> dict[str, Any]:
+        """Return lightweight aggregated Unit -> Class and Category counts without full item payloads."""
+        full = self.get_equipment_hierarchy()
+        compact_units = [
+            {
+                "unit": u["unit"],
+                "unit_name": u["unit_name"],
+                "equipment_count": u["equipment_count"],
+                "conflict_count": u["conflict_count"],
+                "classes": [
+                    {
+                        "class_name": c["class_name"],
+                        "count": c["count"],
+                        "conflict_count": sum(int(i.get("conflict_count") or 0) for i in c.get("items", [])),
+                    }
+                    for c in u.get("classes", [])
+                ],
+            }
+            for u in full.get("units", [])
+        ]
+        compact_cats = [
+            {
+                "category": cat["category"],
+                "count": cat["count"],
+                "conflict_count": sum(int(i.get("conflict_count") or 0) for i in cat.get("items", [])),
+            }
+            for cat in full.get("knowledge_categories", [])
+        ]
+        return {
+            "total_concepts": full["total_concepts"],
+            "total_equipment": full["total_equipment"],
+            "total_conflicts": full["total_conflicts"],
+            "summary_counts": full["summary_counts"],
+            "units": compact_units,
+            "knowledge_categories": compact_cats,
+        }
+
+    def get_equipment_hierarchy_items(
+        self,
+        *,
+        unit: str | None = None,
+        class_name: str | None = None,
+        category: str | None = None,
+        q: str | None = None,
+        conflicts_only: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return paginated, server-side filtered equipment/concept items for lazy UI expansion & search."""
+        safe_limit = max(1, min(200, int(limit)))
+        safe_offset = max(0, int(offset))
+        clean_unit = (unit or "").strip().lower()
+        clean_class = (class_name or "").strip().lower()
+        clean_cat = (category or "").strip().lower()
+        clean_q = (q or "").strip().lower()
+
+        full = self.get_equipment_hierarchy()
+        flat_items: list[dict[str, Any]] = []
+
+        if not clean_cat or clean_cat == "equipment":
+            for u in full.get("units", []):
+                if clean_unit and u["unit"].lower() != clean_unit:
+                    continue
+                for cls in u.get("classes", []):
+                    if clean_class and cls["class_name"].lower() != clean_class:
+                        continue
+                    flat_items.extend(cls.get("items", []))
+
+        if clean_cat != "equipment":
+            for cat_obj in full.get("knowledge_categories", []):
+                if clean_cat and cat_obj["category"].lower() != clean_cat:
+                    continue
+                for item in cat_obj.get("items", []):
+                    if clean_unit and str(item.get("unit") or "").lower() != clean_unit:
+                        continue
+                    if clean_class:
+                        continue
+                    flat_items.append(item)
+
+        if conflicts_only:
+            flat_items = [i for i in flat_items if i.get("has_conflict") or int(i.get("conflict_count") or 0) > 0]
+
+        if clean_q:
+            filtered: list[dict[str, Any]] = []
+            for item in flat_items:
+                haystack = " ".join(
+                    str(item.get(k) or "")
+                    for k in ("canonical_tag", "concept_id", "name", "description", "unit", "equipment_group", "category")
+                ).lower()
+                if clean_q in haystack:
+                    filtered.append(item)
+            flat_items = filtered
+
+        total = len(flat_items)
+        page = flat_items[safe_offset : safe_offset + safe_limit]
+        return {
+            "total": total,
+            "offset": safe_offset,
+            "limit": safe_limit,
+            "has_more": (safe_offset + len(page)) < total,
+            "items": page,
         }
 
     def get_interactive_graph(

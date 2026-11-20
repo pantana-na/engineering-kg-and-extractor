@@ -22,9 +22,9 @@
   $$\text{Idle Min Instance Cost} = \text{Min Instances} \times \text{vCPU} \times \text{Idle Seconds} \times \text{Live\_Idle\_Rate}$$
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service cloudrun --query "CPU Allocation" --region <REGION>
-  python3 scripts/query_gcp_pricing.py --service cloudrun --query "Memory Allocation" --region <REGION>
-  python3 scripts/query_gcp_pricing.py --service cloudrun --query "Requests"
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service cloudrun --query "CPU Allocation" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service cloudrun --query "Memory Allocation" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service cloudrun --query "Requests"
   ```
 - **Live Documentation**: `https://cloud.google.com/run/pricing`
 
@@ -40,9 +40,9 @@
   $$\text{Storage Cost} = \text{Provisioned Disk GB} \times \text{Live\_Disk\_Rate}$$
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service compute --query "Instance Core" --region <REGION>
-  python3 scripts/query_gcp_pricing.py --service compute --query "Instance Ram" --region <REGION>
-  python3 scripts/query_gcp_pricing.py --service compute --query "Storage Balanced SSD" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service compute --query "Instance Core" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service compute --query "Instance Ram" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service compute --query "Storage Balanced SSD" --region <REGION>
   ```
 - **Live Documentation**: `https://cloud.google.com/compute/all-pricing`
 
@@ -55,7 +55,7 @@
   - Standard GKE: Underlying Compute Engine VMs + Management Fee
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service compute --query "Kubernetes"
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service compute --query "Kubernetes"
   ```
 - **Live Documentation**: `https://cloud.google.com/kubernetes-engine/pricing`
 
@@ -75,8 +75,8 @@
   $$\text{Storage Cost} = \text{Provisioned SSD GB} \times \text{Live\_Storage\_Rate} \times (\text{2 if Regional HA else 1})$$
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service cloudsql --query "PostgreSQL DB" --region <REGION>
-  python3 scripts/query_gcp_pricing.py --service cloudsql --query "Storage" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service cloudsql --query "PostgreSQL DB" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service cloudsql --query "Storage" --region <REGION>
   ```
 - **Live Documentation**: `https://cloud.google.com/sql/pricing`
 
@@ -89,8 +89,8 @@
   - Network egress & backup storage
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service spanner --query "Processing Units" --region <REGION>
-  python3 scripts/query_gcp_pricing.py --service spanner --query "Storage" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service spanner --query "Processing Units" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service spanner --query "Storage" --region <REGION>
   ```
 - **Live Documentation**: `https://cloud.google.com/spanner/pricing`
 
@@ -107,9 +107,9 @@
   $$\text{Total Storage Cost} = (\text{Volume GB} \times \text{Live\_Tier\_Rate}) + \left(\frac{\text{Class A Ops}}{10,000} \times \text{Live\_ClassA\_Rate}\right) + \left(\frac{\text{Class B Ops}}{10,000} \times \text{Live\_ClassB\_Rate}\right)$$
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service storage --query "Standard Storage" --region <REGION>
-  python3 scripts/query_gcp_pricing.py --service storage --query "Nearline" --region <REGION>
-  python3 scripts/query_gcp_pricing.py --service storage --query "Operations"
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service storage --query "Standard Storage" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service storage --query "Nearline" --region <REGION>
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service storage --query "Operations"
   ```
 - **Live Documentation**: `https://cloud.google.com/storage/pricing`
 
@@ -123,8 +123,8 @@
   - Storage: Active ($/GB-mo) vs Long-term untouched >90 days ($/GB-mo)
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service bigquery --query "Analysis"
-  python3 scripts/query_gcp_pricing.py --service bigquery --query "Storage"
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service bigquery --query "Analysis"
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service bigquery --query "Storage"
   ```
 - **Live Documentation**: `https://cloud.google.com/bigquery/pricing`
 
@@ -136,7 +136,7 @@
   - Message Storage beyond retention window
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service pubsub --query "Throughput"
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service pubsub --query "Throughput"
   ```
 - **Live Documentation**: `https://cloud.google.com/pubsub/pricing`
 
@@ -147,7 +147,7 @@
   - Changed data capture volume processed (`GB of changed data`)
 - **Live Query**:
   ```bash
-  python3 scripts/query_gcp_pricing.py --service datastream --query "Volume"
+  python3 _agents/skills/gcp_cost_estimator/scripts/query_gcp_pricing.py --service datastream --query "Volume"
   ```
 - **Live Documentation**: `https://cloud.google.com/datastream/pricing`
 

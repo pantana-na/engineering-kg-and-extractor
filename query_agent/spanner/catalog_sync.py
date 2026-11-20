@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -414,7 +415,7 @@ class DataplexCatalogAndLineageSync:
                 "schemaURL": "https://openlineage.io/spec/1-0-5/OpenLineage.json#/definitions/RunEvent",
                 "eventType": "COMPLETE",
                 "eventTime": now_iso,
-                "run": {"runId": "018f5a00-0000-7000-8000-000000000002"},
+                "run": {"runId": str(uuid.uuid4())},
                 "job": {
                     "namespace": self.project_id,
                     "name": "extracter_agent_synthesis_v3",
@@ -427,7 +428,7 @@ class DataplexCatalogAndLineageSync:
                 "schemaURL": "https://openlineage.io/spec/1-0-5/OpenLineage.json#/definitions/RunEvent",
                 "eventType": "COMPLETE",
                 "eventTime": now_iso,
-                "run": {"runId": "018f5a00-0000-7000-8000-000000000003"},
+                "run": {"runId": str(uuid.uuid4())},
                 "job": {
                     "namespace": self.project_id,
                     "name": "okf_spanner_graph_and_lineage_ingestion",
