@@ -53,7 +53,9 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     qry_js = (STATIC_DIR / "js" / "query-tab.js").read_text(encoding="utf-8")
     assert "./telemetry-card.js" in ext_js
     assert "./telemetry-card.js" in qry_js
-    assert "/api/extractor/chat/stream" in ext_js
+    assert "/api/extractor/interactive/start" in ext_js
+    assert "/events?after_seq=" in ext_js
+    assert "/api/extractor/interactive/active" in ext_js
     assert "/api/gcs/sync" in ext_js
     assert "MOC_AUTHORITY" in qry_js
     assert "PENDING_REDRAFT" in qry_js

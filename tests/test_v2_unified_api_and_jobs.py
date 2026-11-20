@@ -341,6 +341,90 @@ def test_gcs_sync_and_extractor_sse_stream_with_latency_and_spanner_sync(
     assert bad.status_code == 400
 
 
+def test_decoupled_interactive_extraction_start_poll_replay_and_active(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify timeout-immune decoupled interactive extraction job + incremental event cursor polling."""
+    import time
+
+    _setup_bundle_env(monkeypatch, tmp_path, n_okf=4)
+    monkeypatch.setenv("EXTRACTOR_WEB_TEST_FAST_AGENT", "true")
+    repo = _make_sample_repo()
+    app = create_unified_app(repo=repo, manifest_store=BundleManifestStore())
+    client = TestClient(app)
+
+    # Disallowed model rejected immediately on /start
+    bad_start = client.post(
+        "/api/extractor/interactive/start",
+        json={"prompt": "Extract sample.pdf", "model": "gemini-not-allowed"},
+    )
+    assert bad_start.status_code == 400
+
+    # Start decoupled background interactive extraction + Spanner sync
+    start_resp = client.post(
+        "/api/extractor/interactive/start",
+        json={
+            "prompt": "Extract sample.pdf",
+            "mode": "by_pdf",
+            "target_pdf": "pid/sample.pdf",
+            "model": "gemini-4-carbon",
+            "invoke_vertex_llm": True,
+            "sync_to_spanner": True,
+            "sync_mode": "INCREMENTAL",
+        },
+    )
+    assert start_resp.status_code == 202
+    started = start_resp.json()
+    job_id = started["job_id"]
+    assert started["status"] == "RUNNING"
+    assert started["model"] == "gemini-4-carbon"
+
+    # Poll incrementally until terminal status, asserting strictly monotonic seq and zero duplicates
+    cursor = -1
+    seen_seqs: list[int] = []
+    collected_events: list[dict[str, Any]] = []
+    final_payload: dict[str, Any] = {}
+    for _ in range(40):
+        poll = client.get(f"/api/extractor/interactive/{job_id}/events?after_seq={cursor}")
+        assert poll.status_code == 200
+        assert "no-store" in poll.headers.get("cache-control", "")
+        pdata = poll.json()
+        for ev in pdata["events"]:
+            assert ev["seq"] > cursor
+            seen_seqs.append(ev["seq"])
+            collected_events.append(ev)
+        cursor = pdata["next_seq"]
+        final_payload = pdata
+        if pdata["status"] != "RUNNING":
+            break
+        time.sleep(0.05)
+
+    assert final_payload["status"] == "COMPLETED"
+    assert seen_seqs == list(range(len(seen_seqs)))
+    ev_types = [e["event"] for e in collected_events]
+    assert "start" in ev_types
+    assert "step" in ev_types
+    assert "tool_call" in ev_types
+    assert "done" in ev_types
+    assert any(
+        e["event"] == "step" and e["data"].get("phase") == "SYNC // CLOUD SPANNER"
+        for e in collected_events
+    )
+
+    # Full replay from after_seq=-1 returns identical event sequence (refresh/reconnect safety)
+    replay = client.get(f"/api/extractor/interactive/{job_id}/events?after_seq=-1").json()
+    assert len(replay["events"]) == len(collected_events)
+
+    # Active endpoint returns None once completed
+    active = client.get("/api/extractor/interactive/active")
+    assert active.status_code == 200
+    assert active.json()["active"] is None
+
+    # Unknown job_id returns 404
+    assert client.get("/api/extractor/interactive/ijob-missing/events").status_code == 404
+
+
 def test_multimodal_execution_context_propagates_model_and_progress_to_worker_threads() -> None:
     import contextvars
     from concurrent.futures import ThreadPoolExecutor

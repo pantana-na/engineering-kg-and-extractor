@@ -129,6 +129,7 @@ RUNTIME_ROLES=(
   "roles/storage.objectAdmin"
   "roles/run.developer"
   "roles/dataplex.editor"
+  "roles/dataplex.catalogEditor"
   "roles/datalineage.editor"
   "roles/logging.logWriter"
   "roles/cloudtrace.agent"

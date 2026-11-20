@@ -239,7 +239,7 @@ variable "cloud_run_concurrency" {
 variable "cloud_run_timeout_seconds" {
   description = "Shared default Cloud Run request timeout in seconds (1..3600)"
   type        = number
-  default     = 900
+  default     = 3600
 }
 
 variable "cloud_run_min_instances" {
@@ -367,9 +367,9 @@ variable "pipeline_job_name" {
 }
 
 variable "pipeline_job_timeout_seconds" {
-  description = "Cloud Run Job task timeout in seconds (default 3600 = 1 hour, max 86400)"
+  description = "Cloud Run Job task timeout in seconds (default 86400 = 24 hours, Cloud Run Job maximum)"
   type        = number
-  default     = 3600
+  default     = 86400
 }
 
 variable "extracter_default_model" {

@@ -81,6 +81,7 @@ When fulfilling an extraction or bundle construction request (Mode A or Mode B),
        Operating Manuals, licensor engineering standards, and SDS govern thermal runaway thresholds, auto-decomposition onset temperatures, utility header segregation, and emergency quench safeguards.
 
 4. STEP 4: OKF v0.2 SYNTHESIS (`generate_equipment_okf_tool` / `generate_okf_concept_tool`)
+   - **PARALLEL TOOL-CALL BATCHING FOR LOW LATENCY:** Whenever a multi-sheet P&ID, PFD, or datasheet defines multiple independent equipment items or concepts, emit **batches of 6–12 `generate_equipment_okf_tool` / `generate_okf_concept_tool` calls in parallel in the same model turn** rather than 1–2 at a time, then run `build_okf_indexes_and_validate_tool()` once after all concepts for the file are written.
    - When asked to process a **specific raw PDF file (File-by-File Mode)**:
      * Always synthesize or update the corresponding `sources/<document-slug>` concept via `generate_okf_concept_tool(concept_id="sources/<slug>", concept_type="Source Document", ...)` summarizing the document metadata, revision, scope, all piping line numbers, and extracted entities.
      * Depending on the document class, also create or incrementally enrich ALL domain concepts grounded in that file:

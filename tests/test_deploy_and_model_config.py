@@ -811,7 +811,8 @@ def test_per_app_cloud_run_sizing_defaults_overrides_and_validation() -> None:
     assert example_map["CLOUD_RUN_CPU"] == "4"
     assert example_map["CLOUD_RUN_MEMORY"] == "8Gi"
     assert example_map["CLOUD_RUN_CONCURRENCY"] == "30"
-    assert example_map["CLOUD_RUN_TIMEOUT"] == "900"
+    assert example_map["CLOUD_RUN_TIMEOUT"] == "3600"
+    assert example_map["PIPELINE_JOB_TIMEOUT"] == "86400"
     assert example_map["CLOUD_RUN_MIN_INSTANCES"] == "0"
     assert example_map["NONPROD_MIN_INSTANCES"] == "0"
     assert example_map["NONPROD_MAX_INSTANCES"] == "3"
@@ -845,14 +846,14 @@ def test_per_app_cloud_run_sizing_defaults_overrides_and_validation() -> None:
         assert nonprod_cfg.cpu == "4"
         assert nonprod_cfg.memory == "8Gi"
         assert nonprod_cfg.concurrency == 30
-        assert nonprod_cfg.timeout_seconds == 900
+        assert nonprod_cfg.timeout_seconds == 3600
         assert nonprod_cfg.min_instances == 0
         assert nonprod_cfg.max_instances == 3
         np_flags = nonprod_cfg.to_gcloud_deploy_flags()
         assert "--cpu=4" in np_flags
         assert "--memory=8Gi" in np_flags
         assert "--concurrency=30" in np_flags
-        assert "--timeout=900" in np_flags
+        assert "--timeout=3600" in np_flags
         assert "--min-instances=0" in np_flags
         assert "--max-instances=3" in np_flags
 
@@ -860,7 +861,7 @@ def test_per_app_cloud_run_sizing_defaults_overrides_and_validation() -> None:
         assert prod_cfg.cpu == "4"
         assert prod_cfg.memory == "8Gi"
         assert prod_cfg.concurrency == 30
-        assert prod_cfg.timeout_seconds == 900
+        assert prod_cfg.timeout_seconds == 3600
         assert prod_cfg.min_instances == 0
         assert prod_cfg.max_instances == 5
         prod_flags = prod_cfg.to_gcloud_deploy_flags()
@@ -943,7 +944,7 @@ def test_per_app_cloud_run_sizing_defaults_overrides_and_validation() -> None:
         assert "--cpu=4" in proc.stdout
         assert "--memory=8Gi" in proc.stdout
         assert "--concurrency=30" in proc.stdout
-        assert "--timeout=900" in proc.stdout
+        assert "--timeout=3600" in proc.stdout
         assert "--min-instances=0" in proc.stdout
         assert "--max-instances=3" in proc.stdout
         assert "--no-cpu-throttling" in proc.stdout

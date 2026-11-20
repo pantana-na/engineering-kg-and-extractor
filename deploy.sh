@@ -646,7 +646,7 @@ deploy_pipeline_job_cloud_run() {
   else
     pipe_job="${NONPROD_PIPELINE_JOB_NAME:-${PIPELINE_JOB_NAME:-okf-pipeline-job}}"
   fi
-  local job_timeout="${PIPELINE_JOB_TIMEOUT:-3600}"
+  local job_timeout="${PIPELINE_JOB_TIMEOUT:-86400}"
   local ar_repo="${ARTIFACT_REGISTRY_REPO:-okf-workbench}"
   local image_uri="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ar_repo}/${pipe_job}:latest"
   local ext_model="${EXTRACTER_DEFAULT_MODEL:-gemini-4-carbon}"

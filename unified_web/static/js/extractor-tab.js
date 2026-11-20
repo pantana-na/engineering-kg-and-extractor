@@ -3,16 +3,43 @@
  * GCS Sync & Live Streaming Extraction Assistant with Zero-Enter Extract + Sync).
  */
 
-import { fetchJson, streamSSE } from "./api.js";
+import { fetchJson } from "./api.js";
 import { escapeHtml, renderMarkdown } from "./markdown.js";
 import { showToast, state } from "./state.js";
 import { createTelemetryCard } from "./telemetry-card.js";
+
+const ACTIVE_EXTRACT_JOB_KEY = "okf_v2_active_extract_job";
 
 let searchDebounce = null;
 let onJumpToGraphCb = null;
 let onSpannerMutatedCb = null;
 let onQuickSyncSpannerCb = null;
 let isExtracting = false;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function saveActiveJob(meta) {
+  try {
+    sessionStorage.setItem(ACTIVE_EXTRACT_JOB_KEY, JSON.stringify(meta));
+  } catch { /* ignore storage quota/privacy errors */ }
+}
+
+function loadSavedActiveJob() {
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_EXTRACT_JOB_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearActiveJob() {
+  try {
+    sessionStorage.removeItem(ACTIVE_EXTRACT_JOB_KEY);
+  } catch { /* ignore */ }
+}
 
 function renderFilterChips() {
   const host = document.getElementById("ext-filter-chips");
@@ -200,6 +227,189 @@ function resolveInteractiveTargetPdf() {
   return null;
 }
 
+async function attachToInteractiveJob({
+  jobId,
+  prompt,
+  model,
+  syncToSpanner = false,
+  reconnected = false,
+}) {
+  const drawer = document.getElementById("ext-chat-drawer");
+  const log = document.getElementById("ext-chat-log");
+  if (drawer) drawer.classList.remove("hidden");
+  if (!log) return;
+
+  const userDiv = document.createElement("div");
+  userDiv.className = "wb-msg user";
+  userDiv.textContent = reconnected
+    ? `[Reconnected · ${jobId}] ${prompt}`
+    : prompt;
+  log.appendChild(userDiv);
+
+  const botDiv = document.createElement("div");
+  botDiv.className = "wb-msg assistant";
+  const telemetry = createTelemetryCard({
+    model,
+    modeLabel: syncToSpanner ? "Extract + Sync" : "Extractor",
+  });
+  const answerEl = document.createElement("div");
+  answerEl.className = "wb-answer-body";
+  answerEl.innerHTML = `<span class="wb-muted">${
+    reconnected
+      ? "Reconnected to live extraction job — streaming updates..."
+      : syncToSpanner
+        ? "Extracting & syncing to GCS + Spanner (timeout-resilient background stream)..."
+        : "Running extraction (timeout-resilient background stream)..."
+  }</span>`;
+  botDiv.appendChild(telemetry.element);
+  botDiv.appendChild(answerEl);
+  log.appendChild(botDiv);
+  log.scrollTop = log.scrollHeight;
+
+  isExtracting = true;
+  const topBtn = document.getElementById("btn-interactive-extract-sync");
+  if (topBtn) topBtn.disabled = true;
+
+  let afterSeq = -1;
+  let streamedText = "";
+  let consecutiveErrors = 0;
+  let doneHandled = false;
+
+  try {
+    while (true) {
+      let data;
+      try {
+        data = await fetchJson(
+          `/api/extractor/interactive/${encodeURIComponent(jobId)}/events?after_seq=${afterSeq}`
+        );
+        consecutiveErrors = 0;
+      } catch (err) {
+        if (err.status === 404) {
+          clearActiveJob();
+          telemetry.onError("Previous server instance recycled");
+          answerEl.innerHTML = `<span class="wb-muted">The Cloud Run instance recycled while reconnecting. Click <strong>&#x21bb; Sync GCS</strong> to view any OKF files already written to GCS.</span>`;
+          loadExtractorFiles({ append: false });
+          break;
+        }
+        consecutiveErrors += 1;
+        if (consecutiveErrors > 10) {
+          telemetry.onError(`Lost connection after ${consecutiveErrors} retries: ${err.message}`);
+          answerEl.innerHTML = `<span style="color:var(--rose)">Polling paused after repeated network errors (${escapeHtml(err.message)}). Refresh the page to auto-reconnect.</span>`;
+          showToast(`Polling interrupted: ${err.message}`, "err");
+          break;
+        }
+        await sleep(Math.min(10000, 1500 * consecutiveErrors));
+        continue;
+      }
+
+      const events = data.events || [];
+      for (const ev of events) {
+        if (typeof ev.seq === "number") {
+          afterSeq = Math.max(afterSeq, ev.seq);
+        }
+        const evType = ev.event;
+        const payload = ev.data || {};
+        if (evType === "step") {
+          telemetry.onStep(payload);
+          log.scrollTop = log.scrollHeight;
+        } else if (evType === "tool_call") {
+          telemetry.onToolCall(payload);
+          log.scrollTop = log.scrollHeight;
+        } else if (evType === "token") {
+          streamedText += payload.text || "";
+          answerEl.innerHTML = renderMarkdown(streamedText);
+          log.scrollTop = log.scrollHeight;
+        } else if (evType === "done") {
+          doneHandled = true;
+          telemetry.onDone(payload);
+          if (payload.status === "blocked") {
+            answerEl.innerHTML = `<strong style="color:var(--rose)">Blocked by Model Armor:</strong> ${escapeHtml(payload.error || "Policy violation")}`;
+          } else {
+            answerEl.innerHTML = renderMarkdown(payload.reply_markdown || streamedText || "Done.");
+          }
+          log.scrollTop = log.scrollHeight;
+          loadExtractorFiles({ append: false });
+          if (syncToSpanner && typeof onSpannerMutatedCb === "function") {
+            onSpannerMutatedCb();
+          }
+        } else if (evType === "error") {
+          doneHandled = true;
+          telemetry.onError(payload.error || "Unknown error");
+          answerEl.innerHTML = `<span style="color:var(--rose)">Error: ${escapeHtml(payload.error || "Unknown error")}</span>`;
+        }
+      }
+
+      if (data.status !== "RUNNING") {
+        clearActiveJob();
+        if (!doneHandled) {
+          if (data.status === "ERROR") {
+            telemetry.onError(data.error || "Extraction failed");
+            answerEl.innerHTML = `<span style="color:var(--rose)">Error: ${escapeHtml(data.error || "Extraction failed")}</span>`;
+          } else {
+            telemetry.onDone({ total_duration_ms: data.total_duration_ms });
+            answerEl.innerHTML = renderMarkdown(data.reply_markdown || streamedText || "Done.");
+            loadExtractorFiles({ append: false });
+            if (syncToSpanner && typeof onSpannerMutatedCb === "function") {
+              onSpannerMutatedCb();
+            }
+          }
+        }
+        break;
+      }
+
+      await sleep(1200);
+    }
+  } finally {
+    telemetry.destroy();
+    isExtracting = false;
+    if (topBtn) topBtn.disabled = false;
+  }
+}
+
+async function checkAndResumeInteractiveJob() {
+  if (isExtracting) return;
+  const saved = loadSavedActiveJob();
+  if (saved?.job_id) {
+    try {
+      const probe = await fetchJson(
+        `/api/extractor/interactive/${encodeURIComponent(saved.job_id)}/events?after_seq=-1`
+      );
+      if (probe && (probe.status === "RUNNING" || probe.events?.length)) {
+        await attachToInteractiveJob({
+          jobId: probe.job_id,
+          prompt: probe.prompt || saved.prompt || "Interactive extraction",
+          model: probe.model || saved.model || state.selectedModels.extractor,
+          syncToSpanner: Boolean(probe.sync_to_spanner ?? saved.sync_to_spanner),
+          reconnected: true,
+        });
+        return;
+      }
+    } catch {
+      clearActiveJob();
+    }
+  }
+
+  try {
+    const activeRes = await fetchJson("/api/extractor/interactive/active");
+    const active = activeRes?.active;
+    if (active?.job_id) {
+      saveActiveJob({
+        job_id: active.job_id,
+        prompt: active.prompt,
+        model: active.model,
+        sync_to_spanner: Boolean(active.sync_to_spanner),
+      });
+      await attachToInteractiveJob({
+        jobId: active.job_id,
+        prompt: active.prompt || "Interactive extraction",
+        model: active.model || state.selectedModels.extractor,
+        syncToSpanner: Boolean(active.sync_to_spanner),
+        reconnected: true,
+      });
+    }
+  } catch { /* non-fatal on startup */ }
+}
+
 export async function runInteractiveExtract({
   prompt = "",
   targetPdf = null,
@@ -210,11 +420,6 @@ export async function runInteractiveExtract({
     showToast("An interactive extraction is already running — please wait for it to finish.", "err");
     return;
   }
-
-  const drawer = document.getElementById("ext-chat-drawer");
-  const log = document.getElementById("ext-chat-log");
-  if (drawer) drawer.classList.remove("hidden");
-  if (!log) return;
 
   const model = state.selectedModels.extractor;
   const invokeLlm =
@@ -229,34 +434,10 @@ export async function runInteractiveExtract({
       ? `Extract all engineering parameters, equipment tags, instrumentation, connections, and hazards from ${targetPdf} and merge-update OKF concepts.`
       : "Audit current OKF bundle status and recent extraction log.");
 
-  const userDiv = document.createElement("div");
-  userDiv.className = "wb-msg user";
-  userDiv.textContent = effectivePrompt;
-  log.appendChild(userDiv);
-
-  const botDiv = document.createElement("div");
-  botDiv.className = "wb-msg assistant";
-  const telemetry = createTelemetryCard({
-    model,
-    modeLabel: syncToSpanner ? "Extract + Sync" : "Extractor",
-  });
-  const answerEl = document.createElement("div");
-  answerEl.className = "wb-answer-body";
-  answerEl.innerHTML = `<span class="wb-muted">${syncToSpanner ? "Extracting & syncing to GCS + Spanner..." : "Running extraction..."}</span>`;
-  botDiv.appendChild(telemetry.element);
-  botDiv.appendChild(answerEl);
-  log.appendChild(botDiv);
-  log.scrollTop = log.scrollHeight;
-
-  isExtracting = true;
-  const topBtn = document.getElementById("btn-interactive-extract-sync");
-  if (topBtn) topBtn.disabled = true;
-
-  let streamedText = "";
   try {
-    await streamSSE(
-      "/api/extractor/chat/stream",
-      {
+    const started = await fetchJson("/api/extractor/interactive/start", {
+      method: "POST",
+      body: JSON.stringify({
         prompt: effectivePrompt,
         mode: targetPdf ? "by_pdf" : "chat",
         target_pdf: targetPdf,
@@ -264,44 +445,23 @@ export async function runInteractiveExtract({
         invoke_vertex_llm: invokeLlm,
         sync_to_spanner: Boolean(syncToSpanner),
         sync_mode: syncMode,
-      },
-      (evType, payload) => {
-        if (evType === "step") {
-          telemetry.onStep(payload);
-          log.scrollTop = log.scrollHeight;
-        } else if (evType === "tool_call") {
-          telemetry.onToolCall(payload);
-          log.scrollTop = log.scrollHeight;
-        } else if (evType === "token") {
-          streamedText += payload.text || "";
-          answerEl.innerHTML = renderMarkdown(streamedText);
-          log.scrollTop = log.scrollHeight;
-        } else if (evType === "done") {
-          telemetry.onDone(payload);
-          if (payload.status === "blocked") {
-            answerEl.innerHTML = `<strong style="color:var(--rose)">Blocked by Model Armor:</strong> ${escapeHtml(payload.error || "Policy violation")}`;
-          } else {
-            answerEl.innerHTML = renderMarkdown(payload.reply_markdown || streamedText || "Done.");
-          }
-          log.scrollTop = log.scrollHeight;
-          loadExtractorFiles({ append: false });
-          if (syncToSpanner && typeof onSpannerMutatedCb === "function") {
-            onSpannerMutatedCb();
-          }
-        } else if (evType === "error") {
-          telemetry.onError(payload.error || "Unknown error");
-          answerEl.innerHTML = `<span style="color:var(--rose)">Error: ${escapeHtml(payload.error || "Unknown error")}</span>`;
-        }
-      }
-    );
+      }),
+    });
+    saveActiveJob({
+      job_id: started.job_id,
+      prompt: effectivePrompt,
+      model: started.model || model,
+      sync_to_spanner: Boolean(syncToSpanner),
+    });
+    await attachToInteractiveJob({
+      jobId: started.job_id,
+      prompt: effectivePrompt,
+      model: started.model || model,
+      syncToSpanner: Boolean(syncToSpanner),
+      reconnected: false,
+    });
   } catch (err) {
-    telemetry.onError(err.message);
-    answerEl.innerHTML = `<span style="color:var(--rose)">Stream error: ${escapeHtml(err.message)}</span>`;
-    showToast(`Interactive extract failed: ${err.message}`, "err");
-  } finally {
-    telemetry.destroy();
-    isExtracting = false;
-    if (topBtn) topBtn.disabled = false;
+    showToast(`Interactive extract failed to start: ${err.message}`, "err");
   }
 }
 
@@ -440,4 +600,7 @@ export function initExtractorTab({ onJumpToGraph, onSpannerMutated, onQuickSyncS
       syncToSpanner: false,
     });
   });
+
+  // Auto-reconnect to any in-flight background interactive extraction after page reload
+  checkAndResumeInteractiveJob();
 }
