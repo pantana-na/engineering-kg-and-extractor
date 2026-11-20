@@ -33,7 +33,9 @@ from unified_web.security import (
     IAP_ISSUER,
     PURGE_CONFIRM_VALUE,
     SlidingWindowRateLimiter,
+    clear_iap_jwk_cache,
     enforce_purge_hitl_gate,
+    resolve_expected_iap_audience,
     verify_iap_jwt_assertion,
 )
 
@@ -129,6 +131,120 @@ def test_iap_jwt_verification_and_purge_hitl_gate() -> None:
     with pytest.raises(HTTPException) as exc_no_idem:
         enforce_purge_hitl_gate(purge=True, confirm_header=PURGE_CONFIRM_VALUE, idempotency_key="short")
     assert exc_no_idem.value.status_code == 400
+
+
+def test_iap_jwt_real_es256_jwk_cryptographic_verification(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify real ES256 JWK Set cryptographic verification via PyJWT + strict audience checks."""
+    import json
+    import time
+
+    import jwt as pyjwt
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    clear_iap_jwk_cache()
+
+    # Auto-derived Cloud Run Native IAP audience
+    monkeypatch.delenv("IAP_JWT_AUDIENCE", raising=False)
+    monkeypatch.setenv("K_SERVICE", "okf-engineering-workbench")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT_NUMBER", "435347747480")
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "asia-southeast1")
+    expected_aud = resolve_expected_iap_audience()
+    assert expected_aud == "/projects/435347747480/locations/asia-southeast1/services/okf-engineering-workbench"
+
+    # Generate ephemeral ES256 (P-256) keypair and construct RFC 7517 JWK Set
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_jwk = json.loads(pyjwt.algorithms.ECAlgorithm.to_jwk(private_key.public_key()))
+    public_jwk["kid"] = "test-iap-kid-1"
+    public_jwk["alg"] = "ES256"
+    public_jwk["use"] = "sig"
+    jwks_payload = {"keys": [public_jwk]}
+
+    now = int(time.time())
+    valid_token = pyjwt.encode(
+        {
+            "iss": IAP_ISSUER,
+            "aud": expected_aud,
+            "email": "admin@pantana.altostrat.com",
+            "sub": "accounts.google.com:987654321",
+            "iat": now,
+            "exp": now + 600,
+        },
+        private_key,
+        algorithm="ES256",
+        headers={"kid": "test-iap-kid-1"},
+    )
+
+    principal = verify_iap_jwt_assertion(
+        valid_token,
+        jwks_provider=lambda force_refresh=False: jwks_payload,
+    )
+    assert principal.email == "admin@pantana.altostrat.com"
+    assert principal.subject == "accounts.google.com:987654321"
+    assert principal.auth_mode == "iap_jwt"
+
+    # Wrong audience must be rejected (cross-service replay protection)
+    wrong_aud_token = pyjwt.encode(
+        {
+            "iss": IAP_ISSUER,
+            "aud": "/projects/435347747480/locations/asia-southeast1/services/other-service",
+            "email": "admin@pantana.altostrat.com",
+            "sub": "accounts.google.com:987654321",
+            "iat": now,
+            "exp": now + 600,
+        },
+        private_key,
+        algorithm="ES256",
+        headers={"kid": "test-iap-kid-1"},
+    )
+    with pytest.raises(HTTPException) as exc_aud:
+        verify_iap_jwt_assertion(
+            wrong_aud_token,
+            jwks_provider=lambda force_refresh=False: jwks_payload,
+        )
+    assert exc_aud.value.status_code == 401
+
+    # Expired token must be rejected
+    expired_token = pyjwt.encode(
+        {
+            "iss": IAP_ISSUER,
+            "aud": expected_aud,
+            "email": "admin@pantana.altostrat.com",
+            "sub": "accounts.google.com:987654321",
+            "iat": now - 1200,
+            "exp": now - 600,
+        },
+        private_key,
+        algorithm="ES256",
+        headers={"kid": "test-iap-kid-1"},
+    )
+    with pytest.raises(HTTPException) as exc_exp:
+        verify_iap_jwt_assertion(
+            expired_token,
+            jwks_provider=lambda force_refresh=False: jwks_payload,
+        )
+    assert exc_exp.value.status_code == 401
+
+    # Wrong signing key must be rejected
+    other_key = ec.generate_private_key(ec.SECP256R1())
+    forged_token = pyjwt.encode(
+        {
+            "iss": IAP_ISSUER,
+            "aud": expected_aud,
+            "email": "attacker@evil.example",
+            "sub": "accounts.google.com:000",
+            "iat": now,
+            "exp": now + 600,
+        },
+        other_key,
+        algorithm="ES256",
+        headers={"kid": "test-iap-kid-1"},
+    )
+    with pytest.raises(HTTPException) as exc_sig:
+        verify_iap_jwt_assertion(
+            forged_token,
+            jwks_provider=lambda force_refresh=False: jwks_payload,
+        )
+    assert exc_sig.value.status_code == 401
 
 
 def test_sliding_window_rate_limiter() -> None:

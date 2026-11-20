@@ -291,8 +291,16 @@ resource "google_cloud_run_v2_service" "okf_engineering_workbench" {
         value = "cloud_run_job"
       }
       env {
+        name  = "GOOGLE_CLOUD_PROJECT_NUMBER"
+        value = data.google_project.current.number
+      }
+      env {
         name  = "IAP_JWT_ENFORCEMENT"
         value = local.workbench_security_mode == "iap" ? "true" : "false"
+      }
+      env {
+        name  = "IAP_JWT_AUDIENCE"
+        value = local.workbench_security_mode == "iap" ? "/projects/${data.google_project.current.number}/locations/${var.region}/services/${var.unified_web_service_name}-${var.environment}" : ""
       }
       env {
         name  = "APP_MODULE"

@@ -558,21 +558,34 @@ deploy_unified_workbench_cloud_run() {
   local allowed_models="${ALLOWED_GEMINI_MODELS:-gemini-4-carbon,gemini-4-hydrogen,gemini-4-argon,gemini-4-neon}"
   local embed_mode="${SPANNER_NATIVE_EMBEDDING_MODE:-native_ml_predict}"
   local embed_loc="${SPANNER_EMBEDDING_LOCATION:-${REGION}}"
+  local proj_num="${GOOGLE_CLOUD_PROJECT_NUMBER:-}"
+  if [[ -z "${proj_num}" || "${proj_num}" == "000000000000" ]]; then
+    if [[ "${DRY_RUN}" -eq 0 ]]; then
+      proj_num="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)' 2>/dev/null || true)"
+    fi
+  fi
+  local iap_audience="${IAP_JWT_AUDIENCE:-}"
+  if [[ -z "${iap_audience}" && "${RESOLVED_SECURITY_MODE}" == "iap" && -n "${proj_num}" && "${proj_num}" != "000000000000" ]]; then
+    iap_audience="/projects/${proj_num}/locations/${REGION}/services/${unified_svc}"
+  fi
 
   echo "=============================================================================="
   echo "[Cloud Run Unified] Deploying OKF Engineering Knowledge Workbench v2"
   echo "  Environment:      ${DEPLOY_ENV}"
-  echo "  Project:          ${PROJECT_ID}"
+  echo "  Project:          ${PROJECT_ID} (${proj_num:-unknown})"
   echo "  Region:           ${REGION}"
   echo "  Service Name:     ${unified_svc}"
   echo "  Pipeline Job:     ${pipe_job}"
   echo "  Default Models:   Extractor=${ext_model} | Query=${qry_model}"
   echo "  Security/Ingress: ${RESOLVED_SECURITY_MODE} / ${RESOLVED_INGRESS} / VPC=${RESOLVED_VPC_MODE}"
+  if [[ -n "${iap_audience}" ]]; then
+    echo "  IAP JWT Audience: ${iap_audience}"
+  fi
   echo "  Sizing:           ${RESOLVED_CPU} vCPU / ${RESOLVED_MEMORY} / conc=${RESOLVED_CONCURRENCY} / timeout=${RESOLVED_TIMEOUT}s (${RESOLVED_MIN_INSTANCES}..${RESOLVED_MAX_INSTANCES})"
   echo "=============================================================================="
 
   # Use ^|^ custom delimiter so commas inside ALLOWED_GEMINI_MODELS are preserved verbatim by gcloud
-  local env_str="^|^DEPLOYMENT_ENV=${DEPLOY_ENV}|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|GOOGLE_CLOUD_LOCATION=${REGION}|NONPROD_REGION=${REGION}|GOOGLE_GENAI_USE_VERTEXAI=true|GEMINI_LOCATION=${MODEL_LOCATION}|GEMINI_MODEL=${RESOLVED_GEMINI_MODEL}|EXTRACTER_DEFAULT_MODEL=${ext_model}|QUERY_DEFAULT_MODEL=${qry_model}|ALLOWED_GEMINI_MODELS=${allowed_models}|CLOUD_RUN_INGRESS=${RESOLVED_INGRESS}|CLOUD_RUN_SECURITY_MODE=${RESOLVED_SECURITY_MODE}|CLOUD_RUN_VPC_MODE=${RESOLVED_VPC_MODE}|EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-005}|SPANNER_NATIVE_EMBEDDING_MODE=${embed_mode}|SPANNER_EMBEDDING_LOCATION=${embed_loc}|USE_GCS_STORAGE=true|SOURCE_GCS_RAW_PREFIX=${RAW_PREFIX}|DESTINATION_GCS_BUCKET=${GCS_BUCKET}|DESTINATION_GCS_PREFIX=${GCS_PREFIX}|SPANNER_INSTANCE_ID=${SPANNER_INST}|SPANNER_DATABASE_ID=${SPANNER_DB}|DATAPLEX_ENTRY_GROUP_ID=${DATAPLEX_ENTRY_GROUP_ID:-okf-knowledge-assets}|DATAPLEX_TAG_TEMPLATE_ID=${DATAPLEX_TAG_TEMPLATE_ID:-okf-governance-template}|UNIFIED_WEB_SERVICE_NAME=${unified_svc}|PIPELINE_JOB_NAME=${pipe_job}|CLOUD_RUN_JOBS_EXECUTION_MODE=cloud_run_job|OUTPUT_BUNDLE_DIR=/tmp/okf_bundle|JOB_STATUS_DIR=/tmp/okf_job_status|APP_MODULE=unified_web.server:app"
+  local env_str="^|^DEPLOYMENT_ENV=${DEPLOY_ENV}|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|GOOGLE_CLOUD_PROJECT_NUMBER=${proj_num}|GOOGLE_CLOUD_LOCATION=${REGION}|NONPROD_REGION=${REGION}|GOOGLE_GENAI_USE_VERTEXAI=true|GEMINI_LOCATION=${MODEL_LOCATION}|GEMINI_MODEL=${RESOLVED_GEMINI_MODEL}|EXTRACTER_DEFAULT_MODEL=${ext_model}|QUERY_DEFAULT_MODEL=${qry_model}|ALLOWED_GEMINI_MODELS=${allowed_models}|CLOUD_RUN_INGRESS=${RESOLVED_INGRESS}|CLOUD_RUN_SECURITY_MODE=${RESOLVED_SECURITY_MODE}|CLOUD_RUN_VPC_MODE=${RESOLVED_VPC_MODE}|IAP_JWT_AUDIENCE=${iap_audience}|EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-005}|SPANNER_NATIVE_EMBEDDING_MODE=${embed_mode}|SPANNER_EMBEDDING_LOCATION=${embed_loc}|USE_GCS_STORAGE=true|SOURCE_GCS_RAW_PREFIX=${RAW_PREFIX}|DESTINATION_GCS_BUCKET=${GCS_BUCKET}|DESTINATION_GCS_PREFIX=${GCS_PREFIX}|SPANNER_INSTANCE_ID=${SPANNER_INST}|SPANNER_DATABASE_ID=${SPANNER_DB}|DATAPLEX_ENTRY_GROUP_ID=${DATAPLEX_ENTRY_GROUP_ID:-okf-knowledge-assets}|DATAPLEX_TAG_TEMPLATE_ID=${DATAPLEX_TAG_TEMPLATE_ID:-okf-governance-template}|UNIFIED_WEB_SERVICE_NAME=${unified_svc}|PIPELINE_JOB_NAME=${pipe_job}|CLOUD_RUN_JOBS_EXECUTION_MODE=cloud_run_job|OUTPUT_BUNDLE_DIR=/tmp/okf_bundle|JOB_STATUS_DIR=/tmp/okf_job_status|APP_MODULE=unified_web.server:app"
 
   local cmd=(
     gcloud run deploy "${unified_svc}"
