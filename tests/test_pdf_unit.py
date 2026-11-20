@@ -112,13 +112,15 @@ def test_multimodal_start_page_and_max_pages_windowing(monkeypatch, tmp_path):
     monkeypatch.setattr(processor, "_extract_single_pdf_window_multimodal", fake_single_window)
 
     out = processor.extract_pdf_multimodal_summary(pdf_path, start_page=3, max_pages=4)
-    assert called_windows == [
-        "ML101620329_SAMPLE_p3-4",
-        "ML101620329_SAMPLE_p5-6",
+    assert sorted(called_windows) == [
+        "ML101620329_SAMPLE_p3-3",
+        "ML101620329_SAMPLE_p4-4",
+        "ML101620329_SAMPLE_p5-5",
+        "ML101620329_SAMPLE_p6-6",
     ]
-    assert "Pages 3–4 of 10" in out
-    assert "Pages 5–6 of 10" in out
-    assert "Pages 1–2 of 10" not in out
+    assert "Pages 3–3 of 10" in out
+    assert "Pages 6–6 of 10" in out
+    assert "Pages 1–1 of 10" not in out
 
 
 def test_resolve_bundle_instrument_link_case_insensitive_and_no_cross_unit_collision(tmp_path):

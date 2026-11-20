@@ -539,6 +539,87 @@ def test_node_focused_catalog_instrument_resolution_and_zero_fake_default_focus(
     assert "parameter_count" in focused["metrics"]
 
 
+def test_multimodal_streaming_with_hydrogen_fallback_and_1page_pid_window(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify streaming vision failover to gemini-4-hydrogen on 504 and 1-page windowing for landscape vector P&IDs."""
+    from types import SimpleNamespace
+
+    import google.genai as genai_mod
+
+    from extracter_agent.pdf import processor as proc
+
+    # 1. Streaming vision fails on primary gemini-4-carbon (504) -> cleanly falls back to gemini-4-hydrogen
+    called_models: list[str] = []
+    progress_events: list[dict[str, Any]] = []
+
+    class _FakeModels:
+        def generate_content_stream(self, *, model: str, contents: Any, config: Any) -> Any:
+            called_models.append(model)
+            if model == "gemini-4-carbon":
+                raise RuntimeError("504 DEADLINE_EXCEEDED")
+            return iter(
+                [
+                    SimpleNamespace(text="# Sheet 1\n"),
+                    SimpleNamespace(text="Equipment V-101 Design Pressure 12 barg"),
+                ]
+            )
+
+    class _FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            self.models = _FakeModels()
+
+    monkeypatch.setattr(genai_mod, "Client", _FakeClient)
+    fake_cfg = SimpleNamespace(google_cloud_project="test-proj", gemini_location="global")
+
+    with proc.multimodal_execution_context(
+        model_name="gemini-4-carbon",
+        progress_callback=progress_events.append,
+    ):
+        text_out, model_used, used_fb = proc._invoke_multimodal_streaming_with_fallback(
+            primary_model="gemini-4-carbon",
+            contents=["dummy-part", "prompt"],
+            gen_cfg=None,
+            cfg=fake_cfg,
+            label="ML101620329-part-2_p1-1",
+            step_id="vision-p1",
+        )
+
+    assert called_models == ["gemini-4-carbon", "gemini-4-hydrogen"]
+    assert model_used == "gemini-4-hydrogen"
+    assert used_fb is True
+    assert "V-101" in text_out
+    assert any(ev.get("phase") == "VISION // FALLBACK" for ev in progress_events)
+
+    # 2. Landscape vector CAD P&ID uses 1-page windows (7 PNGs/call instead of 14)
+    import pypdf
+
+    pdf_path = tmp_path / "landscape_pid.pdf"
+    writer = pypdf.PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=1200, height=800)
+    with pdf_path.open("wb") as fh:
+        writer.write(fh)
+
+    seen_cache_keys: list[str] = []
+    monkeypatch.setattr(proc, "is_vector_drawing", lambda p: True)
+    monkeypatch.setattr(
+        proc,
+        "_extract_single_pdf_window_multimodal",
+        lambda pdf_bytes, cache_key_name, prompt_hint=None: (
+            seen_cache_keys.append(cache_key_name) or f"ok-{cache_key_name}"
+        ),
+    )
+    out = proc.extract_pdf_multimodal_summary(pdf_path)
+    assert sorted(seen_cache_keys) == [
+        "landscape_pid_p1-1",
+        "landscape_pid_p2-2",
+        "landscape_pid_p3-3",
+    ]
+    assert "Pages 1–1 of 3" in out and "Pages 3–3 of 3" in out
+
+
 def test_multimodal_execution_context_propagates_model_and_progress_to_worker_threads() -> None:
     import contextvars
     from concurrent.futures import ThreadPoolExecutor

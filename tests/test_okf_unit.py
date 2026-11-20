@@ -1255,7 +1255,7 @@ def test_v4_chunked_register_append_sections_and_adaptive_vector_windowing(monke
     assert "FE-0101" in reg_md and "0.607" in reg_md
     assert "FE-0202" in reg_md and "0.939" in reg_md
 
-    # 2. Landscape vector CAD drawing (5 pages, width=1190 > height=842) adapts to window_size=2 (windows: 1-2, 3-4, 5-5)
+    # 2. Landscape vector CAD drawing (5 pages, width=1190 > height=842) adapts to window_size=1 (1 sheet / 7 PNGs per parallel call)
     cad_pdf = tmp_path / "CAD_VECTOR_5PAGES.pdf"
     writer = pypdf.PdfWriter()
     for _ in range(5):
@@ -1276,8 +1276,10 @@ def test_v4_chunked_register_append_sections_and_adaptive_vector_windowing(monke
     monkeypatch.setattr(processor, "_extract_single_pdf_window_multimodal", fake_window)
     processor.extract_pdf_multimodal_summary(cad_pdf)
     assert sorted(called_windows) == [
-        "CAD_VECTOR_5PAGES_p1-2",
-        "CAD_VECTOR_5PAGES_p3-4",
+        "CAD_VECTOR_5PAGES_p1-1",
+        "CAD_VECTOR_5PAGES_p2-2",
+        "CAD_VECTOR_5PAGES_p3-3",
+        "CAD_VECTOR_5PAGES_p4-4",
         "CAD_VECTOR_5PAGES_p5-5",
     ]
 

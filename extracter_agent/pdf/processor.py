@@ -527,19 +527,6 @@ def extract_image_multimodal_summary(
             logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
 
     effective_model = _ACTIVE_MULTIMODAL_MODEL.get() or cfg.gemini_model
-    http_opts = types.HttpOptions(
-        timeout=180_000,
-        retry_options=types.HttpRetryOptions(
-            attempts=4,
-            initial_delay=2.0,
-            exp_base=2.0,
-            http_status_codes=[429, 500, 502, 503, 504],
-        ),
-    )
-    use_vertex = (
-        os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() in ("true", "1")
-        or os.getenv("GOOGLE_GENAI_USE_ENTERPRISE", "").lower() in ("true", "1")
-    )
     img_part = types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
 
     gen_cfg_kwargs: dict[str, Any] = {
@@ -551,8 +538,93 @@ def extract_image_multimodal_summary(
         gen_cfg_kwargs["media_resolution"] = media_res_enum.MEDIA_RESOLUTION_HIGH
     gen_cfg = types.GenerateContentConfig(**gen_cfg_kwargs)
 
+    try:
+        text_out, _model_used, _used_fb = _invoke_multimodal_streaming_with_fallback(
+            primary_model=effective_model,
+            contents=[img_part, base_prompt],
+            gen_cfg=gen_cfg,
+            cfg=cfg,
+            label=path.name,
+        )
+        if len(text_out) > 100:
+            try:
+                cache_file.write_text(text_out, encoding="utf-8")
+                if cfg.use_gcs_storage:
+                    from google.cloud import storage
+
+                    st_client = storage.Client(project=cfg.google_cloud_project)
+                    bucket = st_client.bucket(cfg.destination_gcs_bucket)
+                    bucket.blob(
+                        f"cache/multimodal_v8/{path.stem}_{img_sha}.md"
+                    ).upload_from_string(text_out, content_type="text/markdown")
+            except Exception as exc:
+                logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
+        return text_out
+    except Exception as exc:
+        return f"[Multimodal extraction error: {exc}]"
+
+
+
+VISION_FALLBACK_MODEL: str = "gemini-4-hydrogen"
+
+
+def _invoke_multimodal_streaming_with_fallback(
+    *,
+    primary_model: str,
+    contents: list[Any],
+    gen_cfg: Any,
+    cfg: Any,
+    label: str,
+    step_id: str | None = None,
+) -> tuple[str, str, bool]:
+    """Stream multimodal vision response with single-layer HTTP retries and automatic failover to gemini-4-hydrogen.
+
+    Eliminates 180s non-streaming reverse-proxy 504 DEADLINE_EXCEEDED errors and 12x nested retry loops
+    while preserving WAF Pillar 3 graceful degradation to a faster Gemini 4 model on persistent timeouts.
+    """
+    from google import genai
+    from google.genai import types
+
+    http_opts = types.HttpOptions(
+        timeout=300_000,
+        retry_options=types.HttpRetryOptions(
+            attempts=3,
+            initial_delay=2.0,
+            exp_base=2.0,
+            http_status_codes=[429, 500, 502, 503, 504],
+        ),
+    )
+    use_vertex = (
+        os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() in ("true", "1")
+        or os.getenv("GOOGLE_GENAI_USE_ENTERPRISE", "").lower() in ("true", "1")
+    )
+
+    candidate_models: list[str] = [primary_model]
+    if primary_model != VISION_FALLBACK_MODEL:
+        candidate_models.append(VISION_FALLBACK_MODEL)
+
     last_err: Exception | None = None
-    for attempt in range(3):
+    for idx, model_name in enumerate(candidate_models):
+        used_fallback = idx > 0
+        if used_fallback:
+            logging.getLogger(__name__).warning(
+                "Vision model %s failed on %s (%s); falling back to %s",
+                primary_model,
+                label,
+                last_err,
+                model_name,
+            )
+            if step_id:
+                _emit_pdf_progress(
+                    {
+                        "step_id": step_id,
+                        "phase": "VISION // FALLBACK",
+                        "title": f"{label} ({primary_model} -> {model_name})",
+                        "status": "RUNNING",
+                        "duration_ms": None,
+                        "detail": f"Primary model timed out/failed ({str(last_err)[:100]}); retrying with {model_name}...",
+                    }
+                )
         try:
             if use_vertex:
                 client = genai.Client(
@@ -563,32 +635,32 @@ def extract_image_multimodal_summary(
                 )
             else:
                 client = genai.Client(http_options=http_opts)
-            resp = client.models.generate_content(
-                model=effective_model,
-                contents=[img_part, base_prompt],
-                config=gen_cfg,
-            )
-            text_out = resp.text or ""
-            if len(text_out) > 100:
-                try:
-                    cache_file.write_text(text_out, encoding="utf-8")
-                    if cfg.use_gcs_storage:
-                        from google.cloud import storage
 
-                        st_client = storage.Client(project=cfg.google_cloud_project)
-                        bucket = st_client.bucket(cfg.destination_gcs_bucket)
-                        bucket.blob(
-                            f"cache/multimodal_v8/{path.stem}_{img_sha}.md"
-                        ).upload_from_string(text_out, content_type="text/markdown")
-                except Exception as exc:
-                    logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
-            return text_out
+            chunks: list[str] = []
+            stream_fn = getattr(client.models, "generate_content_stream", None)
+            if callable(stream_fn):
+                for chunk in stream_fn(
+                    model=model_name,
+                    contents=contents,
+                    config=gen_cfg,
+                ):
+                    txt = getattr(chunk, "text", None)
+                    if txt:
+                        chunks.append(txt)
+                text_out = "".join(chunks)
+            else:
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=gen_cfg,
+                )
+                text_out = resp.text or ""
+            return text_out, model_name, used_fallback
         except Exception as exc:
             last_err = exc
-            if attempt < 2:
-                time.sleep(2.0 * (2**attempt))
-    return f"[Multimodal extraction error: {last_err}]"
 
+    assert last_err is not None
+    raise last_err
 
 
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
@@ -944,22 +1016,8 @@ def _extract_single_pdf_window_multimodal(
         except Exception as exc:
             logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
 
-    http_opts = types.HttpOptions(
-        timeout=180_000,
-        retry_options=types.HttpRetryOptions(
-            attempts=4,
-            initial_delay=2.0,
-            exp_base=2.0,
-            http_status_codes=[429, 500, 502, 503, 504],
-        ),
-    )
-    use_vertex = (
-        os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() in ("true", "1")
-        or os.getenv("GOOGLE_GENAI_USE_ENTERPRISE", "").lower() in ("true", "1")
-    )
     content_parts = _render_pdf_pages_to_png_parts(pdf_bytes, dpi=300)
 
-    last_err: Exception | None = None
     gen_cfg_kwargs: dict[str, Any] = {
         "max_output_tokens": 65536,
         "temperature": 0.0,
@@ -968,62 +1026,54 @@ def _extract_single_pdf_window_multimodal(
     if media_res_enum is not None and hasattr(media_res_enum, "MEDIA_RESOLUTION_HIGH"):
         gen_cfg_kwargs["media_resolution"] = media_res_enum.MEDIA_RESOLUTION_HIGH
     gen_cfg = types.GenerateContentConfig(**gen_cfg_kwargs)
-    for attempt in range(3):
-        try:
-            if use_vertex:
-                client = genai.Client(
-                    vertexai=True,
-                    project=cfg.google_cloud_project,
-                    location=cfg.gemini_location,
-                    http_options=http_opts,
-                )
-            else:
-                client = genai.Client(http_options=http_opts)
-            resp = client.models.generate_content(
-                model=effective_model,
-                contents=[*content_parts, base_prompt],
-                config=gen_cfg,
-            )
-            text_out = resp.text or ""
-            if len(text_out) > 100:
-                try:
-                    cache_file.write_text(text_out, encoding="utf-8")
-                    if cfg.use_gcs_storage:
-                        from google.cloud import storage
+    try:
+        text_out, model_used, used_fallback = _invoke_multimodal_streaming_with_fallback(
+            primary_model=effective_model,
+            contents=[*content_parts, base_prompt],
+            gen_cfg=gen_cfg,
+            cfg=cfg,
+            label=label,
+            step_id=step_id,
+        )
+        if len(text_out) > 100:
+            try:
+                cache_file.write_text(text_out, encoding="utf-8")
+                if cfg.use_gcs_storage:
+                    from google.cloud import storage
 
-                        st_client = storage.Client(project=cfg.google_cloud_project)
-                        bucket = st_client.bucket(cfg.destination_gcs_bucket)
-                        bucket.blob(
-                            f"cache/multimodal_v8/{cache_key_name}_{pdf_sha}.md"
-                        ).upload_from_string(text_out, content_type="text/markdown")
-                except Exception as exc:
-                    logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
-            _emit_pdf_progress(
-                {
-                    "step_id": step_id,
-                    "phase": "VISION // MULTIMODAL",
-                    "title": f"{label} ({effective_model})",
-                    "status": "COMPLETED",
-                    "duration_ms": round((time.perf_counter() - t_win0) * 1000, 1),
-                    "detail": f"Transcribed {len(text_out):,} chars ({len(content_parts)} image/PDF part(s)) and cached to GCS.",
-                }
-            )
-            return text_out
-        except Exception as e:
-            last_err = e
-            if attempt < 2:
-                time.sleep(2.0 * (2**attempt))
-    _emit_pdf_progress(
-        {
-            "step_id": step_id,
-            "phase": "VISION // MULTIMODAL",
-            "title": f"{label} ({effective_model})",
-            "status": "ERROR",
-            "duration_ms": round((time.perf_counter() - t_win0) * 1000, 1),
-            "detail": f"Vision extraction error: {str(last_err)[:160]}",
-        }
-    )
-    return f"[Multimodal extraction error: {last_err}]"
+                    st_client = storage.Client(project=cfg.google_cloud_project)
+                    bucket = st_client.bucket(cfg.destination_gcs_bucket)
+                    bucket.blob(
+                        f"cache/multimodal_v8/{cache_key_name}_{pdf_sha}.md"
+                    ).upload_from_string(text_out, content_type="text/markdown")
+            except Exception as exc:
+                logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
+        _emit_pdf_progress(
+            {
+                "step_id": step_id,
+                "phase": "VISION // FALLBACK" if used_fallback else "VISION // MULTIMODAL",
+                "title": f"{label} ({model_used})",
+                "status": "COMPLETED",
+                "duration_ms": round((time.perf_counter() - t_win0) * 1000, 1),
+                "detail": (
+                    f"{'Fallback to ' + model_used + ': ' if used_fallback else ''}"
+                    f"Transcribed {len(text_out):,} chars ({len(content_parts)} image/PDF part(s)) and cached to GCS."
+                ),
+            }
+        )
+        return text_out
+    except Exception as last_err:
+        _emit_pdf_progress(
+            {
+                "step_id": step_id,
+                "phase": "VISION // MULTIMODAL",
+                "title": f"{label} ({effective_model})",
+                "status": "ERROR",
+                "duration_ms": round((time.perf_counter() - t_win0) * 1000, 1),
+                "detail": f"Vision extraction error: {str(last_err)[:160]}",
+            }
+        )
+        return f"[Multimodal extraction error: {last_err}]"
 
 
 def _group_adaptive_page_windows(
@@ -1109,7 +1159,7 @@ def extract_pdf_multimodal_summary(
         total_pages = 1
         reader = None
 
-    # Adaptive 1-2 page windowing for landscape vector CAD drawings (P&IDs / PFDs)
+    # Adaptive 1-page windowing for landscape vector CAD drawings (P&IDs / PFDs: 7 multi-scale PNGs per sheet)
     if reader is not None and total_pages > 1 and window_size == 4:
         try:
             first_mb = reader.pages[0].mediabox
@@ -1117,7 +1167,7 @@ def extract_pdf_multimodal_summary(
         except Exception:
             is_landscape = False
         if is_landscape and is_vector_drawing(path):
-            effective_window = 2
+            effective_window = 1
 
     has_page_slice = start_page > 1 or max_pages < total_pages
     if reader is None or (

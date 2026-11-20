@@ -157,21 +157,38 @@ def _run_batch_extract(
             ):
                 pass
 
-        for idx, doc in enumerate(docs, start=1):
-            rel = doc["relative_path"]
-            status_payload["step"] = f"[{idx}/{total}] Extracting {rel} ({model_name})"
-            _write_job_status(execution_id, status_payload)
-            try:
-                with multimodal_execution_context(model_name=model_name):
-                    asyncio.run(_extract_one(rel))
-                extracted_ok += 1
-            except Exception as exc:
-                logger.warning("Extraction failed for %s: %s", rel, exc)
-                errors.append({"file": rel, "error": str(exc)})
-            status_payload["processed_count"] = idx
-            max_pct = 90.0 if status_payload["job_mode"] == "extract" else 50.0
-            status_payload["percent"] = round((idx / max(1, total)) * max_pct, 1)
-            _write_job_status(execution_id, status_payload)
+        async def _extract_all_docs() -> None:
+            nonlocal extracted_ok
+            for idx, doc in enumerate(docs, start=1):
+                rel = doc["relative_path"]
+                base_step = f"[{idx}/{total}] Extracting {rel} ({model_name})"
+                status_payload["step"] = base_step
+                _write_job_status(execution_id, status_payload)
+
+                def _on_vision_progress(ev: dict[str, Any], _base: str = base_step) -> None:
+                    st_val = str(ev.get("status") or "").upper()
+                    if st_val in ("COMPLETED", "ERROR") or "FALLBACK" in str(ev.get("phase") or ""):
+                        title = str(ev.get("title") or "")
+                        phase = str(ev.get("phase") or "")
+                        status_payload["step"] = f"{_base} — {phase}: {title}"
+                        _write_job_status(execution_id, status_payload)
+
+                try:
+                    with multimodal_execution_context(
+                        model_name=model_name,
+                        progress_callback=_on_vision_progress,
+                    ):
+                        await _extract_one(rel)
+                    extracted_ok += 1
+                except Exception as exc:
+                    logger.warning("Extraction failed for %s: %s", rel, exc)
+                    errors.append({"file": rel, "error": str(exc)})
+                status_payload["processed_count"] = idx
+                max_pct = 90.0 if status_payload["job_mode"] == "extract" else 50.0
+                status_payload["percent"] = round((idx / max(1, total)) * max_pct, 1)
+                _write_job_status(execution_id, status_payload)
+
+        asyncio.run(_extract_all_docs())
 
         status_payload["step"] = "Building OKF indexes and refreshing _manifest.json"
         _write_job_status(execution_id, status_payload)
