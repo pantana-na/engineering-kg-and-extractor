@@ -2,14 +2,37 @@
  * API client helpers for Unified OKF Engineering Workbench v2.
  */
 
+function formatApiErrorDetail(rawDetail, fallback) {
+  if (!rawDetail) return fallback;
+  if (typeof rawDetail === "string") return rawDetail;
+  if (Array.isArray(rawDetail)) {
+    const parts = rawDetail.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        const loc = Array.isArray(item.loc) ? item.loc.join(".") : "";
+        const msg = item.msg || item.message || JSON.stringify(item);
+        return loc ? `${loc}: ${msg}` : String(msg);
+      }
+      return String(item);
+    });
+    return parts.filter(Boolean).join("; ") || fallback;
+  }
+  if (typeof rawDetail === "object") {
+    return rawDetail.message || rawDetail.detail || rawDetail.error || JSON.stringify(rawDetail);
+  }
+  return String(rawDetail);
+}
+
 export async function fetchJson(url, options = {}) {
+  const { headers: customHeaders, ...restOptions } = options || {};
+  const mergedHeaders = {
+    "Accept": "application/json",
+    ...(restOptions.body ? { "Content-Type": "application/json" } : {}),
+    ...(customHeaders || {}),
+  };
   const resp = await fetch(url, {
-    headers: {
-      "Accept": "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
-    },
-    ...options,
+    ...restOptions,
+    headers: mergedHeaders,
   });
   let payload = null;
   try {
@@ -18,7 +41,10 @@ export async function fetchJson(url, options = {}) {
     payload = { detail: await resp.text() };
   }
   if (!resp.ok) {
-    const msg = payload?.detail || payload?.error || `HTTP ${resp.status}`;
+    const msg = formatApiErrorDetail(
+      payload?.detail ?? payload?.error,
+      `HTTP ${resp.status}`
+    );
     const err = new Error(msg);
     err.status = resp.status;
     err.payload = payload;
@@ -40,7 +66,7 @@ export async function streamSSE(url, body, onEvent) {
     let errText = `HTTP ${resp.status}`;
     try {
       const p = await resp.json();
-      errText = p.detail || p.error || errText;
+      errText = formatApiErrorDetail(p?.detail ?? p?.error, errText);
     } catch { /* ignore */ }
     throw new Error(errText);
   }

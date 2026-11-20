@@ -77,6 +77,7 @@
             </div>
             <div class="wb-search-row">
               <input id="ext-search-input" type="search" class="wb-input" placeholder="Search files or concepts..." autocomplete="off" />
+              <button id="btn-sync-gcs" class="wb-icon-btn" title="Sync GCS (pull latest raw documents & OKF bundle from GCS)">&#x21bb;</button>
             </div>
             <div class="wb-filter-row" id="ext-filter-chips"></div>
           </div>
@@ -99,12 +100,8 @@
                 Batch Extract + Sync (Job)
               </button>
 
-              <button id="btn-interactive-extract-sync" class="wb-btn wb-btn-secondary" title="Immediately extract & sync the selected document in the Assistant chat with live tool/latency streaming (no Enter needed)">
+              <button id="btn-interactive-extract-sync" class="wb-btn wb-btn-secondary" title="Choose Spanner sync mode and extract the selected document with live tool/latency streaming">
                 Extract + Sync (Interactive)
-              </button>
-
-              <button id="btn-sync-gcs" class="wb-btn wb-btn-ghost" title="Pull latest raw PDFs & OKF bundles from GCS and rebuild manifest">
-                &#x21bb; Sync GCS
               </button>
             </div>
 
@@ -342,6 +339,38 @@
           </button>
         </div>
       </details>
+    </div>
+
+    <!-- Interactive Extract + Sync Mode Selector Modal -->
+    <div id="interactive-sync-backdrop" class="wb-backdrop hidden"></div>
+    <div id="interactive-sync-modal" class="wb-modal wb-modal-info hidden" role="dialog" aria-modal="true" aria-labelledby="interactive-sync-title">
+      <div class="wb-popover-head">
+        <h3 id="interactive-sync-title">Extract + Sync (Interactive)</h3>
+        <button id="btn-close-interactive-sync" class="wb-icon-btn wb-icon-btn-xs" type="button" aria-label="Close">&times;</button>
+      </div>
+      <div class="wb-modal-explainer">
+        <p class="wb-xs" style="margin-bottom:4px">
+          <strong>Target Document:</strong> <code id="interactive-sync-target">—</code>
+        </p>
+        <p class="wb-xs wb-muted" style="margin-bottom:0">
+          <strong>Model:</strong> <code id="interactive-sync-model">gemini-4-carbon</code> · Runs as a timeout-resilient background job with live per-page vision &amp; tool telemetry.
+        </p>
+      </div>
+      <div class="wb-form-grid">
+        <label class="wb-field-label" for="interactive-sync-mode-select">
+          Choose Cloud Spanner Sync Mode
+        </label>
+        <select id="interactive-sync-mode-select" class="wb-select">
+          <option value="INCREMENTAL" selected>Incremental (recommended for single doc — adds/updates only, keeps existing Spanner rows)</option>
+          <option value="FULL_MIRROR">Full Mirror (adds/updates &amp; removes Spanner concepts deleted from GCS)</option>
+        </select>
+      </div>
+      <div class="wb-modal-actions">
+        <button id="btn-cancel-interactive-sync" class="wb-btn wb-btn-ghost" type="button">Cancel</button>
+        <button id="btn-confirm-interactive-sync" class="wb-btn wb-btn-primary" type="button">
+          Start Extract + Sync
+        </button>
+      </div>
     </div>
 
     <!-- Deterministic SAIF RAC HITL Confirmation Modal for Destructive Spanner Purge -->

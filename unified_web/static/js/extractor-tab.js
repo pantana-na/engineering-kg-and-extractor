@@ -196,7 +196,7 @@ export async function syncFromGcs() {
   const btn = document.getElementById("btn-sync-gcs");
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "Syncing GCS...";
+    btn.classList.add("is-busy");
   }
   try {
     const res = await fetchJson("/api/gcs/sync", { method: "POST" });
@@ -211,7 +211,8 @@ export async function syncFromGcs() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = "&#x21bb; Sync GCS";
+      btn.classList.remove("is-busy");
+      btn.innerHTML = "&#x21bb;";
     }
   }
 }
@@ -414,6 +415,7 @@ export async function runInteractiveExtract({
   prompt = "",
   targetPdf = null,
   syncToSpanner = false,
+  syncMode = null,
   invokeVertexLlm = null,
 } = {}) {
   if (isExtracting) {
@@ -426,7 +428,10 @@ export async function runInteractiveExtract({
     invokeVertexLlm !== null
       ? Boolean(invokeVertexLlm)
       : Boolean(document.getElementById("ext-live-llm-toggle")?.checked ?? true);
-  const syncMode = document.getElementById("sync-mode-select")?.value || "INCREMENTAL";
+  const resolvedSyncMode =
+    syncMode ||
+    document.getElementById("interactive-sync-mode-select")?.value ||
+    "INCREMENTAL";
 
   const effectivePrompt =
     prompt.trim() ||
@@ -444,7 +449,7 @@ export async function runInteractiveExtract({
         model,
         invoke_vertex_llm: invokeLlm,
         sync_to_spanner: Boolean(syncToSpanner),
-        sync_mode: syncMode,
+        sync_mode: resolvedSyncMode,
       }),
     });
     saveActiveJob({
@@ -564,8 +569,32 @@ export function initExtractorTab({ onJumpToGraph, onSpannerMutated, onQuickSyncS
     loadExtractorFiles({ append: true });
   });
 
-  // Zero-Enter Interactive Extract + Sync button
+  let pendingInteractiveTargetPdf = null;
+
+  function setInteractiveSyncModalOpen(open, targetPdf = null) {
+    const modal = document.getElementById("interactive-sync-modal");
+    const bg = document.getElementById("interactive-sync-backdrop");
+    if (open) {
+      pendingInteractiveTargetPdf = targetPdf;
+      const tgtEl = document.getElementById("interactive-sync-target");
+      const mdlEl = document.getElementById("interactive-sync-model");
+      const modeSel = document.getElementById("interactive-sync-mode-select");
+      if (tgtEl) tgtEl.textContent = targetPdf || "—";
+      if (mdlEl) mdlEl.textContent = state.selectedModels.extractor || "gemini-4-carbon";
+      if (modeSel && !modeSel.value) modeSel.value = "INCREMENTAL";
+    } else {
+      pendingInteractiveTargetPdf = null;
+    }
+    modal?.classList.toggle("hidden", !open);
+    bg?.classList.toggle("hidden", !open);
+  }
+
+  // Interactive Extract + Sync button -> opens Sync Mode selector popup
   document.getElementById("btn-interactive-extract-sync")?.addEventListener("click", () => {
+    if (isExtracting) {
+      showToast("An interactive extraction is already running — please wait for it to finish.", "err");
+      return;
+    }
     const targetPdf = resolveInteractiveTargetPdf();
     if (!targetPdf) {
       showToast(
@@ -574,10 +603,27 @@ export function initExtractorTab({ onJumpToGraph, onSpannerMutated, onQuickSyncS
       );
       return;
     }
+    setInteractiveSyncModalOpen(true, targetPdf);
+  });
+
+  document.getElementById("btn-close-interactive-sync")?.addEventListener("click", () => setInteractiveSyncModalOpen(false));
+  document.getElementById("btn-cancel-interactive-sync")?.addEventListener("click", () => setInteractiveSyncModalOpen(false));
+  document.getElementById("interactive-sync-backdrop")?.addEventListener("click", () => setInteractiveSyncModalOpen(false));
+  document.getElementById("btn-confirm-interactive-sync")?.addEventListener("click", () => {
+    const targetPdf = pendingInteractiveTargetPdf || resolveInteractiveTargetPdf();
+    const chosenMode = document.getElementById("interactive-sync-mode-select")?.value || "INCREMENTAL";
+    setInteractiveSyncModalOpen(false);
+    if (!targetPdf) return;
     runInteractiveExtract({
       targetPdf,
       syncToSpanner: true,
+      syncMode: chosenMode,
     });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      setInteractiveSyncModalOpen(false);
+    }
   });
 
   document.getElementById("btn-toggle-ext-chat")?.addEventListener("click", () => {

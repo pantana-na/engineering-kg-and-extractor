@@ -243,6 +243,8 @@ code, pre {
   font-size: 15px;
 }
 .wb-icon-btn:hover { background: var(--surface-3); color: var(--text); }
+.wb-icon-btn.is-busy,
+.wb-icon-btn:disabled { opacity: 0.5; cursor: progress; }
 
 .wb-pill {
   background: var(--surface-3);

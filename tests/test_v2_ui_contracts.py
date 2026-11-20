@@ -34,13 +34,17 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     for model_id in ALLOWED_GEMINI_MODELS:
         assert f'value="{model_id}"' in index_html
 
-    # Streamlined v2.2 persistent 2-extract-button toolbar, GCS sync, Batch modal & Purge HITL modal
+    # Streamlined v2.2 persistent 2-extract-button toolbar, left-pane GCS sync, Interactive Sync modal, Batch modal & Purge HITL modal
     assert 'id="btn-open-batch-modal"' in index_html
     assert 'id="btn-interactive-extract-sync"' in index_html
     assert 'id="btn-interactive-info"' not in index_html
     assert 'id="interactive-info-popover"' not in index_html
     assert 'id="ext-refresh-btn"' not in index_html
-    assert 'id="btn-sync-gcs"' in index_html
+    assert 'id="btn-sync-gcs" class="wb-icon-btn"' in index_html
+    assert 'id="interactive-sync-modal"' in index_html
+    assert 'id="interactive-sync-mode-select"' in index_html
+    assert '<option value="INCREMENTAL" selected>' in index_html
+    assert 'id="btn-confirm-interactive-sync"' in index_html
     assert 'id="batch-job-modal"' in index_html
     assert 'id="batch-scope-select"' in index_html
     assert 'id="btn-launch-batch-extract-sync"' in index_html
@@ -51,14 +55,19 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     # Verify both Extractor & Query chats use the shared live telemetry-card.js component & MOC badges
     ext_js = (STATIC_DIR / "js" / "extractor-tab.js").read_text(encoding="utf-8")
     qry_js = (STATIC_DIR / "js" / "query-tab.js").read_text(encoding="utf-8")
+    api_js = (STATIC_DIR / "js" / "api.js").read_text(encoding="utf-8")
     assert "./telemetry-card.js" in ext_js
     assert "./telemetry-card.js" in qry_js
     assert "/api/extractor/interactive/start" in ext_js
     assert "/events?after_seq=" in ext_js
     assert "/api/extractor/interactive/active" in ext_js
+    assert "interactive-sync-modal" in ext_js
     assert "/api/gcs/sync" in ext_js
     assert "MOC_AUTHORITY" in qry_js
     assert "PENDING_REDRAFT" in qry_js
+    # Regression guard: fetchJson must preserve Content-Type when custom headers are passed & format 422 arrays
+    assert "const { headers: customHeaders, ...restOptions } = options" in api_js
+    assert "formatApiErrorDetail" in api_js
 
     # Verify every local ES module import resolves on disk
     js_dir = STATIC_DIR / "js"
@@ -102,6 +111,60 @@ def test_unified_server_serves_shell_css_and_js_with_no_cache(
     ):
         r = client.get(asset)
         assert r.status_code == 200, f"Asset {asset} failed with {r.status_code}"
+
+
+def test_fetch_json_preserves_content_type_with_custom_headers_and_formats_422_arrays() -> None:
+    """Regression test (Rule 13 RCA #9): execute api.js via Node to verify header merge & 422 formatting."""
+    import shutil
+    import subprocess
+
+    node_bin = shutil.which("node")
+    if not node_bin:
+        return
+
+    api_url = (STATIC_DIR / "js" / "api.js").resolve().as_uri()
+    script = f"""
+import {{ fetchJson }} from "{api_url}";
+
+let captured = null;
+globalThis.fetch = async (url, opts) => {{
+  captured = {{ url, opts }};
+  if (url === "/ok") {{
+    return {{ ok: true, status: 202, json: async () => ({{ execution_id: "job-1" }}) }};
+  }}
+  return {{
+    ok: false,
+    status: 422,
+    json: async () => ({{ detail: [{{ loc: ["body", "job_mode"], msg: "Input should be valid" }}] }}),
+  }};
+}};
+
+const okRes = await fetchJson("/ok", {{
+  method: "POST",
+  headers: {{ "X-Idempotency-Key": "k-123" }},
+  body: JSON.stringify({{ job_mode: "sync" }}),
+}});
+if (okRes.execution_id !== "job-1") throw new Error("unexpected okRes");
+if (captured.opts.headers["Content-Type"] !== "application/json") {{
+  throw new Error("Content-Type header was clobbered!");
+}}
+if (captured.opts.headers["X-Idempotency-Key"] !== "k-123") {{
+  throw new Error("Custom header missing!");
+}}
+
+let errMsg = "";
+try {{
+  await fetchJson("/err", {{ method: "POST", body: "{{}}" }});
+}} catch (e) {{
+  errMsg = e.message;
+}}
+if (!errMsg.includes("body.job_mode: Input should be valid") || errMsg.includes("[object Object]")) {{
+  throw new Error("Bad formatted 422 error: " + errMsg);
+}}
+console.log("API_JS_REGRESSION_OK");
+"""
+    res = subprocess.run([node_bin, "--input-type=module", "-e", script], capture_output=True, text=True, check=True)
+    assert "API_JS_REGRESSION_OK" in res.stdout
 
 
 @settings(max_examples=40)
