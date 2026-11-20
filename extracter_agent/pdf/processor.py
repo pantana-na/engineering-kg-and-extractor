@@ -526,13 +526,15 @@ def extract_image_multimodal_summary(
         except Exception as exc:
             logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
 
+    effective_model = _ACTIVE_MULTIMODAL_MODEL.get() or cfg.gemini_model
     http_opts = types.HttpOptions(
+        timeout=180_000,
         retry_options=types.HttpRetryOptions(
-            attempts=5,
+            attempts=4,
             initial_delay=2.0,
             exp_base=2.0,
             http_status_codes=[429, 500, 502, 503, 504],
-        )
+        ),
     )
     use_vertex = (
         os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() in ("true", "1")
@@ -562,7 +564,7 @@ def extract_image_multimodal_summary(
             else:
                 client = genai.Client(http_options=http_opts)
             resp = client.models.generate_content(
-                model=cfg.gemini_model,
+                model=effective_model,
                 contents=[img_part, base_prompt],
                 config=gen_cfg,
             )
