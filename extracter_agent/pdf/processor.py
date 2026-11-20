@@ -7,13 +7,16 @@ CSV tables, and standalone raster diagrams (.png, .jpg, .jpeg, .webp).
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import logging
 import os
 import re
 import struct
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 import pypdf
 
@@ -56,6 +59,39 @@ RAW_MIME_TYPES: dict[str, str] = {
 
 class PDFProcessingError(Exception):
     """Raised when a raw engineering document cannot be parsed or processed."""
+
+
+_ACTIVE_MULTIMODAL_MODEL: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "active_multimodal_model", default=None
+)
+_PDF_PROGRESS_CALLBACK: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = (
+    contextvars.ContextVar("pdf_progress_callback", default=None)
+)
+
+
+@contextlib.contextmanager
+def multimodal_execution_context(
+    *,
+    model_name: str | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> Iterator[None]:
+    """Bind the selected Gemini 4 model and optional live per-page progress callback for multimodal calls."""
+    tok_model = _ACTIVE_MULTIMODAL_MODEL.set(model_name.strip() if model_name else None)
+    tok_cb = _PDF_PROGRESS_CALLBACK.set(progress_callback)
+    try:
+        yield
+    finally:
+        _ACTIVE_MULTIMODAL_MODEL.reset(tok_model)
+        _PDF_PROGRESS_CALLBACK.reset(tok_cb)
+
+
+def _emit_pdf_progress(event: dict[str, Any]) -> None:
+    cb = _PDF_PROGRESS_CALLBACK.get()
+    if cb is not None:
+        try:
+            cb(event)
+        except Exception as exc:
+            logging.getLogger(__name__).debug("PDF progress callback notice: %s", exc)
 
 
 def is_supported_raw_file(path: Path | str) -> bool:
@@ -838,7 +874,6 @@ def _extract_single_pdf_window_multimodal(
 ) -> str:
     """Run or fetch cached Gemini multimodal extraction for a single PDF or page-window byte stream."""
     import tempfile
-    import time
 
     from google import genai
     from google.genai import types
@@ -846,6 +881,22 @@ def _extract_single_pdf_window_multimodal(
     from extracter_agent.config import get_config
 
     cfg = get_config()
+    effective_model = _ACTIVE_MULTIMODAL_MODEL.get() or cfg.gemini_model
+    t_win0 = time.perf_counter()
+    step_id = f"vision-{cache_key_name}"
+    label = cache_key_name
+
+    _emit_pdf_progress(
+        {
+            "step_id": step_id,
+            "phase": "VISION // MULTIMODAL",
+            "title": f"{label} ({effective_model})",
+            "status": "RUNNING",
+            "duration_ms": None,
+            "detail": "Checking GCS vision cache / rasterizing 300-DPI sheet...",
+        }
+    )
+
     base_prompt = _build_multimodal_prompt(prompt_hint=prompt_hint)
     pdf_sha = _compute_multimodal_cache_digest(pdf_bytes, base_prompt)
     cache_dir = Path(tempfile.gettempdir()) / "extracter_multimodal_cache_v8"
@@ -853,7 +904,18 @@ def _extract_single_pdf_window_multimodal(
     cache_file = cache_dir / f"{cache_key_name}_{pdf_sha}.md"
 
     if cache_file.exists() and cache_file.stat().st_size > 100:
-        return cache_file.read_text(encoding="utf-8")
+        cached_text = cache_file.read_text(encoding="utf-8")
+        _emit_pdf_progress(
+            {
+                "step_id": step_id,
+                "phase": "VISION // CACHE HIT",
+                "title": f"{label} (local cache)",
+                "status": "COMPLETED",
+                "duration_ms": round((time.perf_counter() - t_win0) * 1000, 1),
+                "detail": f"Reused cached vision transcription ({len(cached_text):,} chars).",
+            }
+        )
+        return cached_text
 
     if cfg.use_gcs_storage:
         try:
@@ -866,17 +928,28 @@ def _extract_single_pdf_window_multimodal(
                 cached_text = cache_blob.download_as_text(encoding="utf-8")
                 if len(cached_text) > 100:
                     cache_file.write_text(cached_text, encoding="utf-8")
+                    _emit_pdf_progress(
+                        {
+                            "step_id": step_id,
+                            "phase": "VISION // GCS CACHE",
+                            "title": f"{label} (GCS cache hit)",
+                            "status": "COMPLETED",
+                            "duration_ms": round((time.perf_counter() - t_win0) * 1000, 1),
+                            "detail": f"Loaded cached GCS vision transcription ({len(cached_text):,} chars).",
+                        }
+                    )
                     return cached_text
         except Exception as exc:
             logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
 
     http_opts = types.HttpOptions(
+        timeout=180_000,
         retry_options=types.HttpRetryOptions(
-            attempts=5,
+            attempts=4,
             initial_delay=2.0,
             exp_base=2.0,
             http_status_codes=[429, 500, 502, 503, 504],
-        )
+        ),
     )
     use_vertex = (
         os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() in ("true", "1")
@@ -905,7 +978,7 @@ def _extract_single_pdf_window_multimodal(
             else:
                 client = genai.Client(http_options=http_opts)
             resp = client.models.generate_content(
-                model=cfg.gemini_model,
+                model=effective_model,
                 contents=[*content_parts, base_prompt],
                 config=gen_cfg,
             )
@@ -923,11 +996,31 @@ def _extract_single_pdf_window_multimodal(
                         ).upload_from_string(text_out, content_type="text/markdown")
                 except Exception as exc:
                     logging.getLogger(__name__).debug("Ignored non-fatal exception: %s", exc)
+            _emit_pdf_progress(
+                {
+                    "step_id": step_id,
+                    "phase": "VISION // MULTIMODAL",
+                    "title": f"{label} ({effective_model})",
+                    "status": "COMPLETED",
+                    "duration_ms": round((time.perf_counter() - t_win0) * 1000, 1),
+                    "detail": f"Transcribed {len(text_out):,} chars ({len(content_parts)} image/PDF part(s)) and cached to GCS.",
+                }
+            )
             return text_out
         except Exception as e:
             last_err = e
             if attempt < 2:
                 time.sleep(2.0 * (2**attempt))
+    _emit_pdf_progress(
+        {
+            "step_id": step_id,
+            "phase": "VISION // MULTIMODAL",
+            "title": f"{label} ({effective_model})",
+            "status": "ERROR",
+            "duration_ms": round((time.perf_counter() - t_win0) * 1000, 1),
+            "detail": f"Vision extraction error: {str(last_err)[:160]}",
+        }
+    )
     return f"[Multimodal extraction error: {last_err}]"
 
 
@@ -1111,8 +1204,13 @@ def extract_pdf_multimodal_summary(
     if len(prepared_windows) == 1:
         window_outputs = [_run_window(prepared_windows[0])]
     else:
-        with ThreadPoolExecutor(max_workers=min(4, len(prepared_windows))) as pool:
-            window_outputs = list(pool.map(_run_window, prepared_windows))
+        max_workers = min(8, len(prepared_windows))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [
+                pool.submit(contextvars.copy_context().run, _run_window, item)
+                for item in prepared_windows
+            ]
+            window_outputs = [f.result() for f in futures]
 
     return "\n\n".join(window_outputs)
 

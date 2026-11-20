@@ -52,7 +52,11 @@ from extracter_agent.agent.orchestrator import create_extracter_agent
 from extracter_agent.config import get_config as get_extracter_config
 from extracter_agent.deploy_config import get_safe_cloud_run_posture
 from extracter_agent.models.intent import IntentCategory
-from extracter_agent.pdf.processor import get_raw_mime_type, is_supported_raw_file
+from extracter_agent.pdf.processor import (
+    get_raw_mime_type,
+    is_supported_raw_file,
+    multimodal_execution_context,
+)
 from extracter_agent.tools.okf_tools import inspect_existing_okf_concept_tool
 from extracter_agent.tools.pdf_tools import (
     _download_pdf_from_gcs,
@@ -815,8 +819,10 @@ def create_unified_app(
             tool_calls: list[dict[str, Any]] = []
             spanner_counts: dict[str, int] = {}
 
+            main_loop = asyncio.get_running_loop()
+
             def _emit(ev_type: str, data: dict[str, Any]) -> None:
-                queue.put_nowait({"event": ev_type, "data": data})
+                main_loop.call_soon_threadsafe(queue.put_nowait, {"event": ev_type, "data": data})
 
             def _compact_args(raw_args: Any) -> dict[str, Any]:
                 if not isinstance(raw_args, dict):
@@ -933,97 +939,113 @@ def create_unified_app(
                             steps.append(cls_step)
                             _emit("step", cls_step)
 
-                        runner = InMemoryRunner(
-                            agent=create_extracter_agent(model_name=resolved_model),
-                            app_name="extracter_agent_v2_stream",
-                        )
-                        sess = await runner.session_service.create_session(
-                            app_name="extracter_agent_v2_stream",
-                            user_id="workbench_user",
-                        )
-                        msg = types.Content(role="user", parts=[types.Part.from_text(text=effective_prompt)])
-                        texts: list[str] = []
-                        pending_by_id: dict[str, tuple[dict[str, Any], float]] = {}
-                        pending_by_name: dict[str, list[tuple[dict[str, Any], float]]] = {}
+                        def _on_pdf_progress(ev_dict: dict[str, Any]) -> None:
+                            _emit("step", dict(ev_dict))
 
-                        async for ev in runner.run_async(
-                            user_id="workbench_user",
-                            session_id=sess.id,
-                            new_message=msg,
-                        ):
-                            if not (ev.content and ev.content.parts):
-                                continue
-                            for part in ev.content.parts:
-                                fc = getattr(part, "function_call", None)
-                                if fc is not None:
-                                    tool_counter += 1
-                                    t_call = time.perf_counter()
-                                    tc_rec: dict[str, Any] = {
-                                        "call_index": tool_counter,
-                                        "tool_name": str(fc.name),
-                                        "args": _compact_args(dict(fc.args or {})),
-                                        "status": "RUNNING",
-                                        "duration_ms": None,
-                                        "summary": f"Running {fc.name}...",
-                                    }
-                                    tool_calls.append(tc_rec)
-                                    fc_id = str(getattr(fc, "id", "") or "")
-                                    if fc_id:
-                                        pending_by_id[fc_id] = (tc_rec, t_call)
-                                    pending_by_name.setdefault(str(fc.name), []).append((tc_rec, t_call))
-                                    _emit("tool_call", dict(tc_rec))
+                        def _run_adk_in_worker_thread() -> str:
+                            nonlocal tool_counter, t_cursor
 
-                                fr = getattr(part, "function_response", None)
-                                if fr is not None:
-                                    t_done = time.perf_counter()
-                                    fr_id = str(getattr(fr, "id", "") or "")
-                                    fr_name = str(getattr(fr, "name", "") or "")
-                                    matched: tuple[dict[str, Any], float] | None = None
-                                    if fr_id and fr_id in pending_by_id:
-                                        matched = pending_by_id.pop(fr_id)
-                                        q_list = pending_by_name.get(fr_name, [])
-                                        pending_by_name[fr_name] = [x for x in q_list if x[0] is not matched[0]]
-                                    elif pending_by_name.get(fr_name):
-                                        matched = pending_by_name[fr_name].pop(0)
-                                    if matched is not None:
-                                        tc_rec, t_call = matched
-                                        dur = round((t_done - t_call) * 1000, 1)
-                                        t_cursor = t_done
-                                        resp_payload = getattr(fr, "response", None)
-                                        tc_rec.update(
-                                            {
-                                                "status": "COMPLETED",
-                                                "duration_ms": dur,
-                                                "summary": _summarize_ext_response(fr_name, resp_payload),
+                            async def _worker_coro() -> str:
+                                nonlocal tool_counter, t_cursor
+                                runner = InMemoryRunner(
+                                    agent=create_extracter_agent(model_name=resolved_model),
+                                    app_name="extracter_agent_v2_stream",
+                                )
+                                sess = await runner.session_service.create_session(
+                                    app_name="extracter_agent_v2_stream",
+                                    user_id="workbench_user",
+                                )
+                                msg = types.Content(role="user", parts=[types.Part.from_text(text=effective_prompt)])
+                                texts: list[str] = []
+                                pending_by_id: dict[str, tuple[dict[str, Any], float]] = {}
+                                pending_by_name: dict[str, list[tuple[dict[str, Any], float]]] = {}
+
+                                async for ev in runner.run_async(
+                                    user_id="workbench_user",
+                                    session_id=sess.id,
+                                    new_message=msg,
+                                ):
+                                    if not (ev.content and ev.content.parts):
+                                        continue
+                                    for part in ev.content.parts:
+                                        fc = getattr(part, "function_call", None)
+                                        if fc is not None:
+                                            tool_counter += 1
+                                            t_call = time.perf_counter()
+                                            tc_rec: dict[str, Any] = {
+                                                "call_index": tool_counter,
+                                                "tool_name": str(fc.name),
+                                                "args": _compact_args(dict(fc.args or {})),
+                                                "status": "RUNNING",
+                                                "duration_ms": None,
+                                                "summary": f"Running {fc.name}...",
                                             }
-                                        )
-                                        _emit("tool_call", dict(tc_rec))
-                                        steps.append(
-                                            {
-                                                "step_id": f"tool-{tc_rec['call_index']}",
-                                                "step_index": len(steps),
-                                                "call_index": tc_rec["call_index"],
-                                                "phase": f"ADK TOOL #{tc_rec['call_index']}",
-                                                "title": fr_name,
-                                                "status": "COMPLETED",
-                                                "duration_ms": dur,
-                                                "detail": tc_rec["summary"],
-                                            }
-                                        )
+                                            tool_calls.append(tc_rec)
+                                            fc_id = str(getattr(fc, "id", "") or "")
+                                            if fc_id:
+                                                pending_by_id[fc_id] = (tc_rec, t_call)
+                                            pending_by_name.setdefault(str(fc.name), []).append((tc_rec, t_call))
+                                            _emit("tool_call", dict(tc_rec))
 
-                                if getattr(part, "text", None):
-                                    texts.append(part.text)
-                                    _emit("token", {"text": part.text})
+                                        fr = getattr(part, "function_response", None)
+                                        if fr is not None:
+                                            t_done = time.perf_counter()
+                                            fr_id = str(getattr(fr, "id", "") or "")
+                                            fr_name = str(getattr(fr, "name", "") or "")
+                                            matched: tuple[dict[str, Any], float] | None = None
+                                            if fr_id and fr_id in pending_by_id:
+                                                matched = pending_by_id.pop(fr_id)
+                                                q_list = pending_by_name.get(fr_name, [])
+                                                pending_by_name[fr_name] = [x for x in q_list if x[0] is not matched[0]]
+                                            elif pending_by_name.get(fr_name):
+                                                matched = pending_by_name[fr_name].pop(0)
+                                            if matched is not None:
+                                                tc_rec, t_call = matched
+                                                dur = round((t_done - t_call) * 1000, 1)
+                                                t_cursor = t_done
+                                                resp_payload = getattr(fr, "response", None)
+                                                tc_rec.update(
+                                                    {
+                                                        "status": "COMPLETED",
+                                                        "duration_ms": dur,
+                                                        "summary": _summarize_ext_response(fr_name, resp_payload),
+                                                    }
+                                                )
+                                                _emit("tool_call", dict(tc_rec))
+                                                steps.append(
+                                                    {
+                                                        "step_id": f"tool-{tc_rec['call_index']}",
+                                                        "step_index": len(steps),
+                                                        "call_index": tc_rec["call_index"],
+                                                        "phase": f"ADK TOOL #{tc_rec['call_index']}",
+                                                        "title": fr_name,
+                                                        "status": "COMPLETED",
+                                                        "duration_ms": dur,
+                                                        "detail": tc_rec["summary"],
+                                                    }
+                                                )
 
-                        # Close any tool calls that didn't emit a separate function_response
-                        for leftover_list in pending_by_name.values():
-                            for tc_rec, t_call in leftover_list:
-                                if tc_rec.get("status") == "RUNNING":
-                                    dur = round((time.perf_counter() - t_call) * 1000, 1)
-                                    tc_rec.update({"status": "COMPLETED", "duration_ms": dur})
-                                    _emit("tool_call", dict(tc_rec))
+                                        if getattr(part, "text", None):
+                                            texts.append(part.text)
+                                            _emit("token", {"text": part.text})
 
-                        llm_summary = "\n".join(texts).strip()
+                                # Close any tool calls that didn't emit a separate function_response
+                                for leftover_list in pending_by_name.values():
+                                    for tc_rec, t_call in leftover_list:
+                                        if tc_rec.get("status") == "RUNNING":
+                                            dur = round((time.perf_counter() - t_call) * 1000, 1)
+                                            tc_rec.update({"status": "COMPLETED", "duration_ms": dur})
+                                            _emit("tool_call", dict(tc_rec))
+
+                                return "\n".join(texts).strip()
+
+                            with multimodal_execution_context(
+                                model_name=resolved_model,
+                                progress_callback=_on_pdf_progress,
+                            ):
+                                return asyncio.run(_worker_coro())
+
+                        llm_summary = await asyncio.to_thread(_run_adk_in_worker_thread)
                     finally:
                         if prev_out is None:
                             os.environ.pop("OUTPUT_BUNDLE_DIR", None)
@@ -1224,7 +1246,7 @@ def create_unified_app(
                 logger.exception("Extractor SSE stream %s failed", job_id)
                 _emit("error", {"error": f"Extraction stream failed: {exc}", "job_id": job_id})
             finally:
-                queue.put_nowait(None)
+                main_loop.call_soon_threadsafe(queue.put_nowait, None)
 
         asyncio.create_task(_run_stream())
 
@@ -1237,7 +1259,11 @@ def create_unified_app(
             }
             yield f"event: start\ndata: {json.dumps(init_payload)}\n\n"
             while True:
-                item = await queue.get()
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
                 if item is None:
                     break
                 yield f"event: {item['event']}\ndata: {json.dumps(item['data'], ensure_ascii=False)}\n\n"

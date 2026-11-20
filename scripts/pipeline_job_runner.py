@@ -98,6 +98,7 @@ def _run_batch_extract(
     """Run batch document extraction over matching raw documents using the selected Gemini 4 model."""
     from extracter_agent.agent.orchestrator import create_extracter_agent
     from extracter_agent.gcs.exporter import GCSExporter
+    from extracter_agent.pdf.processor import multimodal_execution_context
     from extracter_agent.web_server import ensure_bundle_seeded, list_all_raw_pdfs
     from unified_web.manifest import MANIFEST_STORE
 
@@ -161,7 +162,8 @@ def _run_batch_extract(
             status_payload["step"] = f"[{idx}/{total}] Extracting {rel} ({model_name})"
             _write_job_status(execution_id, status_payload)
             try:
-                asyncio.run(_extract_one(rel))
+                with multimodal_execution_context(model_name=model_name):
+                    asyncio.run(_extract_one(rel))
                 extracted_ok += 1
             except Exception as exc:
                 logger.warning("Extraction failed for %s: %s", rel, exc)

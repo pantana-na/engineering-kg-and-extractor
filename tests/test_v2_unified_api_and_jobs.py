@@ -337,6 +337,36 @@ def test_gcs_sync_and_extractor_sse_stream_with_latency_and_spanner_sync(
     assert bad.status_code == 400
 
 
+def test_multimodal_execution_context_propagates_model_and_progress_to_worker_threads() -> None:
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+
+    from extracter_agent.pdf.processor import (
+        _ACTIVE_MULTIMODAL_MODEL,
+        _emit_pdf_progress,
+        multimodal_execution_context,
+    )
+
+    events: list[dict[str, Any]] = []
+    assert _ACTIVE_MULTIMODAL_MODEL.get() is None
+
+    def _worker(page_num: int) -> str | None:
+        _emit_pdf_progress({"step_id": f"p{page_num}", "status": "COMPLETED"})
+        return _ACTIVE_MULTIMODAL_MODEL.get()
+
+    with multimodal_execution_context(
+        model_name="gemini-4-carbon",
+        progress_callback=events.append,
+    ):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futs = [pool.submit(contextvars.copy_context().run, _worker, i) for i in range(1, 5)]
+            models = [f.result() for f in futs]
+
+    assert models == ["gemini-4-carbon"] * 4
+    assert len(events) == 4
+    assert _ACTIVE_MULTIMODAL_MODEL.get() is None
+
+
 def test_iap_jwt_middleware_enforcement(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _setup_bundle_env(monkeypatch, tmp_path)
     monkeypatch.setenv("IAP_JWT_ENFORCEMENT", "true")
