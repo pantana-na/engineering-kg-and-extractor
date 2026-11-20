@@ -93,28 +93,45 @@
         </aside>
 
         <div class="wb-workspace">
-          <!-- Pipeline Actions Bar (Cloud Run Job Triggers) -->
+          <!-- Streamlined Persistent Pipeline Actions Bar (Identical in Raw Docs & OKF Bundle Views) -->
           <div class="wb-action-bar">
             <div class="wb-action-group">
-              <button id="btn-job-sync" class="wb-btn wb-btn-primary">
-                Sync OKF &rarr; Spanner
+              <button id="btn-open-batch-modal" class="wb-btn wb-btn-primary" title="Open Batch Extract + Sync (Cloud Run Job) launcher & scope guide">
+                Batch Extract + Sync (Job)
               </button>
-              <button id="btn-job-extract" class="wb-btn wb-btn-secondary">
-                Batch Extract (Job)
-              </button>
-              <button id="btn-job-extract-sync" class="wb-btn wb-btn-secondary">
-                Extract + Sync
+
+              <div class="wb-btn-with-info">
+                <button id="btn-interactive-extract-sync" class="wb-btn wb-btn-secondary" title="Immediately extract & sync the selected document in the Assistant chat (no Enter needed)">
+                  Extract + Sync (Interactive)
+                </button>
+                <button id="btn-interactive-info" class="wb-info-btn" type="button" aria-label="About Extract + Sync (Interactive)" aria-expanded="false" aria-controls="interactive-info-popover">?</button>
+                <div id="interactive-info-popover" class="wb-popover hidden" role="dialog" aria-label="About Extract + Sync (Interactive)">
+                  <div class="wb-popover-head">
+                    <strong>Extract + Sync (Interactive)</strong>
+                    <button id="btn-close-interactive-info" class="wb-icon-btn wb-icon-btn-xs" type="button" aria-label="Close">&times;</button>
+                  </div>
+                  <p class="wb-xs wb-muted">
+                    Immediately runs live single-document AI extraction in the <strong>Assistant</strong> drawer
+                    (no need to press Enter) using your selected Gemini 4 model, streaming each tool call, step,
+                    and exact latency in real time.
+                  </p>
+                  <ul class="wb-popover-list wb-xs">
+                    <li><strong>1. Select a file:</strong> Click any raw PDF on the left (or an OKF concept linked to a PDF).</li>
+                    <li><strong>2. Click once:</strong> Auto-opens the Assistant and starts extracting immediately.</li>
+                    <li><strong>3. Auto-sync:</strong> Publishes updated OKF Markdown to GCS and runs an incremental Cloud Spanner sync so the Query tab sees new facts right away.</li>
+                  </ul>
+                  <p class="wb-xs wb-muted" style="margin-bottom:0">
+                    Best for 1 document or quick inspection. For multiple documents or full doc types, use <strong>Batch Extract + Sync (Job)</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <button id="btn-sync-gcs" class="wb-btn wb-btn-ghost" title="Pull latest raw PDFs & OKF bundles from GCS and rebuild manifest">
+                &#x21bb; Sync GCS
               </button>
             </div>
 
             <div class="wb-action-group">
-              <select id="sync-mode-select" class="wb-select wb-select-sm" title="Spanner Sync Mode">
-                <option value="FULL_MIRROR">Mode: Full Mirror</option>
-                <option value="INCREMENTAL">Mode: Incremental</option>
-              </select>
-              <button id="btn-job-purge-modal" class="wb-btn wb-btn-danger-ghost" title="Destructive Spanner Purge & Reload (requires typed HITL confirmation)">
-                Purge &amp; Reload
-              </button>
               <button id="btn-toggle-ext-chat" class="wb-btn wb-btn-ghost">
                 Assistant
               </button>
@@ -290,6 +307,65 @@
         <div class="wb-empty">No pipeline jobs triggered in this session yet.</div>
       </div>
     </aside>
+
+    <!-- Interactive Launcher & Explainer Modal for Batch Extract + Sync (Cloud Run Job) -->
+    <div id="batch-modal-backdrop" class="wb-backdrop hidden"></div>
+    <div id="batch-job-modal" class="wb-modal wb-modal-info hidden" role="dialog" aria-modal="true" aria-labelledby="batch-modal-title">
+      <div class="wb-popover-head">
+        <h3 id="batch-modal-title">Batch Extract + Sync (Cloud Run Job)</h3>
+        <button id="btn-close-batch-modal" class="wb-icon-btn wb-icon-btn-xs" type="button" aria-label="Close">&times;</button>
+      </div>
+      <div class="wb-modal-explainer">
+        <p class="wb-xs">
+          <strong>What it does:</strong> Launches a timeout-free background Cloud Run Job
+          (<code>okf-pipeline-job</code>, up to 60 min) that extracts raw engineering documents into OKF v0.2
+          Markdown using your selected Gemini 4 model, publishes the bundle to GCS, and synchronizes all
+          concepts, graph edges, and native <code>ML.PREDICT</code> embeddings to Cloud Spanner &amp; Dataplex.
+        </p>
+        <p class="wb-xs wb-muted" style="margin-bottom:0">
+          <strong>How to choose documents:</strong> Pick <strong>All Documents</strong> below to process every
+          raw file in GCS, or pick a <strong>particular document type</strong> (e.g., <code>pid</code>,
+          <code>standards</code>, <code>operating_manuals</code>). Your active left-sidebar filter chip is
+          pre-selected automatically.
+        </p>
+      </div>
+
+      <div class="wb-form-grid">
+        <label class="wb-field-label" for="batch-scope-select">
+          Document Scope (All Docs vs. Particular Doc Type)
+        </label>
+        <select id="batch-scope-select" class="wb-select">
+          <option value="">All Documents (all folders in GCS)</option>
+        </select>
+
+        <label class="wb-field-label" for="sync-mode-select">
+          Spanner Reconciliation Mode
+        </label>
+        <select id="sync-mode-select" class="wb-select">
+          <option value="FULL_MIRROR">Full Mirror (recommended — adds/updates &amp; removes deleted concepts)</option>
+          <option value="INCREMENTAL">Incremental (additive — adds/updates only, keeps existing Spanner rows)</option>
+        </select>
+      </div>
+
+      <div class="wb-modal-actions">
+        <button id="btn-cancel-batch-modal" class="wb-btn wb-btn-ghost" type="button">Cancel</button>
+        <button id="btn-launch-batch-extract-sync" class="wb-btn wb-btn-primary" type="button">
+          Launch Batch Extract + Sync
+        </button>
+      </div>
+
+      <details class="wb-advanced-box">
+        <summary class="wb-xs wb-muted">Advanced Spanner Sync Options (Sync Existing OKF Only / Purge &amp; Reload)</summary>
+        <div class="wb-advanced-actions">
+          <button id="btn-job-sync" class="wb-btn wb-btn-secondary wb-btn-sm" type="button" title="Skip PDF extraction and sync already-extracted GCS OKF Markdown into Spanner">
+            Sync Existing OKF &rarr; Spanner Only
+          </button>
+          <button id="btn-job-purge-modal" class="wb-btn wb-btn-danger-ghost wb-btn-sm" type="button" title="Destructive Spanner Purge & Reload (requires typed HITL confirmation)">
+            Purge &amp; Reload (HITL)
+          </button>
+        </div>
+      </details>
+    </div>
 
     <!-- Deterministic SAIF RAC HITL Confirmation Modal for Destructive Spanner Purge -->
     <div id="purge-modal-backdrop" class="wb-backdrop hidden"></div>

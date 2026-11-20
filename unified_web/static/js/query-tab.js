@@ -6,6 +6,7 @@ import { fetchJson, streamSSE } from "./api.js";
 import { renderInteractiveGraph } from "./graph-canvas.js";
 import { escapeHtml, renderMarkdown } from "./markdown.js";
 import { showToast, state } from "./state.js";
+import { createTelemetryCard } from "./telemetry-card.js";
 
 let searchTimer = null;
 
@@ -279,22 +280,16 @@ async function sendQueryQuestion(question) {
 
   const botDiv = document.createElement("div");
   botDiv.className = "wb-msg assistant";
-  botDiv.innerHTML = `
-    <details class="wb-telemetry">
-      <summary class="wb-telemetry-summary">Running ${escapeHtml(model)} · streaming telemetry...</summary>
-      <div class="wb-telemetry-steps"></div>
-    </details>
-    <div class="wb-answer-body"><span class="wb-muted">Thinking...</span></div>
-  `;
+  const telemetry = createTelemetryCard({ model, modeLabel: "Spanner Query" });
+  const answerEl = document.createElement("div");
+  answerEl.className = "wb-answer-body";
+  answerEl.innerHTML = `<span class="wb-muted">Querying Cloud Spanner &amp; reasoning...</span>`;
+  botDiv.appendChild(telemetry.element);
+  botDiv.appendChild(answerEl);
   msgContainer.appendChild(botDiv);
   msgContainer.scrollTop = msgContainer.scrollHeight;
 
-  const summaryEl = botDiv.querySelector(".wb-telemetry-summary");
-  const stepsEl = botDiv.querySelector(".wb-telemetry-steps");
-  const answerEl = botDiv.querySelector(".wb-answer-body");
-
   let streamedText = "";
-  let toolCount = 0;
   if (sendBtn) sendBtn.disabled = true;
   if (statusEl) statusEl.textContent = `Streaming from ${model}...`;
 
@@ -310,19 +305,19 @@ async function sendQueryQuestion(question) {
       (evType, payload) => {
         if (evType === "start") {
           state.query.sessionId = payload.session_id;
-        } else if (evType === "step" || evType === "tool_call") {
-          if (evType === "tool_call" && payload.status === "COMPLETED") toolCount += 1;
-          const line = document.createElement("div");
-          line.textContent = `[${payload.phase || payload.tool_name}] ${payload.detail || payload.summary || ""} (${payload.duration_ms ?? "..."} ms)`;
-          stepsEl.appendChild(line);
-          summaryEl.textContent = `${model} · ${toolCount} Spanner tool call(s)...`;
+        } else if (evType === "step") {
+          telemetry.onStep(payload);
+          msgContainer.scrollTop = msgContainer.scrollHeight;
+        } else if (evType === "tool_call") {
+          telemetry.onToolCall(payload);
+          msgContainer.scrollTop = msgContainer.scrollHeight;
         } else if (evType === "token") {
           streamedText += payload.text || "";
           answerEl.innerHTML = renderMarkdown(streamedText);
           msgContainer.scrollTop = msgContainer.scrollHeight;
         } else if (evType === "done") {
+          telemetry.onDone(payload);
           answerEl.innerHTML = renderMarkdown(payload.answer_markdown || streamedText || "Done.");
-          summaryEl.textContent = `${model} · ${payload.tool_calls?.length || 0} tool call(s) · ${payload.total_duration_ms ?? 0} ms`;
           const tags = payload.referenced_tags || [];
           if (tags.length) {
             const pills = document.createElement("div");
@@ -336,15 +331,19 @@ async function sendQueryQuestion(question) {
             );
             botDiv.appendChild(pills);
           }
+          msgContainer.scrollTop = msgContainer.scrollHeight;
         } else if (evType === "error") {
+          telemetry.onError(payload.error || "Unknown error");
           answerEl.innerHTML = `<span style="color:var(--rose)">Error: ${escapeHtml(payload.error || "Unknown error")}</span>`;
         }
       }
     );
   } catch (err) {
+    telemetry.onError(err.message);
     answerEl.innerHTML = `<span style="color:var(--rose)">Stream error: ${escapeHtml(err.message)}</span>`;
     showToast(`Query failed: ${err.message}`, "err");
   } finally {
+    telemetry.destroy();
     if (sendBtn) sendBtn.disabled = false;
     if (statusEl) statusEl.textContent = "Ready · SSE Streaming enabled";
   }

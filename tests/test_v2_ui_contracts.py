@@ -34,18 +34,32 @@ def test_unified_ui_static_assets_and_esm_imports_resolve() -> None:
     for model_id in ALLOWED_GEMINI_MODELS:
         assert f'value="{model_id}"' in index_html
 
-    # Cloud Run Job triggers & deterministic Purge HITL modal
+    # Streamlined v2.1 persistent 2-extract-button toolbar, GCS sync, popups & Purge HITL modal
+    assert 'id="btn-open-batch-modal"' in index_html
+    assert 'id="btn-interactive-extract-sync"' in index_html
+    assert 'id="btn-interactive-info"' in index_html
+    assert 'id="interactive-info-popover"' in index_html
+    assert 'id="btn-sync-gcs"' in index_html
+    assert 'id="batch-job-modal"' in index_html
+    assert 'id="batch-scope-select"' in index_html
+    assert 'id="btn-launch-batch-extract-sync"' in index_html
     assert 'id="btn-job-sync"' in index_html
-    assert 'id="btn-job-extract"' in index_html
-    assert 'id="btn-job-extract-sync"' in index_html
     assert 'id="purge-modal"' in index_html
     assert "PURGE SPANNER" in index_html
+
+    # Verify both Extractor & Query chats use the shared live telemetry-card.js component
+    ext_js = (STATIC_DIR / "js" / "extractor-tab.js").read_text(encoding="utf-8")
+    qry_js = (STATIC_DIR / "js" / "query-tab.js").read_text(encoding="utf-8")
+    assert "./telemetry-card.js" in ext_js
+    assert "./telemetry-card.js" in qry_js
+    assert "/api/extractor/chat/stream" in ext_js
+    assert "/api/gcs/sync" in ext_js
 
     # Verify every local ES module import resolves on disk
     js_dir = STATIC_DIR / "js"
     import_re = re.compile(r'from\s+["\'](\./[^"\']+)["\']')
     js_files = sorted(js_dir.glob("*.js"))
-    assert len(js_files) >= 7
+    assert len(js_files) >= 8
     for js_file in js_files:
         text = js_file.read_text(encoding="utf-8")
         for m in import_re.finditer(text):
@@ -77,6 +91,7 @@ def test_unified_server_serves_shell_css_and_js_with_no_cache(
         "/static/js/state.js",
         "/static/js/extractor-tab.js",
         "/static/js/query-tab.js",
+        "/static/js/telemetry-card.js",
         "/static/js/jobs-drawer.js",
         "/static/js/graph-canvas.js",
     ):

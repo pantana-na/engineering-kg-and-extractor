@@ -68,7 +68,11 @@ class BundleManifestStore:
     ) -> dict[str, Any]:
         """Rebuild `_manifest.json` from local bundle + raw docs (and optionally sync/upload GCS)."""
         cfg = get_config()
-        gcs_sync = sync_bundle_from_gcs(force=force_gcs)
+        gcs_sync = (
+            sync_bundle_from_gcs(force=force_gcs)
+            if cfg.use_gcs_storage
+            else {"synced": False, "reason": "gcs_disabled", "downloaded_count": 0}
+        )
         bundle_dir = ensure_bundle_seeded()
 
         raw_pdfs = list_all_raw_pdfs()

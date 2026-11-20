@@ -65,6 +65,7 @@ from extracter_agent.web_server import (
     list_all_okf_files,
     list_all_raw_pdfs,
     resolve_pdf_source_links,
+    sync_bundle_from_gcs,
 )
 from query_agent.guardrails import (
     QuerySecurityGuardrailError,
@@ -170,6 +171,14 @@ class UnifiedExtractRequest(BaseModel):
     model: str | None = Field(default=None, description="Allowlisted Gemini 4 model (default: gemini-4-carbon)")
     invoke_vertex_llm: bool = Field(default=False)
     async_job: bool = Field(default=False)
+    sync_to_spanner: bool = Field(
+        default=False,
+        description="When True, export updated OKF bundle to GCS and sync to Cloud Spanner after extraction.",
+    )
+    sync_mode: str = Field(
+        default="INCREMENTAL",
+        description="Spanner sync mode for interactive Extract + Sync (INCREMENTAL or FULL_MIRROR).",
+    )
 
 
 class UnifiedQueryChatRequest(BaseModel):
@@ -727,6 +736,522 @@ def create_unified_app(
             raise HTTPException(status_code=404, detail=f"Extraction job '{job_id}' not found.")
         return job
 
+    @app.post("/api/gcs/sync", response_class=JSONResponse)
+    async def sync_from_gcs_endpoint(request: Request) -> dict[str, Any]:
+        """Pull latest raw documents & OKF .md bundle from GCS and rebuild `_manifest.json`."""
+        principal = getattr(request.state, "principal", None)
+        state.query_rate_limiter.check(principal.email if principal else "local-dev")
+        t0 = time.perf_counter()
+        cfg = get_extracter_config()
+
+        def _do_gcs_sync() -> dict[str, Any]:
+            state.manifest_store.invalidate()
+            manifest = state.manifest_store.rebuild_manifest(
+                force_gcs=bool(cfg.use_gcs_storage),
+                persist_to_gcs=False,
+            )
+            return manifest
+
+        try:
+            manifest = await asyncio.to_thread(_do_gcs_sync)
+        except Exception as exc:
+            logger.warning("GCS sync failed: %s", exc)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "UPSTREAM_UNAVAILABLE_DEGRADED",
+                    "component": "gcs_storage",
+                    "retryable": True,
+                    "detail": f"GCS sync failed: {exc}",
+                },
+            )  # type: ignore[return-value]
+
+        return {
+            "status": "success",
+            "gcs_bucket": f"gs://{cfg.destination_gcs_bucket}",
+            "use_gcs_storage": cfg.use_gcs_storage,
+            "raw_pdf_count": manifest.get("raw_pdf_count", 0),
+            "okf_file_count": manifest.get("okf_file_count", 0),
+            "conflict_count": manifest.get("conflict_count", 0),
+            "sync_version": manifest.get("sync_version", ""),
+            "raw_subfolders": manifest.get("raw_subfolders", {}),
+            "okf_categories": manifest.get("okf_categories", {}),
+            "duration_ms": round((time.perf_counter() - t0) * 1000, 1),
+        }
+
+    @app.post("/api/extractor/chat/stream")
+    @app.post("/api/chat/extract/stream")
+    async def extractor_chat_stream_endpoint(
+        req: UnifiedExtractRequest,
+        request: Request,
+    ) -> StreamingResponse:
+        """Real-time SSE streaming extraction (+ optional GCS & Spanner sync) with live per-step latency."""
+        principal = getattr(request.state, "principal", None)
+        state.query_rate_limiter.check(principal.email if principal else "local-dev")
+        try:
+            resolved_model = validate_gemini_model(req.model, default=get_default_extracter_model())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        effective_prompt = req.prompt.strip()
+        if not effective_prompt:
+            if req.target_pdf:
+                effective_prompt = (
+                    f"Extract all engineering parameters, equipment tags, instrumentation, connections, "
+                    f"and hazards from '{req.target_pdf}' into OKF v0.2 Markdown."
+                )
+            elif req.target_equipment:
+                effective_prompt = f"Extract all specifications for equipment '{req.target_equipment}'."
+            else:
+                effective_prompt = "Audit current OKF bundle status and recent extraction log."
+
+        job_id = f"estream-{uuid.uuid4().hex[:10]}"
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async def _run_stream() -> None:
+            t_start = time.perf_counter()
+            t_cursor = t_start
+            steps: list[dict[str, Any]] = []
+            tool_calls: list[dict[str, Any]] = []
+            spanner_counts: dict[str, int] = {}
+
+            def _emit(ev_type: str, data: dict[str, Any]) -> None:
+                queue.put_nowait({"event": ev_type, "data": data})
+
+            def _compact_args(raw_args: Any) -> dict[str, Any]:
+                if not isinstance(raw_args, dict):
+                    return {}
+                out: dict[str, Any] = {}
+                for k, v in list(raw_args.items())[:5]:
+                    sv = str(v)
+                    out[str(k)] = sv if len(sv) <= 120 else sv[:117] + "..."
+                return out
+
+            def _summarize_ext_response(tname: str, raw_resp: Any) -> str:
+                if isinstance(raw_resp, dict):
+                    if raw_resp.get("error"):
+                        return f"Error: {str(raw_resp['error'])[:160]}"
+                    parts: list[str] = []
+                    for key in ("status", "concept_id", "match_count", "pages_extracted", "file_path", "message"):
+                        if key in raw_resp and raw_resp[key] not in (None, "", []):
+                            parts.append(f"{key}={raw_resp[key]}")
+                    if parts:
+                        return " · ".join(parts)[:200]
+                return f"Completed {tname}"
+
+            try:
+                # STEP 0: Pre-flight Guardrail
+                blocked_err: str | None = None
+                try:
+                    before_agent_callback(effective_prompt)
+                except SecurityGuardrailError as exc:
+                    blocked_err = str(exc)
+
+                t_now = time.perf_counter()
+                step0 = {
+                    "step_id": "guardrail",
+                    "step_index": 0,
+                    "phase": "STEP 0 // GUARDRAIL",
+                    "title": "Model Armor & Prompt Injection Inspection",
+                    "status": "BLOCKED" if blocked_err else "COMPLETED",
+                    "duration_ms": round((t_now - t_cursor) * 1000, 1),
+                    "detail": blocked_err if blocked_err else f"Verified clean ({resolved_model}).",
+                }
+                t_cursor = t_now
+                steps.append(step0)
+                _emit("step", step0)
+
+                if blocked_err:
+                    t_end = time.perf_counter()
+                    s_sum, tot = compute_telemetry_totals(steps, t_end - t_start)
+                    _emit(
+                        "done",
+                        {
+                            "status": "blocked",
+                            "verdict": "BLOCKED_BY_MODEL_ARMOR",
+                            "model": resolved_model,
+                            "error": blocked_err,
+                            "reply_markdown": f"### Security Guardrail Intervention\n\n- **Reason:** {blocked_err}",
+                            "steps": steps,
+                            "tool_calls": tool_calls,
+                            "steps_sum_ms": s_sum,
+                            "total_duration_ms": tot,
+                        },
+                    )
+                    return
+
+                bundle_dir = await asyncio.to_thread(ensure_bundle_seeded)
+                before_hashes = {
+                    f["concept_id"]: f["content_hash"]
+                    for f in await asyncio.to_thread(list_all_okf_files, bundle_dir)
+                }
+
+                pdf_sub = req.subfolder if req.subfolder in ALLOWED_RAW_SUBFOLDERS else "data_sheets"
+                pdf_name = req.pdf_filename.strip()
+                if req.target_pdf:
+                    clean_pdf = req.target_pdf.replace("reference/raw/", "").strip("/")
+                    if "/" in clean_pdf:
+                        sub_p, name_p = clean_pdf.split("/", 1)
+                        if sub_p in ALLOWED_RAW_SUBFOLDERS:
+                            pdf_sub, pdf_name = sub_p, name_p
+                    else:
+                        pdf_name = clean_pdf
+
+                llm_summary = ""
+                tool_counter = 0
+                fast_mode = os.environ.get("EXTRACTOR_WEB_TEST_FAST_AGENT", "false").lower() in ("true", "1")
+
+                if req.invoke_vertex_llm and not fast_mode:
+                    prev_out = os.environ.get("OUTPUT_BUNDLE_DIR")
+                    os.environ["OUTPUT_BUNDLE_DIR"] = str(bundle_dir)
+                    try:
+                        if req.mode == "chat" and not req.target_pdf and not req.target_equipment:
+                            t_cls0 = time.perf_counter()
+                            cls_step = {
+                                "step_id": "classify",
+                                "step_index": len(steps),
+                                "phase": "STEP 1 // COGNITIVE INTENT",
+                                "title": f"CognitiveClassifier ({resolved_model})",
+                                "status": "RUNNING",
+                                "duration_ms": None,
+                                "detail": "Classifying user intent...",
+                            }
+                            _emit("step", cls_step)
+                            intent_res = await asyncio.to_thread(
+                                CognitiveClassifier(model_name=resolved_model).classify_intent,
+                                effective_prompt,
+                            )
+                            t_cls1 = time.perf_counter()
+                            cls_step.update(
+                                {
+                                    "status": "COMPLETED",
+                                    "duration_ms": round((t_cls1 - t_cls0) * 1000, 1),
+                                    "detail": f"Intent={intent_res.intent.value}",
+                                }
+                            )
+                            t_cursor = t_cls1
+                            steps.append(cls_step)
+                            _emit("step", cls_step)
+
+                        runner = InMemoryRunner(
+                            agent=create_extracter_agent(model_name=resolved_model),
+                            app_name="extracter_agent_v2_stream",
+                        )
+                        sess = await runner.session_service.create_session(
+                            app_name="extracter_agent_v2_stream",
+                            user_id="workbench_user",
+                        )
+                        msg = types.Content(role="user", parts=[types.Part.from_text(text=effective_prompt)])
+                        texts: list[str] = []
+                        pending_by_id: dict[str, tuple[dict[str, Any], float]] = {}
+                        pending_by_name: dict[str, list[tuple[dict[str, Any], float]]] = {}
+
+                        async for ev in runner.run_async(
+                            user_id="workbench_user",
+                            session_id=sess.id,
+                            new_message=msg,
+                        ):
+                            if not (ev.content and ev.content.parts):
+                                continue
+                            for part in ev.content.parts:
+                                fc = getattr(part, "function_call", None)
+                                if fc is not None:
+                                    tool_counter += 1
+                                    t_call = time.perf_counter()
+                                    tc_rec: dict[str, Any] = {
+                                        "call_index": tool_counter,
+                                        "tool_name": str(fc.name),
+                                        "args": _compact_args(dict(fc.args or {})),
+                                        "status": "RUNNING",
+                                        "duration_ms": None,
+                                        "summary": f"Running {fc.name}...",
+                                    }
+                                    tool_calls.append(tc_rec)
+                                    fc_id = str(getattr(fc, "id", "") or "")
+                                    if fc_id:
+                                        pending_by_id[fc_id] = (tc_rec, t_call)
+                                    pending_by_name.setdefault(str(fc.name), []).append((tc_rec, t_call))
+                                    _emit("tool_call", dict(tc_rec))
+
+                                fr = getattr(part, "function_response", None)
+                                if fr is not None:
+                                    t_done = time.perf_counter()
+                                    fr_id = str(getattr(fr, "id", "") or "")
+                                    fr_name = str(getattr(fr, "name", "") or "")
+                                    matched: tuple[dict[str, Any], float] | None = None
+                                    if fr_id and fr_id in pending_by_id:
+                                        matched = pending_by_id.pop(fr_id)
+                                        q_list = pending_by_name.get(fr_name, [])
+                                        pending_by_name[fr_name] = [x for x in q_list if x[0] is not matched[0]]
+                                    elif pending_by_name.get(fr_name):
+                                        matched = pending_by_name[fr_name].pop(0)
+                                    if matched is not None:
+                                        tc_rec, t_call = matched
+                                        dur = round((t_done - t_call) * 1000, 1)
+                                        t_cursor = t_done
+                                        resp_payload = getattr(fr, "response", None)
+                                        tc_rec.update(
+                                            {
+                                                "status": "COMPLETED",
+                                                "duration_ms": dur,
+                                                "summary": _summarize_ext_response(fr_name, resp_payload),
+                                            }
+                                        )
+                                        _emit("tool_call", dict(tc_rec))
+                                        steps.append(
+                                            {
+                                                "step_id": f"tool-{tc_rec['call_index']}",
+                                                "step_index": len(steps),
+                                                "call_index": tc_rec["call_index"],
+                                                "phase": f"ADK TOOL #{tc_rec['call_index']}",
+                                                "title": fr_name,
+                                                "status": "COMPLETED",
+                                                "duration_ms": dur,
+                                                "detail": tc_rec["summary"],
+                                            }
+                                        )
+
+                                if getattr(part, "text", None):
+                                    texts.append(part.text)
+                                    _emit("token", {"text": part.text})
+
+                        # Close any tool calls that didn't emit a separate function_response
+                        for leftover_list in pending_by_name.values():
+                            for tc_rec, t_call in leftover_list:
+                                if tc_rec.get("status") == "RUNNING":
+                                    dur = round((time.perf_counter() - t_call) * 1000, 1)
+                                    tc_rec.update({"status": "COMPLETED", "duration_ms": dur})
+                                    _emit("tool_call", dict(tc_rec))
+
+                        llm_summary = "\n".join(texts).strip()
+                    finally:
+                        if prev_out is None:
+                            os.environ.pop("OUTPUT_BUNDLE_DIR", None)
+                        else:
+                            os.environ["OUTPUT_BUNDLE_DIR"] = prev_out
+                else:
+                    # Fast deterministic parser/discovery path
+                    tool_counter += 1
+                    t_t0 = time.perf_counter()
+                    tname = "process_raw_pdf_tool" if pdf_name else "find_raw_documents_tool"
+                    tc_rec = {
+                        "call_index": tool_counter,
+                        "tool_name": tname,
+                        "args": {"pdf": f"{pdf_sub}/{pdf_name}"} if pdf_name else {"query": req.target_equipment or "document"},
+                        "status": "RUNNING",
+                        "duration_ms": None,
+                        "summary": f"Running {tname}...",
+                    }
+                    tool_calls.append(tc_rec)
+                    _emit("tool_call", dict(tc_rec))
+                    if pdf_name:
+                        parsed = await asyncio.to_thread(
+                            process_raw_pdf_tool,
+                            pdf_filename=pdf_name,
+                            subfolder=pdf_sub,
+                            max_pages=3,
+                            enable_multimodal=False,
+                        )
+                        detail = f"Parsed {pdf_sub}/{pdf_name} (tags={len(parsed.get('tag_candidates', []))})"
+                    else:
+                        disc = await asyncio.to_thread(
+                            find_raw_documents_tool,
+                            query=req.target_equipment or req.concept_id or "document",
+                        )
+                        detail = f"Matched {disc.get('match_count', 0)} raw document(s)"
+                    t_t1 = time.perf_counter()
+                    dur = round((t_t1 - t_t0) * 1000, 1)
+                    t_cursor = t_t1
+                    tc_rec.update({"status": "COMPLETED", "duration_ms": dur, "summary": detail})
+                    _emit("tool_call", dict(tc_rec))
+                    steps.append(
+                        {
+                            "step_id": f"tool-{tool_counter}",
+                            "step_index": len(steps),
+                            "call_index": tool_counter,
+                            "phase": f"ADK TOOL #{tool_counter}",
+                            "title": tname,
+                            "status": "COMPLETED",
+                            "duration_ms": dur,
+                            "detail": detail,
+                        }
+                    )
+
+                # STEP: Rebuild Manifest & Publish to GCS (when sync_to_spanner or GCS enabled)
+                t_m0 = time.perf_counter()
+                cfg = get_extracter_config()
+                gcs_step = {
+                    "step_id": "gcs-manifest",
+                    "step_index": len(steps),
+                    "phase": "SYNC // GCS & MANIFEST",
+                    "title": "Publish OKF Bundle & Refresh _manifest.json",
+                    "status": "RUNNING",
+                    "duration_ms": None,
+                    "detail": "Updating bundle manifest" + (" & uploading to GCS..." if cfg.use_gcs_storage else "..."),
+                }
+                _emit("step", dict(gcs_step))
+
+                def _publish_and_manifest() -> dict[str, Any]:
+                    if cfg.use_gcs_storage and req.sync_to_spanner:
+                        from extracter_agent.gcs.exporter import GCSExporter
+
+                        GCSExporter(bucket_name=cfg.destination_gcs_bucket).export_bundle(
+                            bundle_dir,
+                            prefix=cfg.destination_gcs_prefix,
+                            dry_run=False,
+                        )
+                    return state.manifest_store.rebuild_manifest(
+                        force_gcs=False,
+                        persist_to_gcs=bool(cfg.use_gcs_storage and req.sync_to_spanner),
+                    )
+
+                manifest = await asyncio.to_thread(_publish_and_manifest)
+                t_m1 = time.perf_counter()
+                gcs_step.update(
+                    {
+                        "status": "COMPLETED",
+                        "duration_ms": round((t_m1 - t_m0) * 1000, 1),
+                        "detail": (
+                            f"{manifest.get('okf_file_count', 0)} OKF concept(s) · "
+                            f"digest {str(manifest.get('sync_version', ''))[:8]}"
+                        ),
+                    }
+                )
+                steps.append(gcs_step)
+                _emit("step", dict(gcs_step))
+
+                after_files = manifest.get("okf_files", [])
+                touched = [
+                    f["concept_id"]
+                    for f in after_files
+                    if before_hashes.get(f["concept_id"]) != f["content_hash"]
+                ]
+
+                # STEP: Optional Cloud Spanner Sync (Extract + Sync Interactive Mode)
+                if req.sync_to_spanner:
+                    t_s0 = time.perf_counter()
+                    sync_mode_clean = (
+                        req.sync_mode.strip().upper()
+                        if req.sync_mode.strip().upper() in ("INCREMENTAL", "FULL_MIRROR")
+                        else "INCREMENTAL"
+                    )
+                    sp_step: dict[str, Any] = {
+                        "step_id": "spanner-sync",
+                        "step_index": len(steps),
+                        "phase": "SYNC // CLOUD SPANNER",
+                        "title": f"Sync OKF -> Cloud Spanner ({sync_mode_clean})",
+                        "status": "RUNNING",
+                        "duration_ms": None,
+                        "detail": "Upserting OKF concepts, graph edges & native ML.PREDICT embeddings...",
+                    }
+                    _emit("step", dict(sp_step))
+                    try:
+                        repo_inst = state.get_repo()
+                        sync_rep = await asyncio.to_thread(
+                            repo_inst.sync_markdown_bundle_to_spanner,
+                            md_source=bundle_dir,
+                            sync_mode=sync_mode_clean,
+                            compute_embeddings=True,
+                            sync_dataplex_catalog=False,
+                            force_reingest=False,
+                            bundle_version="v2.1-interactive",
+                        )
+                        state.invalidate_spanner_caches()
+                        spanner_counts = {
+                            k: int(v) for k, v in (sync_rep.live_counts_after_sync or {}).items()
+                        }
+                        t_s1 = time.perf_counter()
+                        sp_step.update(
+                            {
+                                "status": "COMPLETED",
+                                "duration_ms": round((t_s1 - t_s0) * 1000, 1),
+                                "detail": (
+                                    f"added={len(sync_rep.added_concepts)} · "
+                                    f"updated={len(sync_rep.updated_concepts)} · "
+                                    f"unchanged={len(sync_rep.unchanged_concepts)} · "
+                                    f"total={spanner_counts.get('total_concepts', 0)}"
+                                ),
+                            }
+                        )
+                    except Exception as sync_exc:
+                        logger.warning("Interactive Spanner sync degraded: %s", sync_exc)
+                        t_s1 = time.perf_counter()
+                        sp_step.update(
+                            {
+                                "status": "DEGRADED",
+                                "duration_ms": round((t_s1 - t_s0) * 1000, 1),
+                                "detail": f"UPSTREAM_UNAVAILABLE_DEGRADED: Extraction saved; Spanner sync error: {str(sync_exc)[:160]}",
+                            }
+                        )
+                    steps.append(sp_step)
+                    _emit("step", dict(sp_step))
+
+                reply_md = llm_summary
+                if not reply_md:
+                    target_label = f"`{pdf_sub}/{pdf_name}`" if pdf_name else "current bundle"
+                    reply_md = (
+                        f"### Interactive Extract{' + Sync' if req.sync_to_spanner else ''} Complete (`{resolved_model}`)\n\n"
+                        f"- **Target:** {target_label}\n"
+                        f"- **Touched OKF Concepts:** `{len(touched)}`\n"
+                        f"- **Total OKF Concepts:** `{manifest.get('okf_file_count', 0)}`"
+                    )
+                    if spanner_counts:
+                        reply_md += (
+                            f"\n- **Spanner Graph Live:** `{spanner_counts.get('total_concepts', 0)}` concepts · "
+                            f"`{spanner_counts.get('total_entities', 0)}` entities"
+                        )
+                    _emit("token", {"text": reply_md})
+
+                t_end = time.perf_counter()
+                s_sum, tot = compute_telemetry_totals(steps, t_end - t_start)
+                _emit(
+                    "done",
+                    {
+                        "status": "success",
+                        "verdict": "PASS",
+                        "model": resolved_model,
+                        "reply_markdown": reply_md,
+                        "touched_concepts": touched,
+                        "sync_version": manifest.get("sync_version", ""),
+                        "spanner_counts": spanner_counts,
+                        "steps": steps,
+                        "tool_calls": tool_calls,
+                        "steps_sum_ms": s_sum,
+                        "total_duration_ms": tot,
+                    },
+                )
+            except Exception as exc:
+                logger.exception("Extractor SSE stream %s failed", job_id)
+                _emit("error", {"error": f"Extraction stream failed: {exc}", "job_id": job_id})
+            finally:
+                queue.put_nowait(None)
+
+        asyncio.create_task(_run_stream())
+
+        async def _sse_gen() -> AsyncIterator[str]:
+            init_payload = {
+                "job_id": job_id,
+                "model": resolved_model,
+                "target_pdf": req.target_pdf,
+                "sync_to_spanner": req.sync_to_spanner,
+            }
+            yield f"event: start\ndata: {json.dumps(init_payload)}\n\n"
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"event: {item['event']}\ndata: {json.dumps(item['data'], ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            _sse_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
     # ==========================================================================
     # Parameterized Cloud Run Pipeline Jobs (`okf-pipeline-job`)
     # ==========================================================================
@@ -1197,6 +1722,7 @@ def create_unified_app(
                         tc.update({"status": "COMPLETED", "duration_ms": dur, **sinfo})
                         st_rec = {
                             "step_index": len(job["steps"]),
+                            "call_index": idx,
                             "phase": f"STEP {len(job['steps'])} // ADK TOOL #{idx}",
                             "title": tname,
                             "status": "COMPLETED",

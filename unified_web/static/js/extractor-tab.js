@@ -1,13 +1,18 @@
 /**
- * Tab 1: Extractor Studio (Paginated _manifest.json Explorer, Document Viewer & Assistant Drawer).
+ * Tab 1: Extractor Studio (Paginated _manifest.json Explorer, Document Viewer,
+ * GCS Sync & Live Streaming Extraction Assistant with Zero-Enter Extract + Sync).
  */
 
-import { fetchJson } from "./api.js";
+import { fetchJson, streamSSE } from "./api.js";
 import { escapeHtml, renderMarkdown } from "./markdown.js";
 import { showToast, state } from "./state.js";
+import { createTelemetryCard } from "./telemetry-card.js";
 
 let searchDebounce = null;
 let onJumpToGraphCb = null;
+let onSpannerMutatedCb = null;
+let onQuickSyncSpannerCb = null;
+let isExtracting = false;
 
 function renderFilterChips() {
   const host = document.getElementById("ext-filter-chips");
@@ -160,6 +165,146 @@ export async function loadExtractorFiles({ append = false, forceGcs = false } = 
   }
 }
 
+export async function syncFromGcs() {
+  const btn = document.getElementById("btn-sync-gcs");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Syncing GCS...";
+  }
+  try {
+    const res = await fetchJson("/api/gcs/sync", { method: "POST" });
+    state.extractor.offset = 0;
+    await loadExtractorFiles({ append: false, forceGcs: false });
+    showToast(
+      `GCS synced (${res.raw_pdf_count} raw docs · ${res.okf_file_count} OKF concepts · ${res.duration_ms} ms).`,
+      "ok"
+    );
+  } catch (err) {
+    showToast(`GCS sync failed: ${err.message}`, "err");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "&#x21bb; Sync GCS";
+    }
+  }
+}
+
+function resolveInteractiveTargetPdf() {
+  const sel = state.extractor.selectedItem;
+  if (sel?.kind === "raw" && sel.relative_path) {
+    return sel.relative_path;
+  }
+  if (sel?.kind === "okf" && sel.primary_pdf_path) {
+    return sel.primary_pdf_path;
+  }
+  return null;
+}
+
+export async function runInteractiveExtract({
+  prompt = "",
+  targetPdf = null,
+  syncToSpanner = false,
+  invokeVertexLlm = null,
+} = {}) {
+  if (isExtracting) {
+    showToast("An interactive extraction is already running — please wait for it to finish.", "err");
+    return;
+  }
+
+  const drawer = document.getElementById("ext-chat-drawer");
+  const log = document.getElementById("ext-chat-log");
+  if (drawer) drawer.classList.remove("hidden");
+  if (!log) return;
+
+  const model = state.selectedModels.extractor;
+  const invokeLlm =
+    invokeVertexLlm !== null
+      ? Boolean(invokeVertexLlm)
+      : Boolean(document.getElementById("ext-live-llm-toggle")?.checked ?? true);
+  const syncMode = document.getElementById("sync-mode-select")?.value || "INCREMENTAL";
+
+  const effectivePrompt =
+    prompt.trim() ||
+    (targetPdf
+      ? `Extract all engineering parameters, equipment tags, instrumentation, connections, and hazards from ${targetPdf} and merge-update OKF concepts.`
+      : "Audit current OKF bundle status and recent extraction log.");
+
+  const userDiv = document.createElement("div");
+  userDiv.className = "wb-msg user";
+  userDiv.textContent = effectivePrompt;
+  log.appendChild(userDiv);
+
+  const botDiv = document.createElement("div");
+  botDiv.className = "wb-msg assistant";
+  const telemetry = createTelemetryCard({
+    model,
+    modeLabel: syncToSpanner ? "Extract + Sync" : "Extractor",
+  });
+  const answerEl = document.createElement("div");
+  answerEl.className = "wb-answer-body";
+  answerEl.innerHTML = `<span class="wb-muted">${syncToSpanner ? "Extracting & syncing to GCS + Spanner..." : "Running extraction..."}</span>`;
+  botDiv.appendChild(telemetry.element);
+  botDiv.appendChild(answerEl);
+  log.appendChild(botDiv);
+  log.scrollTop = log.scrollHeight;
+
+  isExtracting = true;
+  const topBtn = document.getElementById("btn-interactive-extract-sync");
+  if (topBtn) topBtn.disabled = true;
+
+  let streamedText = "";
+  try {
+    await streamSSE(
+      "/api/extractor/chat/stream",
+      {
+        prompt: effectivePrompt,
+        mode: targetPdf ? "by_pdf" : "chat",
+        target_pdf: targetPdf,
+        model,
+        invoke_vertex_llm: invokeLlm,
+        sync_to_spanner: Boolean(syncToSpanner),
+        sync_mode: syncMode,
+      },
+      (evType, payload) => {
+        if (evType === "step") {
+          telemetry.onStep(payload);
+          log.scrollTop = log.scrollHeight;
+        } else if (evType === "tool_call") {
+          telemetry.onToolCall(payload);
+          log.scrollTop = log.scrollHeight;
+        } else if (evType === "token") {
+          streamedText += payload.text || "";
+          answerEl.innerHTML = renderMarkdown(streamedText);
+          log.scrollTop = log.scrollHeight;
+        } else if (evType === "done") {
+          telemetry.onDone(payload);
+          if (payload.status === "blocked") {
+            answerEl.innerHTML = `<strong style="color:var(--rose)">Blocked by Model Armor:</strong> ${escapeHtml(payload.error || "Policy violation")}`;
+          } else {
+            answerEl.innerHTML = renderMarkdown(payload.reply_markdown || streamedText || "Done.");
+          }
+          log.scrollTop = log.scrollHeight;
+          loadExtractorFiles({ append: false });
+          if (syncToSpanner && typeof onSpannerMutatedCb === "function") {
+            onSpannerMutatedCb();
+          }
+        } else if (evType === "error") {
+          telemetry.onError(payload.error || "Unknown error");
+          answerEl.innerHTML = `<span style="color:var(--rose)">Error: ${escapeHtml(payload.error || "Unknown error")}</span>`;
+        }
+      }
+    );
+  } catch (err) {
+    telemetry.onError(err.message);
+    answerEl.innerHTML = `<span style="color:var(--rose)">Stream error: ${escapeHtml(err.message)}</span>`;
+    showToast(`Interactive extract failed: ${err.message}`, "err");
+  } finally {
+    telemetry.destroy();
+    isExtracting = false;
+    if (topBtn) topBtn.disabled = false;
+  }
+}
+
 function openRawDocument(doc) {
   state.extractor.selectedItem = { kind: "raw", id: doc.relative_path, ...doc };
   renderFileList();
@@ -168,41 +313,40 @@ function openRawDocument(doc) {
   document.getElementById("ext-viewer-subtitle").textContent = `reference/raw/${doc.relative_path}`;
   const actions = document.getElementById("ext-viewer-actions");
   actions.innerHTML = `
-    <button class="wb-btn wb-btn-primary wb-btn-sm" id="btn-extract-this-doc">Extract This Document</button>
     <a class="wb-btn wb-btn-ghost wb-btn-sm" href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">Open Raw</a>
   `;
-  actions.querySelector("#btn-extract-this-doc")?.addEventListener("click", () => {
-    document.getElementById("ext-chat-drawer")?.classList.remove("hidden");
-    const input = document.getElementById("ext-chat-input");
-    if (input) {
-      input.value = `Extract all engineering parameters, equipment tags, and hazards from ${doc.relative_path}.`;
-      input.focus();
-    }
-  });
 
   const body = document.getElementById("ext-viewer-body");
   if (doc.file_name.toLowerCase().endsWith(".pdf")) {
     body.innerHTML = `<iframe class="wb-pdf-frame" src="${escapeHtml(doc.url)}" title="${escapeHtml(doc.file_name)}"></iframe>`;
   } else {
-    body.innerHTML = `<div class="wb-welcome-card"><h3>${escapeHtml(doc.file_name)}</h3><p class="wb-muted">Office/tabular document ready for native OOXML ingestion. Click <strong>Extract This Document</strong> or launch a <strong>Batch Extract</strong> job.</p></div>`;
+    body.innerHTML = `<div class="wb-welcome-card"><h3>${escapeHtml(doc.file_name)}</h3><p class="wb-muted">Office/tabular document ready for native OOXML ingestion. Click <strong>Extract + Sync (Interactive)</strong> above to extract immediately, or launch <strong>Batch Extract + Sync (Job)</strong>.</p></div>`;
   }
 }
 
 async function openOkfConcept(conceptId) {
-  state.extractor.selectedItem = { kind: "okf", id: conceptId };
+  state.extractor.selectedItem = { kind: "okf", id: conceptId, primary_pdf_path: null };
   renderFileList();
 
   const body = document.getElementById("ext-viewer-body");
   body.innerHTML = `<div class="wb-empty">Loading ${escapeHtml(conceptId)}...</div>`;
   try {
     const data = await fetchJson(`/api/okf/${encodeURI(conceptId)}`);
+    const primaryPdf = data.resolved_pdf_sources?.[0]?.relative_path || null;
+    state.extractor.selectedItem = {
+      kind: "okf",
+      id: conceptId,
+      primary_pdf_path: primaryPdf,
+    };
+
     document.getElementById("ext-viewer-title").textContent = data.frontmatter?.title || conceptId;
     document.getElementById("ext-viewer-subtitle").textContent = `${conceptId}.md · ${data.size_bytes} bytes · ${data.sources?.length || 0} source(s)`;
 
     const tagGuess = conceptId.includes("/") ? conceptId.split("/").pop() : conceptId;
     const actions = document.getElementById("ext-viewer-actions");
     actions.innerHTML = `
-      <button class="wb-btn wb-btn-secondary wb-btn-sm" id="btn-toggle-raw-md">Raw YAML</button>
+      <button class="wb-btn wb-btn-ghost wb-btn-sm" id="btn-toggle-raw-md">Raw YAML</button>
+      <button class="wb-btn wb-btn-secondary wb-btn-sm" id="btn-okf-sync-spanner" title="Sync existing OKF Markdown bundle to Cloud Spanner">Sync to Spanner</button>
       <button class="wb-btn wb-btn-primary wb-btn-sm" id="btn-jump-to-graph">Inspect in Graph &rarr;</button>
     `;
 
@@ -219,6 +363,9 @@ async function openOkfConcept(conceptId) {
       e.target.textContent = showingRaw ? "Rendered View" : "Raw YAML";
       renderBody();
     });
+    actions.querySelector("#btn-okf-sync-spanner")?.addEventListener("click", () => {
+      if (typeof onQuickSyncSpannerCb === "function") onQuickSyncSpannerCb();
+    });
     actions.querySelector("#btn-jump-to-graph")?.addEventListener("click", () => {
       if (typeof onJumpToGraphCb === "function") onJumpToGraphCb(tagGuess);
     });
@@ -227,18 +374,10 @@ async function openOkfConcept(conceptId) {
   }
 }
 
-function appendChatMessage(role, html) {
-  const log = document.getElementById("ext-chat-log");
-  if (!log) return;
-  const div = document.createElement("div");
-  div.className = `wb-msg ${role}`;
-  div.innerHTML = html;
-  log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
-}
-
-export function initExtractorTab({ onJumpToGraph } = {}) {
+export function initExtractorTab({ onJumpToGraph, onSpannerMutated, onQuickSyncSpanner } = {}) {
   onJumpToGraphCb = onJumpToGraph || null;
+  onSpannerMutatedCb = onSpannerMutated || null;
+  onQuickSyncSpannerCb = onQuickSyncSpanner || null;
 
   document.querySelectorAll("[data-ext-kind]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -259,14 +398,49 @@ export function initExtractorTab({ onJumpToGraph } = {}) {
     }, 280);
   });
 
-  document.getElementById("ext-refresh-btn")?.addEventListener("click", () => {
-    state.extractor.offset = 0;
-    loadExtractorFiles({ append: false, forceGcs: true });
-    showToast("Refreshed manifest from GCS.", "ok");
-  });
+  document.getElementById("ext-refresh-btn")?.addEventListener("click", () => syncFromGcs());
+  document.getElementById("btn-sync-gcs")?.addEventListener("click", () => syncFromGcs());
 
   document.getElementById("ext-load-more-btn")?.addEventListener("click", () => {
     loadExtractorFiles({ append: true });
+  });
+
+  // Zero-Enter Interactive Extract + Sync button
+  document.getElementById("btn-interactive-extract-sync")?.addEventListener("click", () => {
+    const targetPdf = resolveInteractiveTargetPdf();
+    if (!targetPdf) {
+      showToast(
+        "Select a raw document on the left first for Interactive Extract + Sync, or use Batch Extract + Sync (Job) for multiple docs.",
+        "err"
+      );
+      return;
+    }
+    runInteractiveExtract({
+      targetPdf,
+      syncToSpanner: true,
+    });
+  });
+
+  // Explanatory (?) Popover for Extract + Sync (Interactive)
+  const infoBtn = document.getElementById("btn-interactive-info");
+  const infoPop = document.getElementById("interactive-info-popover");
+  const closeInfo = () => {
+    infoPop?.classList.add("hidden");
+    infoBtn?.setAttribute("aria-expanded", "false");
+  };
+  infoBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isHidden = infoPop?.classList.toggle("hidden");
+    infoBtn.setAttribute("aria-expanded", String(!isHidden));
+  });
+  document.getElementById("btn-close-interactive-info")?.addEventListener("click", closeInfo);
+  document.addEventListener("click", (e) => {
+    if (infoPop && !infoPop.classList.contains("hidden") && !infoPop.contains(e.target) && e.target !== infoBtn) {
+      closeInfo();
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeInfo();
   });
 
   document.getElementById("btn-toggle-ext-chat")?.addEventListener("click", () => {
@@ -281,32 +455,12 @@ export function initExtractorTab({ onJumpToGraph } = {}) {
     const input = document.getElementById("ext-chat-input");
     const prompt = input?.value.trim();
     if (!prompt) return;
-    const model = state.selectedModels.extractor;
-    const invokeLlm = Boolean(document.getElementById("ext-live-llm-toggle")?.checked);
     input.value = "";
-    appendChatMessage("user", escapeHtml(prompt));
-
-    try {
-      const sel = state.extractor.selectedItem;
-      const res = await fetchJson("/api/chat/extract", {
-        method: "POST",
-        body: JSON.stringify({
-          prompt,
-          mode: sel?.kind === "raw" ? "by_pdf" : "chat",
-          target_pdf: sel?.kind === "raw" ? sel.relative_path : null,
-          model,
-          invoke_vertex_llm: invokeLlm,
-          async_job: false,
-        }),
-      });
-      if (res.status === "blocked") {
-        appendChatMessage("assistant", `<strong style="color:var(--rose)">Blocked by Model Armor:</strong> ${escapeHtml(res.error)}`);
-        return;
-      }
-      appendChatMessage("assistant", renderMarkdown(res.reply_markdown || "Done."));
-      loadExtractorFiles({ append: false });
-    } catch (err) {
-      appendChatMessage("assistant", `<span style="color:var(--rose)">Error: ${escapeHtml(err.message)}</span>`);
-    }
+    const targetPdf = resolveInteractiveTargetPdf();
+    await runInteractiveExtract({
+      prompt,
+      targetPdf,
+      syncToSpanner: false,
+    });
   });
 }

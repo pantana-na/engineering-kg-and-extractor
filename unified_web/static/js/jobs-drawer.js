@@ -1,5 +1,6 @@
 /**
- * Cloud Run Pipeline Jobs Drawer (`okf-pipeline-job`) & Deterministic Purge HITL Modal.
+ * Cloud Run Pipeline Jobs Drawer (`okf-pipeline-job`),
+ * Interactive Batch Extract + Sync Launcher Modal & Deterministic Purge HITL Modal.
  */
 
 import { fetchJson, generateIdempotencyKey } from "./api.js";
@@ -15,6 +16,31 @@ function setDrawerOpen(open) {
   if (open) {
     refreshJobs();
   }
+}
+
+function populateBatchScopeOptions() {
+  const select = document.getElementById("batch-scope-select");
+  if (!select) return;
+  const subs = state.extractor.rawSubfolders || {};
+  const totalRaw = Object.values(subs).reduce((acc, n) => acc + Number(n || 0), 0);
+  const options = [
+    `<option value="">All Documents (${totalRaw || "all"} files across all doc types)</option>`,
+  ];
+  for (const [sub, count] of Object.entries(subs)) {
+    options.push(
+      `<option value="${escapeHtml(sub)}">Doc Type: ${escapeHtml(sub)} (${count} file${Number(count) === 1 ? "" : "s"})</option>`
+    );
+  }
+  select.innerHTML = options.join("");
+  select.value = state.extractor.subfolder || "";
+}
+
+function setBatchModalOpen(open) {
+  const modal = document.getElementById("batch-job-modal");
+  const bg = document.getElementById("batch-modal-backdrop");
+  if (open) populateBatchScopeOptions();
+  modal?.classList.toggle("hidden", !open);
+  bg?.classList.toggle("hidden", !open);
 }
 
 function setPurgeModalOpen(open) {
@@ -101,9 +127,15 @@ export async function refreshJobs() {
   }
 }
 
-export async function triggerPipelineJob(jobMode, { purge = false, confirmPurge = false } = {}) {
+export async function triggerPipelineJob(
+  jobMode,
+  { purge = false, confirmPurge = false, targetSubfolder = undefined } = {}
+) {
   const syncMode = document.getElementById("sync-mode-select")?.value || "FULL_MIRROR";
   const model = state.selectedModels.extractor || getActiveModel();
+  const resolvedSubfolder =
+    targetSubfolder !== undefined ? (targetSubfolder || null) : (state.extractor.subfolder || null);
+
   const headers = {
     "X-Idempotency-Key": generateIdempotencyKey(`job-${jobMode}`),
   };
@@ -120,12 +152,13 @@ export async function triggerPipelineJob(jobMode, { purge = false, confirmPurge 
         model,
         sync_mode: syncMode,
         purge,
-        target_subfolder: state.extractor.subfolder || null,
+        target_subfolder: resolvedSubfolder,
         compute_embeddings: true,
         sync_dataplex_catalog: true,
       }),
     });
-    showToast(`Dispatched ${jobMode} job (${res.execution_id}) via ${res.execution_backend}.`, "ok");
+    const scopeLabel = resolvedSubfolder ? `doc type '${resolvedSubfolder}'` : "all documents";
+    showToast(`Dispatched ${jobMode} (${scopeLabel}) -> ${res.execution_id} via ${res.execution_backend}.`, "ok");
     setDrawerOpen(true);
     await refreshJobs();
   } catch (err) {
@@ -141,12 +174,29 @@ export function initJobsDrawer({ onSyncCompleted } = {}) {
   document.getElementById("jobs-drawer-backdrop")?.addEventListener("click", () => setDrawerOpen(false));
   document.getElementById("btn-refresh-jobs")?.addEventListener("click", () => refreshJobs());
 
-  document.getElementById("btn-job-sync")?.addEventListener("click", () => triggerPipelineJob("sync"));
-  document.getElementById("btn-job-extract")?.addEventListener("click", () => triggerPipelineJob("extract"));
-  document.getElementById("btn-job-extract-sync")?.addEventListener("click", () => triggerPipelineJob("extract_and_sync"));
+  // Batch Extract + Sync Interactive Launcher Modal
+  document.getElementById("btn-open-batch-modal")?.addEventListener("click", () => setBatchModalOpen(true));
+  document.getElementById("btn-close-batch-modal")?.addEventListener("click", () => setBatchModalOpen(false));
+  document.getElementById("btn-cancel-batch-modal")?.addEventListener("click", () => setBatchModalOpen(false));
+  document.getElementById("batch-modal-backdrop")?.addEventListener("click", () => setBatchModalOpen(false));
+
+  document.getElementById("btn-launch-batch-extract-sync")?.addEventListener("click", async () => {
+    const scope = document.getElementById("batch-scope-select")?.value || "";
+    setBatchModalOpen(false);
+    await triggerPipelineJob("extract_and_sync", { targetSubfolder: scope });
+  });
+
+  // Advanced: Sync Existing OKF -> Spanner Only
+  document.getElementById("btn-job-sync")?.addEventListener("click", async () => {
+    setBatchModalOpen(false);
+    await triggerPipelineJob("sync", { targetSubfolder: null });
+  });
 
   // Destructive Purge HITL Modal
-  document.getElementById("btn-job-purge-modal")?.addEventListener("click", () => setPurgeModalOpen(true));
+  document.getElementById("btn-job-purge-modal")?.addEventListener("click", () => {
+    setBatchModalOpen(false);
+    setPurgeModalOpen(true);
+  });
   document.getElementById("btn-cancel-purge")?.addEventListener("click", () => setPurgeModalOpen(false));
   document.getElementById("purge-modal-backdrop")?.addEventListener("click", () => setPurgeModalOpen(false));
 
@@ -157,6 +207,13 @@ export function initJobsDrawer({ onSyncCompleted } = {}) {
   });
   confirmBtn?.addEventListener("click", async () => {
     setPurgeModalOpen(false);
-    await triggerPipelineJob("sync", { purge: true, confirmPurge: true });
+    await triggerPipelineJob("sync", { purge: true, confirmPurge: true, targetSubfolder: null });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      setBatchModalOpen(false);
+      setPurgeModalOpen(false);
+    }
   });
 }

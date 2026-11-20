@@ -5,7 +5,7 @@
 
 import { fetchJson } from "./api.js";
 import { initExtractorTab, loadExtractorFiles } from "./extractor-tab.js";
-import { initJobsDrawer, refreshJobs } from "./jobs-drawer.js";
+import { initJobsDrawer, refreshJobs, triggerPipelineJob } from "./jobs-drawer.js";
 import {
   focusEquipmentInQuery,
   initQueryTab,
@@ -84,6 +84,12 @@ async function bootstrap() {
     onJumpToGraph: (tag) => {
       activateTab("query");
       focusEquipmentInQuery(tag);
+    },
+    onSpannerMutated: () => {
+      if (state.query.initialized) loadSpannerSummary(true);
+    },
+    onQuickSyncSpanner: () => {
+      triggerPipelineJob("sync", { targetSubfolder: null });
     },
   });
   initQueryTab();
