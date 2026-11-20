@@ -649,8 +649,12 @@ def create_unified_app(
                     }
                 )
 
-        # Rebuild fast manifest after write/extraction
-        manifest = state.manifest_store.rebuild_manifest(force_gcs=False, persist_to_gcs=False)
+        # Rebuild fast manifest after write/extraction (and persist to GCS so all instances stay synced)
+        cfg_ext = get_extracter_config()
+        manifest = state.manifest_store.rebuild_manifest(
+            force_gcs=False,
+            persist_to_gcs=bool(cfg_ext.use_gcs_storage),
+        )
         after_files = manifest.get("okf_files", [])
         touched = [
             f["concept_id"]
@@ -752,7 +756,7 @@ def create_unified_app(
             state.manifest_store.invalidate()
             manifest = state.manifest_store.rebuild_manifest(
                 force_gcs=bool(cfg.use_gcs_storage),
-                persist_to_gcs=False,
+                persist_to_gcs=bool(cfg.use_gcs_storage),
             )
             return manifest
 
@@ -1124,7 +1128,7 @@ def create_unified_app(
                         )
                     return state.manifest_store.rebuild_manifest(
                         force_gcs=False,
-                        persist_to_gcs=bool(cfg.use_gcs_storage and req.sync_to_spanner),
+                        persist_to_gcs=bool(cfg.use_gcs_storage),
                     )
 
                 manifest = await asyncio.to_thread(_publish_and_manifest)

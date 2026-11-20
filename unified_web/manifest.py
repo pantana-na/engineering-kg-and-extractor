@@ -28,7 +28,22 @@ from unified_web.models import ALLOWED_RAW_SUBFOLDERS
 logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = "_manifest.json"
+MANIFEST_SCHEMA_VERSION = "2.2"
 MANIFEST_CACHE_TTL_SECONDS = 15.0
+
+
+def _normalize_raw_subfolders(counts: dict[str, Any] | None) -> dict[str, int]:
+    """Ensure all 6 canonical raw document types are always present in deterministic order."""
+    normalized: dict[str, int] = {sub: 0 for sub in ALLOWED_RAW_SUBFOLDERS}
+    if isinstance(counts, dict):
+        for k, v in counts.items():
+            key = str(k).strip()
+            if key:
+                try:
+                    normalized[key] = int(v)
+                except (TypeError, ValueError):
+                    normalized.setdefault(key, 0)
+    return normalized
 
 
 class BundleManifestStore:
@@ -95,14 +110,14 @@ class BundleManifestStore:
                 conflict_count += 1
 
         manifest = {
-            "schema_version": "2.0",
+            "schema_version": MANIFEST_SCHEMA_VERSION,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "sync_version": sync_version,
             "gcs_sync": gcs_sync,
             "raw_pdf_count": len(raw_pdfs),
             "okf_file_count": len(okf_files),
             "conflict_count": conflict_count,
-            "raw_subfolders": raw_counts,
+            "raw_subfolders": _normalize_raw_subfolders(raw_counts),
             "okf_categories": okf_counts,
             "raw_pdfs": raw_pdfs,
             "okf_files": okf_files,
@@ -155,7 +170,13 @@ class BundleManifestStore:
                 return None
             raw_json = blob.download_as_text(encoding="utf-8")
             parsed = json.loads(raw_json)
-            if isinstance(parsed, dict) and "okf_files" in parsed and "raw_pdfs" in parsed:
+            if (
+                isinstance(parsed, dict)
+                and parsed.get("schema_version") == MANIFEST_SCHEMA_VERSION
+                and "okf_files" in parsed
+                and "raw_pdfs" in parsed
+            ):
+                parsed["raw_subfolders"] = _normalize_raw_subfolders(parsed.get("raw_subfolders"))
                 return parsed
         except Exception as exc:
             logger.debug("GCS _manifest.json fast-path skipped: %s", exc)
@@ -163,6 +184,7 @@ class BundleManifestStore:
 
     def get_manifest(self, *, force_refresh: bool = False) -> dict[str, Any]:
         """Return cached metadata manifest or rebuild/fetch when stale."""
+        cfg = get_config()
         bundle_dir = ensure_bundle_seeded()
         now = time.monotonic()
 
@@ -184,7 +206,10 @@ class BundleManifestStore:
                     self._manifest = gcs_manifest
                 return gcs_manifest
 
-        return self.rebuild_manifest(force_gcs=force_refresh, persist_to_gcs=force_refresh)
+        return self.rebuild_manifest(
+            force_gcs=bool(cfg.use_gcs_storage),
+            persist_to_gcs=bool(cfg.use_gcs_storage),
+        )
 
     def query_paginated_files(
         self,

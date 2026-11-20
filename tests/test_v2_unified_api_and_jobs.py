@@ -371,6 +371,25 @@ def test_multimodal_execution_context_propagates_model_and_progress_to_worker_th
     assert _ACTIVE_MULTIMODAL_MODEL.get() is None
 
 
+def test_stale_v20_gcs_manifest_triggers_self_healing_v22_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify a stale schema_version=2.0 GCS manifest never overwrites fresh local/GCS bundle counts."""
+    from unified_web.manifest import MANIFEST_SCHEMA_VERSION
+
+    _setup_bundle_env(monkeypatch, tmp_path, n_okf=5)
+    store = BundleManifestStore(ttl_seconds=0.0)
+    # Simulate _try_load_gcs_manifest rejecting an old 2.0 manifest (returns None)
+    monkeypatch.setattr(store, "_try_load_gcs_manifest", lambda: None)
+
+    manifest = store.get_manifest(force_refresh=False)
+    assert manifest["schema_version"] == MANIFEST_SCHEMA_VERSION
+    assert manifest["okf_file_count"] == 5
+    for sub in ("data_sheets", "pid", "pfd", "operating_manuals", "standards", "moc"):
+        assert sub in manifest["raw_subfolders"]
+
+
 def test_iap_jwt_middleware_enforcement(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _setup_bundle_env(monkeypatch, tmp_path)
     monkeypatch.setenv("IAP_JWT_ENFORCEMENT", "true")
