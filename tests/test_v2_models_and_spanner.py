@@ -342,6 +342,43 @@ def test_hybrid_rrf_search_uses_json_options_and_isolated_snapshots_on_ann_fallb
     assert "FORCE_INDEX=idx_okf_chunks_vec" in executed_sqls[0]
 
 
+def test_catalog_dossier_deduplicates_identical_pdf_across_multiple_fact_citations() -> None:
+    """Verify build_catalog_dossier collapses multiple fact citations for the same PDF+Rev into 1 entry with fact_count & highest-priority role."""
+    doc = {
+        "found": True,
+        "concept_id": "equipment/P-12",
+        "title": "Pump P-12",
+        "category": "equipment",
+        "unit": "Unit 1",
+        "frontmatter": {
+            "sources": [{"resource": "pid/ML101620329-part-1.pdf", "revision": "1"}],
+        },
+        "body_markdown": "# Pump P-12\nSee ML101620329-part-1.pdf.",
+    }
+    lineage_traces = [
+        {"filename": "ML101620329-part-1.pdf", "revision": "1", "source_role": "PRIMARY", "raw_citation_string": "[ML101620329-part-1.pdf, p. 1]"},
+        {"filename": "ML101620329-part-1.pdf", "revision": "1", "source_role": "PRIMARY", "raw_citation_string": "[ML101620329-part-1.pdf, p. 2]"},
+        {"filename": "ML101620329-part-1.pdf", "revision": "1", "source_role": "CONFLICTING", "raw_citation_string": "[ML101620329-part-1.pdf, Sheet 3]"},
+        {"filename": "ML101620329-part-1.pdf", "revision": "1", "source_role": "PRIMARY", "raw_citation_string": "[ML101620329-part-1.pdf, Sheet 4]"},
+    ]
+    parameters = [
+        {"source_filename": "ML101620329-part-1.pdf", "revision": "1", "source_role": "PRIMARY", "raw_citation_string": "[ML101620329-part-1.pdf, p. 1]"},
+    ]
+
+    dossier = SpannerGraphRepository.build_catalog_dossier(
+        concept_doc=doc,
+        lineage_traces=lineage_traces,
+        parameters=parameters,
+        fallback_tag="P-12",
+    )
+    src_docs = dossier["source_documents"]
+    assert len(src_docs) == 1
+    assert src_docs[0]["filename"] == "ML101620329-part-1.pdf"
+    assert src_docs[0]["revision"] == "1"
+    assert src_docs[0]["fact_count"] == 4
+    assert src_docs[0]["source_role"] == "CONFLICTING"
+
+
 def test_spanner_lazy_hierarchy_summary_and_paginated_items() -> None:
     repo = SpannerGraphRepository(use_in_memory=True)
     for i in range(1, 26):

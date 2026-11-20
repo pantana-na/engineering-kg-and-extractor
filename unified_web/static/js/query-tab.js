@@ -296,12 +296,28 @@ async function loadConceptDossier(tagOrId) {
           `<tr><td>${escapeHtml(p.parameter_name)}</td><td>${escapeHtml(p.parameter_value)} ${escapeHtml(p.parameter_unit || "")}</td><td>${p.has_conflict ? "CONFLICT" : "OK"}</td></tr>`
       )
       .join("");
-    const lineageHtml = (data.lineage_traces || [])
+    const dossierDocs = Array.isArray(data.catalog_dossier?.source_documents)
+      ? data.catalog_dossier.source_documents
+      : [];
+    const lineageSourceList = dossierDocs.length ? dossierDocs : (data.lineage_traces || []);
+    const seenLineage = new Set();
+    const dedupLineage = [];
+    for (const l of lineageSourceList) {
+      const fname = String(l.filename || l.document_name || l.source_id || "unknown");
+      const rev = String(l.revision || "");
+      const key = `${fname.toLowerCase()}|${rev.toLowerCase()}`;
+      if (seenLineage.has(key)) continue;
+      seenLineage.add(key);
+      dedupLineage.push(l);
+    }
+    const lineageHtml = dedupLineage
       .slice(0, 12)
-      .map(
-        (l) =>
-          `<li><code>${escapeHtml(l.filename || l.source_id)}</code> ${renderRoleBadge(l.source_role)}</li>`
-      )
+      .map((l) => {
+        const fname = l.filename || l.document_name || l.source_id || "unknown";
+        const rev = l.revision ? ` · Rev ${l.revision}` : "";
+        const fc = Number(l.fact_count || 0) > 0 ? ` · ${l.fact_count} fact${l.fact_count === 1 ? "" : "s"}` : "";
+        return `<li><code>${escapeHtml(fname)}</code>${escapeHtml(rev)}${escapeHtml(fc)} ${renderRoleBadge(l.source_role)}</li>`;
+      })
       .join("");
 
     el.innerHTML = `
@@ -342,13 +358,25 @@ async function loadDataplexCatalog(forceSync = false, focusTag = undefined) {
         : `<span class="wb-health-ok">VERIFIED · NO CONFLICTS</span>`;
       const srcDocs = Array.isArray(focused.source_documents) ? focused.source_documents : [];
       const traces = Array.isArray(focused.lineage_traces) ? focused.lineage_traces : [];
-      const docRows = (srcDocs.length ? srcDocs : traces)
-        .slice(0, 10)
+      const rawDocs = srcDocs.length ? srcDocs : traces;
+      const seenDocs = new Set();
+      const uniqueDocs = [];
+      for (const d of rawDocs) {
+        const fname = String(d.filename || d.document_name || d.source_id || "unknown");
+        const rev = String(d.revision || "");
+        const key = `${fname.toLowerCase()}|${rev.toLowerCase()}`;
+        if (seenDocs.has(key)) continue;
+        seenDocs.add(key);
+        uniqueDocs.push(d);
+      }
+      const docRows = uniqueDocs
+        .slice(0, 12)
         .map((d) => {
           const fname = d.filename || d.document_name || d.source_id || "unknown";
           const rev = d.revision ? ` · Rev ${d.revision}` : "";
+          const fc = Number(d.fact_count || 0) > 0 ? ` · ${d.fact_count} fact${d.fact_count === 1 ? "" : "s"}` : "";
           const role = d.source_role || d.role || "PRIMARY";
-          return `<li><code>${escapeHtml(fname)}</code>${escapeHtml(rev)} ${renderRoleBadge(role)}</li>`;
+          return `<li><code>${escapeHtml(fname)}</code>${escapeHtml(rev)}${escapeHtml(fc)} ${renderRoleBadge(role)}</li>`;
         })
         .join("");
 

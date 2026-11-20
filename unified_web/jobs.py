@@ -60,6 +60,9 @@ class PipelineJobDispatcher:
         self._lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._idempotency: dict[str, tuple[float, str]] = {}
+        self._hydrated_at: float = 0.0
+        self._exec_cache_at: float = 0.0
+        self._exec_cache: list[dict[str, Any]] = []
         self._http_client_factory = http_client_factory
         self._token_provider = token_provider
 
@@ -67,6 +70,9 @@ class PipelineJobDispatcher:
         with self._lock:
             self._jobs.clear()
             self._idempotency.clear()
+            self._hydrated_at = 0.0
+            self._exec_cache_at = 0.0
+            self._exec_cache = []
 
     def _get_execution_backend(self) -> str:
         raw = os.getenv("CLOUD_RUN_JOBS_EXECUTION_MODE", "auto").strip().lower()
@@ -258,10 +264,190 @@ class PipelineJobDispatcher:
                 oldest = next(iter(self._jobs))
                 self._jobs.pop(oldest, None)
 
+        # Persist initial QUEUED record immediately so restarts/scale-to-zero never lose the job
+        self._persist_initial_heartbeat(execution_id, record.model_dump())
+
         return record, False
 
+    def _persist_initial_heartbeat(self, execution_id: str, payload: dict[str, Any]) -> None:
+        status_dir = Path(os.getenv("JOB_STATUS_DIR", str(JOB_STATUS_DIR)))
+        try:
+            status_dir.mkdir(parents=True, exist_ok=True)
+            (status_dir / f"{execution_id}.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.debug("Initial local heartbeat write notice: %s", exc)
+
+        cfg = get_config()
+        if cfg.use_gcs_storage:
+            try:
+                from google.cloud import storage
+
+                client = storage.Client(project=cfg.google_cloud_project)
+                bucket = client.bucket(cfg.destination_gcs_bucket)
+                prefix = cfg.destination_gcs_prefix.strip("/")
+                blob = bucket.blob(f"{prefix}/_job_status/{execution_id}.json")
+                blob.upload_from_string(
+                    json.dumps(payload, ensure_ascii=False),
+                    content_type="application/json",
+                )
+            except Exception as exc:
+                logger.debug("Initial GCS heartbeat write notice: %s", exc)
+
+    def _hydrate_from_storage(self, *, ttl_seconds: float = 5.0) -> None:
+        """Hydrate persisted `_job_status/*.json` records from local dir and GCS so jobs survive restarts."""
+        now = time.monotonic()
+        with self._lock:
+            if (now - self._hydrated_at) < ttl_seconds:
+                return
+            self._hydrated_at = now
+
+        loaded: list[dict[str, Any]] = []
+        status_dir = Path(os.getenv("JOB_STATUS_DIR", str(JOB_STATUS_DIR)))
+        if status_dir.is_dir():
+            for fp in sorted(status_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:25]:
+                try:
+                    obj = json.loads(fp.read_text(encoding="utf-8"))
+                    if isinstance(obj, dict) and obj.get("execution_id"):
+                        loaded.append(obj)
+                except Exception:
+                    continue
+
+        cfg = get_config()
+        if cfg.use_gcs_storage:
+            try:
+                from google.cloud import storage
+
+                client = storage.Client(project=cfg.google_cloud_project)
+                bucket = client.bucket(cfg.destination_gcs_bucket)
+                prefix = cfg.destination_gcs_prefix.strip("/")
+                blobs = [
+                    b
+                    for b in bucket.list_blobs(prefix=f"{prefix}/_job_status/")
+                    if b.name.endswith(".json")
+                ]
+                blobs.sort(key=lambda b: b.updated.timestamp() if b.updated else 0.0, reverse=True)
+                for blob in blobs[:25]:
+                    try:
+                        obj = json.loads(blob.download_as_text(encoding="utf-8"))
+                        if isinstance(obj, dict) and obj.get("execution_id"):
+                            loaded.append(obj)
+                    except Exception:
+                        continue
+            except Exception as exc:
+                logger.debug("GCS _job_status hydration notice: %s", exc)
+
+        if not loaded:
+            return
+        with self._lock:
+            for item in loaded:
+                eid = str(item["execution_id"])
+                existing = self._jobs.get(eid)
+                if existing is None:
+                    self._jobs[eid] = item
+                else:
+                    # Merge keeping whichever record has the newer updated_at timestamp
+                    if str(item.get("updated_at") or "") >= str(existing.get("updated_at") or ""):
+                        merged_summary = {
+                            **(existing.get("summary") or {}),
+                            **(item.get("summary") or {}),
+                        }
+                        self._jobs[eid] = {**existing, **item, "summary": merged_summary}
+
+    def _list_live_cloud_run_executions(self, *, ttl_seconds: float = 10.0) -> list[dict[str, Any]]:
+        """Query live Cloud Run Jobs v2 Executions API to reconcile cancelled/completed/failed states."""
+        if self._get_execution_backend() != "cloud_run_job":
+            return []
+        if not os.getenv("K_SERVICE", "").strip() and self._http_client_factory is None:
+            return []
+        now = time.monotonic()
+        with self._lock:
+            if (now - self._exec_cache_at) < ttl_seconds and self._exec_cache:
+                return list(self._exec_cache)
+        try:
+            cfg = get_config()
+            job_name = self._get_job_name()
+            url = (
+                f"https://run.googleapis.com/v2/projects/{cfg.google_cloud_project}"
+                f"/locations/{cfg.google_cloud_location}/jobs/{job_name}/executions?pageSize=15"
+            )
+            token = self._get_access_token()
+            client = self._http_client_factory() if self._http_client_factory else httpx.Client(timeout=8.0)
+            with client:
+                resp = client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code >= 400:
+                return []
+            execs = list((resp.json() or {}).get("executions") or [])
+            with self._lock:
+                self._exec_cache_at = now
+                self._exec_cache = execs
+            return execs
+        except Exception as exc:
+            logger.debug("Cloud Run live execution reconcile notice: %s", exc)
+            return []
+
+    def _reconcile_cloud_run_status(self, merged: dict[str, Any], live_execs: list[dict[str, Any]]) -> dict[str, Any]:
+        """Reconcile a RUNNING/QUEUED heartbeat against live Cloud Run Job executions (handles external cancel/crash)."""
+        if merged.get("execution_backend") != "cloud_run_job" or merged.get("status") not in ("QUEUED", "RUNNING"):
+            return merged
+        if not live_execs:
+            return merged
+
+        recorded_name = str((merged.get("summary") or {}).get("cloud_run_execution") or "").strip()
+        matched: dict[str, Any] | None = None
+        if recorded_name:
+            for ex in live_execs:
+                if str(ex.get("name") or "") == recorded_name:
+                    matched = ex
+                    break
+        else:
+            # Match by closest creation timestamp within 120 seconds (for legacy heartbeats without cloud_run_execution)
+            try:
+                hb_dt = datetime.fromisoformat(str(merged.get("created_at") or "").replace("Z", "+00:00"))
+                best_diff = 120.0
+                for ex in live_execs:
+                    ex_ct = str(ex.get("createTime") or "")
+                    if not ex_ct:
+                        continue
+                    ex_dt = datetime.fromisoformat(ex_ct.replace("Z", "+00:00"))
+                    diff = abs((hb_dt - ex_dt).total_seconds())
+                    if diff < best_diff:
+                        best_diff = diff
+                        matched = ex
+            except Exception:
+                matched = None
+
+        if matched is None:
+            return merged
+
+        cancelled = int(matched.get("cancelledCount") or 0)
+        failed = int(matched.get("failedCount") or 0)
+        succeeded = int(matched.get("succeededCount") or 0)
+        running = int(matched.get("runningCount") or 0)
+        if running > 0:
+            return merged
+
+        updated = dict(merged)
+        if cancelled > 0:
+            updated["status"] = "CANCELLED"
+            updated["step"] = f"Execution cancelled ({str(matched.get('name') or '').split('/')[-1]})"
+            updated["completed_at"] = str(matched.get("completionTime") or _now_iso())
+        elif failed > 0:
+            updated["status"] = "FAILED"
+            updated["completed_at"] = str(matched.get("completionTime") or _now_iso())
+            if not updated.get("error"):
+                updated["error"] = "Cloud Run Job execution failed (check Cloud Logging)."
+        elif succeeded > 0:
+            updated["status"] = "SUCCEEDED"
+            updated["percent"] = 100.0
+            updated["completed_at"] = str(matched.get("completionTime") or _now_iso())
+        return updated
+
     def _read_status_heartbeat(self, execution_id: str) -> dict[str, Any] | None:
-        local_file = JOB_STATUS_DIR / f"{execution_id}.json"
+        status_dir = Path(os.getenv("JOB_STATUS_DIR", str(JOB_STATUS_DIR)))
+        local_file = status_dir / f"{execution_id}.json"
         if local_file.is_file():
             try:
                 return json.loads(local_file.read_text(encoding="utf-8"))
@@ -283,7 +469,7 @@ class PipelineJobDispatcher:
                 pass
         return None
 
-    def get_job(self, execution_id: str) -> PipelineJobStatus | None:
+    def get_job(self, execution_id: str, *, _live_execs: list[dict[str, Any]] | None = None) -> PipelineJobStatus | None:
         with self._lock:
             base = dict(self._jobs.get(execution_id) or {})
 
@@ -292,23 +478,40 @@ class PipelineJobDispatcher:
             return None
 
         merged = {**base, **(heartbeat or {})}
+        if base.get("summary") or (heartbeat and heartbeat.get("summary")):
+            merged["summary"] = {
+                **(base.get("summary") or {}),
+                **((heartbeat or {}).get("summary") or {}),
+            }
         if not merged.get("execution_id"):
             merged["execution_id"] = execution_id
+
+        if merged.get("status") in ("QUEUED", "RUNNING") and merged.get("execution_backend") == "cloud_run_job":
+            execs = _live_execs if _live_execs is not None else self._list_live_cloud_run_executions()
+            merged = self._reconcile_cloud_run_status(merged, execs)
+
         with self._lock:
             self._jobs[execution_id] = merged
         return PipelineJobStatus(**merged)
 
     def list_jobs(self, limit: int = 20) -> list[PipelineJobStatus]:
+        self._hydrate_from_storage()
         with self._lock:
             ids = list(self._jobs.keys())
+        has_active_cr = any(
+            self._jobs.get(eid, {}).get("status") in ("QUEUED", "RUNNING")
+            and self._jobs.get(eid, {}).get("execution_backend") == "cloud_run_job"
+            for eid in ids
+        )
+        live_execs = self._list_live_cloud_run_executions() if has_active_cr else []
+
         items: list[PipelineJobStatus] = []
-        for eid in reversed(ids):
-            st_obj = self.get_job(eid)
+        for eid in ids:
+            st_obj = self.get_job(eid, _live_execs=live_execs)
             if st_obj is not None:
                 items.append(st_obj)
-            if len(items) >= limit:
-                break
-        return items
+        items.sort(key=lambda j: str(j.created_at or ""), reverse=True)
+        return items[:limit]
 
 
 JOB_DISPATCHER = PipelineJobDispatcher()

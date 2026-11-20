@@ -2920,8 +2920,14 @@ class SpannerGraphRepository:
             "bundle_gcs_uri": str(doc.get("bundle_gcs_uri") or fm.get("resource") or ""),
         }
 
-        # Aggregate & deduplicate Source PDFs from frontmatter.sources, entity_metadata, lineage_traces, parameters, and markdown citations
+        # Aggregate & deduplicate Source PDFs by canonical (filename, revision) across frontmatter, lineage_traces, parameters, and markdown citations
         docs_by_key: dict[str, dict[str, Any]] = {}
+        _ROLE_PRIORITY = {
+            "PRIMARY": 1,
+            "PENDING_REDRAFT": 2,
+            "CONFLICTING": 3,
+            "MOC_AUTHORITY": 4,
+        }
 
         def _upsert_pdf(
             path_or_file: str,
@@ -2930,6 +2936,7 @@ class SpannerGraphRepository:
             role: str = "PRIMARY",
             md5: str = "",
             gcs: str = "",
+            count_fact: bool = False,
         ) -> None:
             if not (path_or_file or code or gcs):
                 return
@@ -2941,11 +2948,36 @@ class SpannerGraphRepository:
                 md5_hash=md5,
                 gcs_uri=gcs,
             )
-            dedup_key = (meta["doc_code"] or meta["filename"]).upper()
+            fname_base = Path(str(meta.get("filename") or "")).name.strip().lower()
+            norm_rev = str(meta.get("revision") or "").strip().upper()
+            if norm_rev in ("", "Z1", "UNKNOWN"):
+                norm_rev_key = ""
+            else:
+                norm_rev_key = norm_rev
+            if fname_base and "." in fname_base:
+                dedup_key = f"file:{fname_base}|rev:{norm_rev_key}"
+                # Also merge into an existing entry with the same filename if one lacked revision
+                if dedup_key not in docs_by_key:
+                    fallback_key = f"file:{fname_base}|rev:"
+                    if norm_rev_key and fallback_key in docs_by_key:
+                        dedup_key = fallback_key
+                    elif not norm_rev_key:
+                        for existing_k in docs_by_key:
+                            if existing_k.startswith(f"file:{fname_base}|rev:"):
+                                dedup_key = existing_k
+                                break
+            else:
+                code_norm = str(meta.get("doc_code") or fname_base).strip().upper()
+                dedup_key = f"code:{code_norm}|rev:{norm_rev_key}"
+
             existing = docs_by_key.get(dedup_key)
             if existing:
-                if meta["source_role"] == "CONFLICTING":
-                    existing["source_role"] = "CONFLICTING"
+                if count_fact:
+                    existing["fact_count"] = int(existing.get("fact_count") or 0) + 1
+                new_role = str(meta.get("source_role") or "PRIMARY").upper()
+                cur_role = str(existing.get("source_role") or "PRIMARY").upper()
+                if _ROLE_PRIORITY.get(new_role, 1) > _ROLE_PRIORITY.get(cur_role, 1):
+                    existing["source_role"] = new_role
                 if meta["md5_hash"] and not existing.get("md5_hash"):
                     existing["md5_hash"] = meta["md5_hash"]
                 if meta["revision"] and existing.get("revision") in ("", "Z1"):
@@ -2955,6 +2987,7 @@ class SpannerGraphRepository:
                     existing["doc_type"] = meta["doc_type"]
                     existing["resource_path"] = meta["resource_path"]
                 return
+            meta["fact_count"] = 1 if count_fact else 0
             docs_by_key[dedup_key] = meta
 
         fm_sources = fm.get("sources")
@@ -2965,7 +2998,7 @@ class SpannerGraphRepository:
                         path_or_file=str(s.get("resource") or s.get("filename") or s.get("title") or ""),
                         code=str(s.get("doc_code") or s.get("id") or ""),
                         rev=str(s.get("revision") or meta_rev_str or ""),
-                        role="PRIMARY",
+                        role=str(s.get("source_role") or s.get("role") or "PRIMARY"),
                     )
                 elif isinstance(s, str):
                     _upsert_pdf(path_or_file=s, rev=meta_rev_str, role="PRIMARY")
@@ -2992,39 +3025,33 @@ class SpannerGraphRepository:
                         _upsert_pdf(path_or_file=md_item.strip(), rev=meta_rev_str, role="PRIMARY")
 
         for tr in lineage_traces:
-            role_val = (
-                "CONFLICTING"
-                if str(tr.get("source_role") or "").upper() == "CONFLICTING"
-                else str(tr.get("source_role") or "PRIMARY")
-            )
+            role_val = str(tr.get("source_role") or "PRIMARY").upper()
+            clean_src_code = str(tr.get("doc_code") or tr.get("source_id") or "").removeprefix("SRC:")
             _upsert_pdf(
-                path_or_file=str(tr.get("filename") or tr.get("raw_citation_string") or tr.get("source_id") or ""),
-                code=str(tr.get("raw_citation_string") or tr.get("source_id") or ""),
+                path_or_file=str(tr.get("filename") or tr.get("source_id") or ""),
+                code=clean_src_code,
                 rev=str(tr.get("revision") or ""),
                 role=role_val,
                 md5=str(tr.get("md5_hash") or ""),
                 gcs=str(tr.get("gcs_uri") or ""),
+                count_fact=True,
             )
 
         for p in parameters:
-            if p.get("source_filename") or p.get("filename") or p.get("doc_code") or p.get("raw_citation_string"):
-                role_val = (
-                    "CONFLICTING"
-                    if str(p.get("source_role") or "").upper() == "CONFLICTING"
-                    else str(p.get("source_role") or "PRIMARY")
-                )
+            if p.get("source_filename") or p.get("filename") or p.get("doc_code"):
+                role_val = str(p.get("source_role") or "PRIMARY").upper()
                 _upsert_pdf(
                     path_or_file=str(
                         p.get("source_filename")
                         or p.get("filename")
-                        or p.get("raw_citation_string")
                         or p.get("doc_code")
                         or ""
                     ),
-                    code=str(p.get("doc_code") or p.get("raw_citation_string") or ""),
+                    code=str(p.get("doc_code") or ""),
                     rev=str(p.get("revision") or ""),
                     role=role_val,
                     gcs=str(p.get("gcs_uri") or ""),
+                    count_fact=False,
                 )
 
         wiki_links_list = doc.get("wiki_links") or []

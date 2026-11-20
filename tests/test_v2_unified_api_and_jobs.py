@@ -620,6 +620,92 @@ def test_multimodal_streaming_with_hydrogen_fallback_and_1page_pid_window(
     assert "Pages 1–1 of 3" in out and "Pages 3–3 of 3" in out
 
 
+def test_pipeline_job_dispatcher_hydrates_persisted_jobs_and_reconciles_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify a fresh PipelineJobDispatcher hydrates persisted _job_status/*.json after restart & reconciles CANCELLED Cloud Run jobs."""
+    _setup_bundle_env(monkeypatch, tmp_path, n_okf=2)
+    monkeypatch.setenv("CLOUD_RUN_JOBS_EXECUTION_MODE", "cloud_run_job")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "engineering-kg-demo")
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "asia-southeast1")
+
+    status_dir = tmp_path / "job_status"
+    status_dir.mkdir(parents=True, exist_ok=True)
+    # Job 1 (older, externally cancelled in Cloud Run Jobs)
+    (status_dir / "job-old111.json").write_text(
+        json.dumps(
+            {
+                "execution_id": "job-old111",
+                "job_name": "okf-pipeline-job",
+                "job_mode": "extract_and_sync",
+                "model": "gemini-4-carbon",
+                "sync_mode": "FULL_MIRROR",
+                "purge": False,
+                "status": "RUNNING",
+                "execution_backend": "cloud_run_job",
+                "triggered_by": "admin@example.com",
+                "step": "[3/11] Extracting...",
+                "percent": 9.1,
+                "created_at": "2026-11-20T07:30:42+00:00",
+                "updated_at": "2026-11-20T08:07:49+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Job 2 (newer, actively running in Cloud Run Jobs)
+    (status_dir / "job-new222.json").write_text(
+        json.dumps(
+            {
+                "execution_id": "job-new222",
+                "job_name": "okf-pipeline-job",
+                "job_mode": "extract_and_sync",
+                "model": "gemini-4-carbon",
+                "sync_mode": "FULL_MIRROR",
+                "purge": False,
+                "status": "RUNNING",
+                "execution_backend": "cloud_run_job",
+                "triggered_by": "admin@example.com",
+                "step": "[2/11] Extracting...",
+                "percent": 4.5,
+                "created_at": "2026-11-20T10:23:21+00:00",
+                "updated_at": "2026-11-20T10:36:22+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _mock_execs(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "executions": [
+                    {
+                        "name": "projects/engineering-kg-demo/locations/asia-southeast1/jobs/okf-pipeline-job/executions/okf-pipeline-job-whzcn",
+                        "createTime": "2026-11-20T10:23:02Z",
+                        "runningCount": 1,
+                    },
+                    {
+                        "name": "projects/engineering-kg-demo/locations/asia-southeast1/jobs/okf-pipeline-job/executions/okf-pipeline-job-bwkzj",
+                        "createTime": "2026-11-20T07:30:14Z",
+                        "cancelledCount": 1,
+                        "completionTime": "2026-11-20T10:14:12Z",
+                    },
+                ]
+            },
+        )
+
+    # Fresh dispatcher simulating container restart / scale-to-zero (empty self._jobs!)
+    fresh_dispatcher = PipelineJobDispatcher(
+        http_client_factory=lambda: httpx.Client(transport=httpx.MockTransport(_mock_execs)),
+        token_provider=lambda: "fake-token",
+    )
+    jobs = fresh_dispatcher.list_jobs(limit=10)
+    assert [j.execution_id for j in jobs] == ["job-new222", "job-old111"]
+    assert jobs[0].status == "RUNNING"
+    assert jobs[1].status == "CANCELLED"
+
+
 def test_multimodal_execution_context_propagates_model_and_progress_to_worker_threads() -> None:
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
