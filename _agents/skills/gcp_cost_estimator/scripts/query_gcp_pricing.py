@@ -42,7 +42,15 @@ KNOWN_SERVICES = {
     "datastream": "F7F6-DEBD-DB7B",       # Datastream
     "memorystore": "5440-F92D-6F40",      # Memorystore (Redis)
     "monitoring": "58CD-22C9-F11B",       # Cloud Monitoring
-    "logging": "95FF-2EF5-5EA1",          # Cloud Logging
+    "cloud monitoring": "58CD-22C9-F11B",
+    "logging": "5490-F7B7-8DF6",          # Cloud Logging
+    "cloud logging": "5490-F7B7-8DF6",
+    "artifact registry": "149C-F9EC-3994",# Artifact Registry
+    "artifactregistry": "149C-F9EC-3994",
+    "cloud build": "2447-B3B8-5089",      # Cloud Build
+    "cloudbuild": "2447-B3B8-5089",
+    "secret manager": "EE65-9A9E-227C",   # Secret Manager
+    "secretmanager": "EE65-9A9E-227C",
 }
 
 

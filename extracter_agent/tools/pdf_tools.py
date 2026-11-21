@@ -1,4 +1,4 @@
-"""ADK FunctionTools for PDF document processing.
+"""ADK FunctionTools for multi-format raw engineering document processing.
 
 Strictly complies with Rule 11 (FunctionTool docstring contracts, type safety).
 """
@@ -19,10 +19,15 @@ from google.cloud import storage
 
 from extracter_agent.config import get_config
 from extracter_agent.pdf.processor import (
+    IMAGE_RAW_EXTENSIONS,
+    SUPPORTED_RAW_EXTENSIONS,
+    TABULAR_OR_DOCX_RAW_EXTENSIONS,
     extract_equipment_tag_candidates,
+    extract_image_multimodal_summary,
     extract_pdf_multimodal_summary,
     extract_pdf_pages,
     get_pdf_metadata,
+    is_supported_raw_file,
     is_vector_drawing,
     search_raw_documents,
 )
@@ -42,7 +47,7 @@ def _compute_file_md5_b64(path: Path) -> str:
 
 
 def _list_gcs_raw_blobs(force_refresh: bool = False) -> list[dict[str, Any]]:
-    """List and cache raw PDF object metadata from Google Cloud Storage with a short TTL."""
+    """List and cache supported raw engineering object metadata from Google Cloud Storage with a short TTL."""
     global _GCS_RAW_BLOBS_CACHE, _GCS_RAW_BLOBS_CACHE_ID, _GCS_RAW_BLOBS_CACHE_TS
     now = time.monotonic()
     if not force_refresh and _GCS_RAW_BLOBS_CACHE is not None:
@@ -59,7 +64,7 @@ def _list_gcs_raw_blobs(force_refresh: bool = False) -> list[dict[str, Any]]:
     prefix = cfg.source_gcs_raw_prefix.strip("/") + "/"
     items: list[dict[str, Any]] = []
     for blob in bucket.list_blobs(prefix=prefix):
-        if blob.name.lower().endswith(".pdf"):
+        if is_supported_raw_file(blob.name):
             rel_under_raw = blob.name[len(prefix) :]
             parts = rel_under_raw.split("/")
             sub = parts[0] if len(parts) > 1 else ""
@@ -226,11 +231,14 @@ def find_raw_documents_tool(
     query: str,
     subfolder: str | None = None,
 ) -> dict[str, Any]:
-    """Search and discover raw engineering technical documents in Google Cloud Storage (reference/raw/).
+    """Search and discover raw engineering technical documents in Google Cloud Storage or local reference/raw/.
+
+    Supports .pdf, .xlsx, .xlsm, .csv, .docx, .png, .jpg, .jpeg, and .webp across
+    data_sheets, pid, pfd, operating_manuals, standards, and moc.
 
     When to use:
-        - When discovering raw PDF files for an equipment tag, drawing number,
-          or document category (e.g. data_sheets, pid, pfd) before starting extraction.
+        - When discovering raw engineering files (PDFs, Excel workbooks/checklists, Word procedures/MOCs,
+          or diagram images) for an equipment tag, drawing number, or document category before starting extraction.
         - Example: find_raw_documents_tool(query="<EQUIPMENT_TAG>")
 
     When NOT to use:
@@ -240,7 +248,7 @@ def find_raw_documents_tool(
 
     Args:
         query: Equipment tag, document code, or keyword to search.
-        subfolder: Optional subdirectory to scope search (data_sheets, pid, pfd, operating_manuals, standards).
+        subfolder: Optional subdirectory to scope search (data_sheets, pid, pfd, operating_manuals, standards, moc).
 
     Returns:
         A dictionary containing matched files, counts, GCS URIs, and relative paths.
@@ -354,47 +362,78 @@ def process_raw_pdf_tool(
     start_page: int = 1,
     page_query: str | None = None,
 ) -> dict[str, Any]:
-    """Extract text, tables, and document metadata from a raw engineering PDF in GCS (reference/raw/).
+    """Extract text, structured tables, formulas, and document metadata from a raw engineering file in GCS or reference/raw/.
+
+    Supports .pdf, .xlsx, .xlsm, .csv, .docx, .png, .jpg, .jpeg, and .webp across
+    data_sheets, pid, pfd, operating_manuals, standards, and moc.
 
     When to use:
-        - When ingesting process data sheets, P&IDs, PFDs, standards, or operating manuals
-          from the reference/raw directory in GCS to extract chemical engineering knowledge.
+        - When ingesting process data sheets, P&IDs, PFDs, standards, Excel checklists/risk matrices (.xlsx/.xlsm),
+          Word procedures/MOC dossiers (.docx), CSV tables (.csv), or standalone diagram images (.png/.jpg/.webp)
+          from the reference/raw directory to extract chemical engineering knowledge.
         - Example: process_raw_pdf_tool("<PROCESS_DATA_SHEET>.pdf", "data_sheets")
 
     When NOT to use:
         - Do NOT use for already processed Markdown files in reference/wiki/.
         - Do NOT use for general conversational queries unrelated to document ingestion.
-        - Do NOT attempt to modify or delete the source PDF file.
+        - Do NOT attempt to modify or delete the source file.
 
     Args:
-        pdf_filename: The filename or relative path of the PDF.
-        subfolder: The subdirectory under reference/raw (e.g. data_sheets, pid, pfd, operating_manuals, standards).
-        max_pages: Maximum pages to process (default: 150, covering full multi-sheet datasheets, 136-page valve packages, and standards).
-        enable_multimodal: Whether to run Gemini multimodal vision for vector drawings, data sheets, or scanned tables (default: True).
-        start_page: 1-indexed starting page number (default: 1).
-        page_query: Optional keyword filter to prioritize specific sections or tags within large manuals.
+        pdf_filename: The filename or relative path of the raw document (.pdf, .xlsx, .xlsm, .csv, .docx, .png, .jpg, .jpeg, .webp).
+        subfolder: The subdirectory under reference/raw (e.g. data_sheets, pid, pfd, operating_manuals, standards, moc).
+        max_pages: Maximum pages or worksheets to process (default: 150).
+        enable_multimodal: Whether to run Gemini multimodal vision for vector drawings, PDF tables, or standalone images (default: True).
+        start_page: 1-indexed starting page or worksheet number (default: 1).
+        page_query: Optional keyword filter to prioritize specific sections, sheets, or tags within large documents.
 
     Returns:
         A dictionary containing metadata, source GCS URI, extracted pages, vector drawing status, and identified equipment tag candidates.
     """
+    if not pdf_filename or ".." in pdf_filename or "\x00" in pdf_filename or "\\" in pdf_filename:
+        return {
+            "status": "error",
+            "error": f"Invalid pdf_filename: {pdf_filename}",
+            "pages": [],
+        }
+
     cfg = get_config()
     raw_dir = cfg.reference_raw_dir
+    raw_root = raw_dir.resolve()
+    temp_root = Path(tempfile.gettempdir()).resolve()
     target_path: Path | None = None
     source_gcs_uri: str | None = None
 
-    if cfg.use_gcs_storage:
+    if cfg.use_gcs_storage and not pdf_filename.startswith("/"):
         try:
             target_path, source_gcs_uri = _download_pdf_from_gcs(pdf_filename, subfolder)
         except Exception:
             target_path = None
 
     if target_path is None:
-        if (raw_dir / subfolder / pdf_filename).exists():
-            target_path = raw_dir / subfolder / pdf_filename
-        elif (raw_dir / pdf_filename).exists():
-            target_path = raw_dir / pdf_filename
-        elif Path(pdf_filename).exists():
-            target_path = Path(pdf_filename)
+        cand_sub = (raw_dir / subfolder / pdf_filename).resolve() if not pdf_filename.startswith("/") else None
+        cand_raw = (raw_dir / pdf_filename).resolve() if not pdf_filename.startswith("/") else None
+        cand_direct = Path(pdf_filename).resolve()
+        if (
+            cand_sub is not None
+            and cand_sub.is_relative_to(raw_root)
+            and cand_sub.is_file()
+            and is_supported_raw_file(cand_sub)
+        ):
+            target_path = cand_sub
+        elif (
+            cand_raw is not None
+            and cand_raw.is_relative_to(raw_root)
+            and cand_raw.is_file()
+            and is_supported_raw_file(cand_raw)
+        ):
+            target_path = cand_raw
+        elif (
+            cand_direct.is_file()
+            and cand_direct.suffix.lower() in SUPPORTED_RAW_EXTENSIONS
+            and is_supported_raw_file(cand_direct)
+            and (cand_direct.is_relative_to(raw_root) or cand_direct.is_relative_to(temp_root))
+        ):
+            target_path = cand_direct
         else:
             local_candidates = [
                 {
@@ -402,7 +441,8 @@ def process_raw_pdf_tool(
                     "subfolder": p.parent.name if p.parent != raw_dir else "",
                     "path": p,
                 }
-                for p in sorted(raw_dir.rglob("*.pdf"))
+                for p in sorted(raw_dir.rglob("*"))
+                if p.is_file() and is_supported_raw_file(p)
             ]
             matched_local = _match_pdf_candidate(pdf_filename, subfolder, local_candidates)
             if matched_local is not None:
@@ -410,11 +450,12 @@ def process_raw_pdf_tool(
             else:
                 return {
                     "status": "error",
-                    "error": f"PDF file not found in GCS or {raw_dir}: {pdf_filename}",
+                    "error": f"Raw engineering file not found in GCS or {raw_dir}: {pdf_filename}",
                     "pages": [],
                 }
 
     try:
+        ext = target_path.suffix.lower()
         meta = get_pdf_metadata(target_path)
         pages = extract_pdf_pages(target_path)
         limited_pages = _select_document_pages(
@@ -429,11 +470,37 @@ def process_raw_pdf_tool(
         # Check if drawing is an AutoCAD vector graphic with empty text stream
         is_vector = is_vector_drawing(target_path)
 
-        # Universal multimodal visual analysis when enable_multimodal is True:
-        # 1. Vector drawings or documents with minimal native text (<100 chars)
-        # 2. All other documents with native text (extracting embedded tables, sketches, and structured rows)
         multimodal_text = None
-        if enable_multimodal and (is_vector or len(full_text.strip()) < 100):
+        if ext in TABULAR_OR_DOCX_RAW_EXTENSIONS:
+            # Native OOXML/CSV extraction yields 100% lossless structured Markdown tables & formulas
+            multimodal_text = None
+        elif ext in IMAGE_RAW_EXTENSIONS:
+            if enable_multimodal:
+                multimodal_text = extract_image_multimodal_summary(
+                    target_path,
+                    prompt_hint=(
+                        f"Exhaustively transcribe every table cell, row, column, axis, risk level, "
+                        f"legend, and engineering note from {target_path.name}"
+                    ),
+                )
+                img_page_text = (
+                    f"[Multimodal Visual Interpretation of {target_path.name}]:\n{multimodal_text}"
+                )
+                if limited_pages:
+                    limited_pages[0]["text"] = img_page_text
+                    limited_pages[0]["char_count"] = len(img_page_text)
+                    limited_pages[0]["word_count"] = len(img_page_text.split())
+                else:
+                    limited_pages.append(
+                        {
+                            "page_number": 1,
+                            "text": img_page_text,
+                            "char_count": len(img_page_text),
+                            "word_count": len(img_page_text.split()),
+                        }
+                    )
+                full_text = multimodal_text
+        elif enable_multimodal and (is_vector or len(full_text.strip()) < 100):
             mm_kwargs: dict[str, Any] = {
                 "prompt_hint": f"Extract complete engineering data for drawing {target_path.stem}",
             }
@@ -534,7 +601,7 @@ def process_raw_pdf_tool(
     except Exception as e:
         return {
             "status": "error",
-            "error": f"Failed to process PDF {target_path}: {e}",
+            "error": f"Failed to process raw document {target_path}: {e}",
             "pages": [],
         }
 

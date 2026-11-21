@@ -8,7 +8,7 @@ This directory holds the raw engineering PDF source documents ingested by **Agen
 
 ## 📁 Canonical Subfolder Structure
 
-All raw PDFs must be placed inside one of the **5 canonical category subfolders** (both locally under `reference/raw/` and in Google Cloud Storage under `gs://<DESTINATION_GCS_BUCKET>/reference/raw/`):
+All raw PDFs must be placed inside one of the **6 canonical category subfolders** (both locally under `reference/raw/` and in Google Cloud Storage under `gs://<DESTINATION_GCS_BUCKET>/reference/raw/`):
 
 | Subfolder | Document Types | Examples |
 | :--- | :--- | :--- |
@@ -17,6 +17,7 @@ All raw PDFs must be placed inside one of the **5 canonical category subfolders*
 | [`pfd/`](./pfd/README.md) | Process Flow Diagrams (PFDs), Material Selection Diagrams (MSDs), and Heat & Material Balance (H&MB) sheets | `PFD-23-0001_Cumene_Fractionation_Z1.pdf` |
 | [`operating_manuals/`](./operating_manuals/README.md) | Plant Operating Manuals, Equipment Inspection & Maintenance Manuals, Startup/Shutdown SOPs | `Inspection_Manual_for_Heat_Exchangers_1.pdf`, `OM-2300_Fractionation_Operating_Manual_R2.pdf` |
 | [`standards/`](./standards/README.md) | Engineering Standards, HAZOP Guides, Risk Assessment Matrices (RAM), SIS Cause & Effect Matrices, Safety Data Sheets (SDS) | `HAZOP_Training_Guide.pdf`, `Risk_Assessment_Matrix.pdf`, `SDS-Cumene_Hydroperoxide_R1.pdf` |
+| [`moc/`](./moc/README.md) | Approved Management of Change (MOC), Engineering Change Notices (ECN), and Field Change Requests (FCR) | `MOC-2026-042_D2304_Quench_and_Setpoint_Upgrade_R1.pdf` |
 
 ---
 

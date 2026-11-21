@@ -1,44 +1,29 @@
-# Operational & Skill Documentation (`docs/`)
+# Operational & Architecture Documentation (`docs/`)
 
-This directory houses operational audit reports, security assessment logs, cloud infrastructure cost models, and standalone visual architecture assets produced by agent skills.
+This directory contains standardized operational architecture documentation, security audit reports, and interactive standalone HTML/SVG visual assets for the **OKF Engineering Knowledge Workbench v2**.
 
 ## Separation of Documentation Responsibilities
-
-This repository maintains a strict boundary between specification documents and operational reports:
-- **Spec-Driven Development Artifacts ([`specs/`](../specs/)):** Baseline models, formal feature specifications, test designs, and living plan execution reports.
-- **Skill-Generated Operational Artifacts ([`docs/`](./)):** Generated security audits, real-time GCP cost estimations, and interactive architecture visual assets.
+- **Master Specification & Living Execution Plan ([`specs/`](../specs/)):** Authoritative baseline ([`specs/baseline/system-overview.md`](../specs/baseline/system-overview.md)) and unified master feature SDD + living progress plan ([`specs/features/SPEC-20261120-UNIFIED-WORKBENCH-V2.md`](../specs/features/SPEC-20261120-UNIFIED-WORKBENCH-V2.md)).
+- **Operational Docs & Visual Assets ([`docs/`](./)):** Consolidated architecture & demo guide, CodeMender SAST & security audit summary, and standalone HTML/SVG diagrams.
 
 ---
 
-## Artifact Catalog & Standard Naming Conventions
+## Document & Visual Asset Catalog
 
-### 1. Visual Architecture Diagrams ([`architecture-diagram`](../_agents/skills/architecture_diagram/SKILL.md))
-- **Markdown Architecture Document:** `docs/<topic>-architecture.md`
-- **Interactive Standalone HTML/SVG Asset:** `docs/<topic>-architecture.html`
-- **Focus:** System topology, Cloud Run proxies, Gemini Enterprise Agent Platform runtime integration, data flows, and security zones.
-- **Published Deliverables:**
-  - [Data Ingestion Architecture Document (`docs/data-ingestion-architecture.md`)](./data-ingestion-architecture.md)
-  - [Interactive Standalone Data Ingestion Diagram (`docs/data-ingestion-architecture.html`)](./data-ingestion-architecture.html)
-  - [Multi-Source OKF Extraction Step-by-Step Architecture (`docs/multi-source-extraction-architecture.md`)](./multi-source-extraction-architecture.md)
-  - [Interactive Standalone Multi-Source Diagram Asset (`docs/multi-source-extraction-architecture.html`)](./multi-source-extraction-architecture.html)
-  - [OKF Query Agent Demo Mockup Baseline Specification (`docs/okf-query-agent-mockup-spec.md`)](./okf-query-agent-mockup-spec.md)
-  - [OKF Query Agent Interactive Single-File Demo Mockup UI (`docs/okf-query-agent-mockup.html`)](./okf-query-agent-mockup.html)
-  - [OKF Query Agent 5–7 Minute Executive Demo Script & Talking Points (`docs/okf-query-agent-demo-script.md`)](./okf-query-agent-demo-script.md)
+### 1. Demo Guide, Architecture & Data Ingestion
+- **[Complete Demo Guide (`demo-guide.md`)](./demo-guide.md):** Audience-friendly `go/demos` walkthrough covering setup, **Extractor Studio** (6 extraction mechanisms, upload, interactive & 24h batch jobs), **Query Agent** (graph, dossier, Dataplex, 5-stage HAZOP), **15+ copy-paste sample queries**, a **10–15 minute presenter Talk Track**, Org Policies, and Costs.
+- **[Unified Architecture, Ingestion & Demo Guide (`engineering-kg-workbench-architecture.md`)](./engineering-kg-workbench-architecture.md):** End-to-end Dual-Runtime topology, Zero-Trust Pattern 1B IAP, 6-folder multi-format & MOC ingestion pipeline, Cloud Spanner Enterprise Graph + native `ML.PREDICT` + ANN Vector Index, and 5-minute executive walkthrough.
+- **Interactive Standalone HTML/SVG Assets:**
+  - [`high-level-system-architecture.html`](./high-level-system-architecture.html) — High-level system architecture topology.
+  - [`data-ingestion-architecture.html`](./data-ingestion-architecture.html) — Multi-format ingestion & Spanner synchronization flow.
+  - [`okf-query-agent-mockup.html`](./okf-query-agent-mockup.html) — Interactive UI reference mockup.
 
-### 2. Static Security & SAST Audit Reports ([`codemender`](../_agents/skills/codemender/SKILL.md))
-- **Vulnerability Discovery Report:** `docs/codemender-01-vulnerability-scan-report.md` (`cm find`)
-- **Exploit Verification & PoC Triage:** `docs/codemender-02-verification-report.md` (`cm verify`)
-- **Remediation & Patch Diff Report:** `docs/codemender-03-remediation-report.md` (`cm fix`)
-- **Master Security Audit Summary:** `docs/codemender-security-audit-summary.md`
-
-### 3. Cloud Cost Estimations ([`gcp-cost-estimator`](../_agents/skills/gcp_cost_estimator/SKILL.md))
-- **Workload Cost Analysis & Itemized BoM:** `docs/gcp_cost_estimate_<project_name>.md`
-- **Pricing Source Mandate:** Real-time rates queried strictly from the live Google Cloud Billing API or official live pricing endpoints (zero local caching).
-- **Structure:** Executive summary, category distribution, itemized BoM table with live SKU attributions, CUD savings (1-yr and 3-yr), and elicited workload parameters.
+### 2. Security & SAST Audit Summary
+- **[CodeMender SAST & Security Audit Summary (`codemender-security-audit-summary.md`)](./codemender-security-audit-summary.md):** Consolidated vulnerability scan results (`0` findings), PyJWT ES256 JWK Set IAP enforcement, SAIF 2.0 4-point guardrails, and deterministic HITL verification.
 
 ---
 
-## Related Documentation
+## Related Governance
 - **Agent Operating Manual:** [`AGENTS.md`](../AGENTS.md)
-- **DevOps, Security & Quality Standards:** [`_agents/rules/devops_security_and_quality_standards.md`](../_agents/rules/devops_security_and_quality_standards.md)
-- **System Specifications:** [`specs/README.md`](../specs/README.md)
+- **AI-SDLC & SDD Governance Rules:** [`_agents/rules/`](../_agents/rules/)
+- **Master Spec & Plan Index:** [`specs/README.md`](../specs/README.md)

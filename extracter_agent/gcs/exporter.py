@@ -62,9 +62,11 @@ class GCSExporter:
         bundle_dir: Path | str,
         prefix: str | None = None,
         dry_run: bool = False,
+        seal_bundle: bool = True,
     ) -> dict[str, Any]:
         """Upload all bundle files from bundle_dir to gs://<bucket_name>/<prefix>/."""
         from extracter_agent.config import get_config
+        from extracter_agent.okf.indexer import write_bundle_completion_seal
 
         resolved_prefix = prefix if prefix is not None else get_config().destination_gcs_prefix
         root = Path(bundle_dir)
@@ -75,7 +77,9 @@ class GCSExporter:
         total_bytes = 0
 
         for file_path in root.rglob("*"):
-            if file_path.is_file():
+            if file_path.is_file() and not any(
+                part.startswith(".") for part in file_path.relative_to(root).parts
+            ):
                 rel_path = str(file_path.relative_to(root))
                 blob_name = get_blob_name(resolved_prefix, rel_path)
                 content_type = infer_content_type(file_path)
@@ -122,6 +126,16 @@ class GCSExporter:
 
             with ThreadPoolExecutor(max_workers=16) as pool:
                 uploaded_uris = list(pool.map(_upload_one, files_to_upload))
+
+            if seal_bundle:
+                write_bundle_completion_seal(
+                    root,
+                    metadata={
+                        "bucket": self.bucket_name,
+                        "prefix": resolved_prefix,
+                        "files_count": len(files_to_upload),
+                    },
+                )
         else:
             for _, blob_name, _ in files_to_upload:
                 uploaded_uris.append(f"gs://{self.bucket_name}/{blob_name}")

@@ -40,8 +40,10 @@ from extracter_agent.agent.guardrails import (
 )
 from extracter_agent.agent.orchestrator import create_extracter_agent
 from extracter_agent.config import get_config
+from extracter_agent.deploy_config import get_safe_cloud_run_posture
 from extracter_agent.models.intent import IntentCategory
 from extracter_agent.okf.document import OKFDocument
+from extracter_agent.pdf.processor import get_raw_mime_type, is_supported_raw_file
 from extracter_agent.tools.okf_tools import (
     inspect_existing_okf_concept_tool,
     validate_okf_bundle_tool,
@@ -66,6 +68,7 @@ ALLOWED_RAW_SUBFOLDERS = {
     "pfd",
     "operating_manuals",
     "standards",
+    "moc",
 }
 
 _LAST_GCS_SYNC_TS: float = 0.0
@@ -267,8 +270,8 @@ def list_all_raw_pdfs() -> list[dict[str, Any]]:
         raw_dir = (REPO_ROOT / raw_dir).resolve()
 
     if raw_dir.exists():
-        for p in sorted(raw_dir.rglob("*.pdf")):
-            if not p.is_file():
+        for p in sorted(raw_dir.rglob("*")):
+            if not p.is_file() or not is_supported_raw_file(p):
                 continue
             rel = p.relative_to(raw_dir).as_posix()
             parts = p.relative_to(raw_dir).parts
@@ -413,7 +416,7 @@ def resolve_pdf_source_links(
             for pdf in raw_pdfs:
                 if stem and (
                     stem in pdf["file_name"].lower()
-                    or pdf["file_name"].lower().removesuffix(".pdf") in stem
+                    or Path(pdf["file_name"]).stem.lower() in stem
                 ):
                     matched_pdf = pdf
                     break
@@ -477,8 +480,6 @@ class LiveExtractRequest(BaseModel):
 
 def create_web_app() -> FastAPI:
     """Create the standalone FastAPI application serving the 3-Pane Split Engineering Workbench."""
-    ensure_bundle_seeded()
-
     app = FastAPI(
         title="OKF v0.2 Engineering Extraction Workbench",
         version="2.0.0",
@@ -574,6 +575,7 @@ def create_web_app() -> FastAPI:
             "region": cfg.google_cloud_location,
             "gemini_location": cfg.gemini_location,
             "gemini_model": cfg.gemini_model,
+            "cloud_run_posture": get_safe_cloud_run_posture("EXTRACTER_WEB"),
             "gcs_bucket": f"gs://{cfg.destination_gcs_bucket}",
             "gcs_raw_prefix": cfg.source_gcs_raw_prefix,
             "gcs_prefix": cfg.destination_gcs_prefix,
@@ -664,6 +666,8 @@ def create_web_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid raw PDF subfolder")
         if ".." in filename or filename.startswith("/"):
             raise HTTPException(status_code=400, detail="Invalid filename path")
+        if not is_supported_raw_file(filename):
+            raise HTTPException(status_code=400, detail="Unsupported raw document format")
 
         cfg = get_config()
         raw_dir = cfg.reference_raw_dir
@@ -684,13 +688,13 @@ def create_web_app() -> FastAPI:
             if downloaded_path and downloaded_path.is_file():
                 target = downloaded_path
 
-        if not target.is_file():
-            raise HTTPException(status_code=404, detail="Raw PDF file not found")
+        if not target.is_file() or not is_supported_raw_file(target):
+            raise HTTPException(status_code=404, detail="Raw document file not found")
 
         safe_name = target.name
         return FileResponse(
             path=str(target),
-            media_type="application/pdf",
+            media_type=get_raw_mime_type(target),
             headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
         )
 
@@ -786,10 +790,27 @@ def create_web_app() -> FastAPI:
     async def parse_raw_pdf_endpoint(req: ParsePdfRequest) -> dict[str, Any]:
         if req.subfolder not in ALLOWED_RAW_SUBFOLDERS:
             raise HTTPException(status_code=400, detail="Invalid subfolder")
-        if ".." in req.pdf_filename:
+        clean_pdf = req.pdf_filename.strip()
+        if (
+            not clean_pdf
+            or ".." in clean_pdf
+            or clean_pdf.startswith("/")
+            or "\\" in clean_pdf
+            or "\x00" in clean_pdf
+        ):
             raise HTTPException(status_code=400, detail="Invalid pdf_filename")
+
+        cfg = get_config()
+        raw_dir = cfg.reference_raw_dir
+        if not raw_dir.is_absolute():
+            raw_dir = (REPO_ROOT / raw_dir).resolve()
+        scoped_dir = (raw_dir / req.subfolder).resolve()
+        target = (scoped_dir / clean_pdf).resolve()
+        if not target.is_relative_to(scoped_dir):
+            raise HTTPException(status_code=400, detail="Invalid pdf_filename")
+
         return process_raw_pdf_tool(
-            pdf_filename=req.pdf_filename,
+            pdf_filename=target.name,
             subfolder=req.subfolder,
             max_pages=req.max_pages,
             enable_multimodal=req.enable_multimodal,

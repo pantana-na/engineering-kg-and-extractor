@@ -5,6 +5,7 @@ Transforms extracted domain entities into fully conformant OKF v0.2 concept docu
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,8 @@ from extracter_agent.models.domain import (
     EquipmentEntity,
     HazardEntity,
     InstrumentLoop,
+    MOCChangeRecord,
+    _extract_equipment_base_id,
     derive_canonical_equipment_tag,
     is_nozzle_mark_only,
     sanitize_tag_filename,
@@ -29,7 +32,96 @@ def _slugify(text: str) -> str:
     return re.sub(r"[-\s]+", "-", s).strip("-")
 
 
-_INST_REGISTER_CACHE: dict[tuple[str, int, int, int], list[tuple[Path, str, set[str]]]] = {}
+_INST_REGISTER_CACHE: dict[
+    tuple[str, int, int, int],
+    list[tuple[Path, str, set[str], set[str], set[str]]],
+] = {}
+
+_GENERIC_REGISTER_STOPWORDS: set[str] = {
+    "cdn",
+    "unit",
+    "control",
+    "instrument",
+    "instruments",
+    "instrumentation",
+    "system",
+    "systems",
+    "process",
+    "section",
+    "high",
+    "low",
+    "alarm",
+    "normal",
+    "general",
+    "local",
+    "loop",
+    "loops",
+    "data",
+    "sheet",
+    "sheets",
+    "register",
+    "specification",
+    "specifications",
+    "summary",
+    "table",
+    "overview",
+    "plant",
+    "equipment",
+    "monitoring",
+    "service",
+    "services",
+}
+
+
+def _strip_unit_infix(tag_str: str) -> str:
+    """Strip a 2-to-4 digit unit number infix from an ISA tag (e.g., 'uxv-23-1204' -> 'uxv-1204')."""
+    return re.sub(r"^([a-z]{1,6})-\d{2,4}-(\d{2,5}[a-z0-9]*)$", r"\1-\2", tag_str)
+
+
+def _extract_register_primary_keys(raw_text: str) -> set[str]:
+    """Extract normalized primary-key instrument tags from Markdown table first columns and level-3 headings."""
+    pkeys: set[str] = set()
+    isa_tok_re = re.compile(r"\b(?:\d+-)?[a-z]{1,6}-(?:\d{2,4}-)?\d{2,5}[a-z0-9]*\b")
+
+    def _add_tag_variants(tok: str) -> None:
+        t = tok.strip().lower()
+        if not t:
+            return
+        pkeys.add(t)
+        no_lead = re.sub(r"^\d+-", "", t)
+        pkeys.add(no_lead)
+        pkeys.add(_strip_unit_infix(no_lead))
+        base_loop = re.sub(r"[a-z]+$", "", no_lead)
+        if base_loop and len(base_loop) >= 4:
+            pkeys.add(base_loop)
+            pkeys.add(_strip_unit_infix(base_loop))
+
+    for line in raw_text.splitlines():
+        s = line.strip()
+        if s.startswith("### "):
+            heading_txt = re.sub(r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", s[4:]).strip().lower()
+            for tok in isa_tok_re.findall(heading_txt):
+                _add_tag_variants(tok)
+        elif s.startswith("|") and s.endswith("|"):
+            cells = [c.strip() for c in s.split("|")[1:-1]]
+            if not cells:
+                continue
+            c0 = re.sub(r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", cells[0]).strip().lower()
+            c0 = c0.replace("**", "").replace("`", "").strip()
+            if not c0 or c0 in ("tag", "loop", "instrument", "instrument tag", "tag number", "item", "---", ":---"):
+                continue
+            if re.match(r"^[:\-]+$", c0):
+                continue
+            base_c0 = c0.split("(")[0].strip()
+            if base_c0:
+                _add_tag_variants(base_c0)
+            for part in re.split(r"[/,;]+", base_c0):
+                part_cl = part.strip()
+                if part_cl:
+                    _add_tag_variants(part_cl)
+            for tok in isa_tok_re.findall(c0):
+                _add_tag_variants(tok)
+    return pkeys
 
 
 def resolve_bundle_instrument_link(
@@ -40,10 +132,11 @@ def resolve_bundle_instrument_link(
 ) -> str | None:
     """Dynamically resolve an instrument loop tag to an existing file in bundle_root/instruments/.
 
-    Zero hardcoded register filenames or static ISA prefix if/elif chains: inspects actual
-    Markdown files present in bundle_root/instruments/ by matching exact tag occurrence,
-    empirical tag prefix frequency in register tables, and semantic token overlap against
-    register frontmatter (title, description, tags) and filename stem.
+    Prioritizes:
+    1. Direct single-instrument concept file match (`<tag>.md`).
+    2. Primary-key match in register Markdown tables (first column) and H3 headings.
+    3. Specific numbered tag match in register prose (only when the register is domain/prefix compatible).
+    4. Empirical ISA prefix frequency across register primary keys + domain token overlap.
     When bundle_root is None, returns the default bundle-relative tag URI.
     """
     safe_inst_tag = sanitize_tag_filename(inst_tag)
@@ -91,57 +184,347 @@ def resolve_bundle_instrument_link(
                 fm = doc.frontmatter
                 fm_meta_str = f"{fm.get('title', '')} {fm.get('description', '')} {' '.join(str(t) for t in (fm.get('tags') or []))}"
             except Exception:
+                raw_text = ""
                 content_lower = ""
                 fm_meta_str = ""
-            reg_tokens = set(re.findall(r"[a-z]{2,}", f"{reg.stem} {fm_meta_str}".lower()))
-            cached_regs.append((reg, content_lower, reg_tokens))
+            stem_tokens = set(re.findall(r"[a-z]{2,}", reg.stem.lower())) - _GENERIC_REGISTER_STOPWORDS
+            reg_tokens = (
+                set(re.findall(r"[a-z]{2,}", f"{reg.stem} {fm_meta_str}".lower()))
+                - _GENERIC_REGISTER_STOPWORDS
+            )
+            primary_keys = _extract_register_primary_keys(raw_text)
+            cached_regs.append((reg, content_lower, reg_tokens, stem_tokens, primary_keys))
         _INST_REGISTER_CACHE[cache_key] = cached_regs
 
     clean_probe = inst_tag.split("/")[0].split("(")[0].strip().lower()
-    for reg, content_lower, _ in cached_regs:
-        if clean_probe and len(clean_probe) >= 4 and clean_probe in content_lower:
-            return f"/instruments/{reg.name}"
+    stripped_probe = re.sub(r"^\d+-", "", clean_probe)
+    no_infix_probe = _strip_unit_infix(stripped_probe)
+    range_head_probe = re.split(r"\.\.|~|to", no_infix_probe)[0].strip()
+
+    # Also extract any embedded ISA tag inside parentheses (e.g. 'BL (LT-23-1301)' -> 'lt-23-1301', 'lt-1301')
+    embedded_isa_probes: list[str] = []
+    for m_emb in re.finditer(r"\b(?:\d+-)?([a-z]{1,6}-(?:\d{2,4}-)?\d{2,5}[a-z0-9]*)\b", inst_tag.lower()):
+        emb = m_emb.group(1)
+        embedded_isa_probes.append(emb)
+        embedded_isa_probes.append(_strip_unit_infix(emb))
 
     # Only allow fuzzy category fallback onto multi-instrument register files
-    # (never onto an unrelated single-instrument tag file like lt-0401.md, 1-re-2524.md, or pt-0401.md)
     single_tag_stem_re = re.compile(r"^(?:\d+-)?(?:[a-z]{1,4}-)?[a-z]{1,6}-\d+[a-z0-9]*$")
     register_candidates = [
         item for item in cached_regs if not single_tag_stem_re.match(item[0].stem.lower())
     ]
 
-    if register_candidates:
-        prefix_match = re.match(r"^([a-z]{1,4})", clean_probe)
+    # Strip explicit nozzle mark labels (e.g. 'Nozzle AX (TI)' -> '(TI)') before extracting ISA alpha codes
+    tag_for_alpha = re.sub(r"\bnozzle\s+[a-z0-9]{1,4}\b", "", inst_tag.lower()).strip()
+    raw_alpha_codes = [
+        m.group(1).lower()
+        for m in re.finditer(r"\b(?:\d+-)?([a-z]{1,5})(?:[-_\s]+\d|\b)", tag_for_alpha)
+        if m.group(1).lower() not in ("high", "low", "ll", "hh", "min", "max", "and", "or", "to", "in", "on", "nozzle", "tap", "taps", "off", "rev", "relief")
+    ]
+    p_code = raw_alpha_codes[0] if raw_alpha_codes else ""
+    if not p_code:
+        prefix_match = re.match(r"^(?:\d+-)?([a-z]{1,5})", clean_probe)
         p_code = prefix_match.group(1) if prefix_match else ""
-        inferred_terms: set[str] = set(
-            re.findall(r"[a-z]{2,}", f"{p_code} {instrument_type} {service}".lower())
+    active_codes = list(dict.fromkeys(raw_alpha_codes or ([p_code] if p_code else [])))
+
+    # Map common ISA instrument letters/codes to semantic engineering domain keywords
+    isa_domain_hints: list[str] = []
+    probe_and_meta = f"{tag_for_alpha} {instrument_type} {service}".lower()
+    for code_tok in active_codes:
+        if code_tok in ("bs", "ls", "lsh", "lsl", "lshh", "lsll", "lxshh", "lxsll", "lt", "lxt", "li", "lic", "lg", "lgr", "lcv"):
+            isa_domain_hints.extend(["level", "bridle", "float"])
+        elif code_tok in ("ro", "fo", "fe", "ft", "fxt", "fi", "fic", "fcv", "fsh", "fsl", "fxsl", "fxsll", "fm"):
+            isa_domain_hints.extend(["flow", "orifice", "rotameter", "coriolis"])
+        elif code_tok in ("psv", "pzv", "tsv", "pse", "pvrv", "bdv"):
+            isa_domain_hints.extend(["relief", "safety", "pressure", "vacuum", "valves"])
+        elif code_tok in ("pi", "pt", "pxt", "pic", "pdi", "pdt", "pdic", "pg", "ps", "psh", "psl", "pcv"):
+            isa_domain_hints.extend(["pressure", "differential"])
+        elif code_tok in ("ti", "tt", "txt", "tic", "te", "tw", "tsh", "tsl", "tshh", "tsll", "txshh", "txsll", "tdt", "tdxt", "tcv", "rtd", "tah", "tal"):
+            isa_domain_hints.extend(["temperature", "thermocouple", "thermowell", "rtd"])
+        elif code_tok in ("ai", "at", "ay", "aic", "ae", "as", "gc", "ph", "orp"):
+            isa_domain_hints.extend(["analyzers", "analyzer", "analytical"])
+        elif code_tok in ("sn", "sc", "ss", "sp"):
+            isa_domain_hints.extend(["sampling", "sample", "stations"])
+        elif code_tok in ("vi", "vt", "ve", "vxt", "vsh", "vshh", "vs"):
+            isa_domain_hints.extend(["vibration", "monitoring"])
+        elif code_tok in ("xv", "uxv", "uv", "uz", "uy", "uxy", "uc", "hv", "fv", "lv", "pv", "tv", "mov", "sov"):
+            isa_domain_hints.extend(["valves", "valve", "interlocks", "esd", "sis"])
+        elif code_tok in ("hs", "hss", "mcc"):
+            isa_domain_hints.extend(["pump", "motor", "schematics"])
+
+    meta_only_terms: set[str] = (
+        set(re.findall(r"[a-z]{2,}", f"{instrument_type} {service}".lower()))
+        - _GENERIC_REGISTER_STOPWORDS
+    )
+    inferred_terms: set[str] = (
+        set(re.findall(r"[a-z]{2,}", f"{probe_and_meta} {' '.join(isa_domain_hints)}"))
+        - _GENERIC_REGISTER_STOPWORDS
+    )
+
+    def _score_register_candidate(
+        reg: Path,
+        content_lower: str,
+        reg_tokens: set[str],
+        stem_tokens: set[str],
+        primary_keys: set[str],
+    ) -> float:
+        stem_overlap = len(inferred_terms & stem_tokens)
+        unmatched_stem_tokens = len(stem_tokens - inferred_terms)
+        meta_overlap = len(inferred_terms & reg_tokens)
+        pkey_exact_prefix = (
+            max(
+                (
+                    sum(
+                        1
+                        for pk in primary_keys
+                        if re.match(rf"^(?:\d+-)?{re.escape(c_tok)}[-_0-9]", pk)
+                    )
+                    for c_tok in active_codes
+                ),
+                default=0,
+            )
+            if active_codes
+            else 0
+        )
+        pkey_family_prefix = (
+            max(
+                (
+                    sum(
+                        1
+                        for pk in primary_keys
+                        if re.match(rf"^(?:\d+-)?{re.escape(c_tok[:1])}[a-z]{{0,4}}[-_0-9]", pk)
+                    )
+                    for c_tok in active_codes
+                ),
+                default=0,
+            )
+            if active_codes
+            else 0
+        )
+        prose_prefix_hits = (
+            max(
+                (
+                    len(re.findall(rf"\b(?:\d+-)?{re.escape(c_tok)}[-_0-9]", content_lower))
+                    for c_tok in active_codes
+                ),
+                default=0,
+            )
+            if active_codes
+            else 0
+        )
+        return (
+            (stem_overlap * 15.0)
+            - (unmatched_stem_tokens * 2.0)
+            + (meta_overlap * 4.0)
+            + (pkey_exact_prefix * 8.0)
+            + (pkey_family_prefix * 1.5)
+            + min(10.0, prose_prefix_hits * 0.5)
         )
 
+    # When caller supplies a numbered tag with zero informative service/type terms (e.g. generic placeholder),
+    # only link to a specific register file if the tag literally appears in that register; otherwise fall back to index.md
+    if not meta_only_terms and clean_probe and re.search(r"\d{2,}", clean_probe):
+        literal_pat = re.compile(rf"(?<![a-z0-9]){re.escape(clean_probe)}(?![a-z0-9])")
+        lit_matches: list[tuple[float, Path]] = []
+        for reg, content_lower, reg_tokens, stem_tokens, primary_keys in cached_regs:
+            if literal_pat.search(content_lower):
+                lit_matches.append(
+                    (
+                        _score_register_candidate(
+                            reg, content_lower, reg_tokens, stem_tokens, primary_keys
+                        ),
+                        reg,
+                    )
+                )
+        if lit_matches:
+            lit_matches.sort(key=lambda item: item[0], reverse=True)
+            return f"/instruments/{lit_matches[0][1].name}"
+        if (inst_dir / "index.md").exists():
+            return "/instruments/index.md"
+        return f"/instruments/{reg_files[0].name}"
+
+    # Tier 1: Exact Primary-Key match in register tables / H3 headings
+    pkey_matches: list[tuple[float, Path]] = []
+    all_pkey_probes = [
+        p for p in (clean_probe, stripped_probe, no_infix_probe, range_head_probe, *embedded_isa_probes)
+        if p and len(p) >= 3
+    ]
+    for reg, content_lower, reg_tokens, stem_tokens, primary_keys in cached_regs:
+        for probe_cand in all_pkey_probes:
+            if probe_cand in primary_keys:
+                pkey_matches.append(
+                    (
+                        _score_register_candidate(
+                            reg, content_lower, reg_tokens, stem_tokens, primary_keys
+                        ),
+                        reg,
+                    )
+                )
+                break
+    if pkey_matches:
+        pkey_matches.sort(key=lambda item: item[0], reverse=True)
+        return f"/instruments/{pkey_matches[0][1].name}"
+
+    # Tier 2: Specific numbered tag occurrence in register prose (only when register is domain/prefix compatible)
+    if clean_probe and len(clean_probe) >= 4 and re.search(r"\d{2,}", clean_probe):
+        prose_matches: list[tuple[float, Path]] = []
+        probe_variants = list(dict.fromkeys([clean_probe, stripped_probe, no_infix_probe]))
+        probe_pats = [
+            re.compile(rf"(?<![a-z0-9]){re.escape(pv)}(?![a-z0-9])")
+            for pv in probe_variants
+            if pv and len(pv) >= 4
+        ]
+        for reg, content_lower, reg_tokens, stem_tokens, primary_keys in cached_regs:
+            if any(pat.search(content_lower) for pat in probe_pats):
+                is_single_reg = single_tag_stem_re.match(reg.stem.lower()) is not None
+                stem_overlap = len(inferred_terms & stem_tokens)
+                pkey_exact_prefix = (
+                    max(
+                        (
+                            sum(
+                                1
+                                for pk in primary_keys
+                                if re.match(rf"^(?:\d+-)?{re.escape(c_tok)}[-_0-9]", pk)
+                            )
+                            for c_tok in active_codes
+                        ),
+                        default=0,
+                    )
+                    if active_codes
+                    else 0
+                )
+                if is_single_reg or stem_overlap > 0 or pkey_exact_prefix > 0:
+                    prose_matches.append(
+                        (
+                            _score_register_candidate(
+                                reg, content_lower, reg_tokens, stem_tokens, primary_keys
+                            ),
+                            reg,
+                        )
+                    )
+        if prose_matches:
+            prose_matches.sort(key=lambda item: item[0], reverse=True)
+            return f"/instruments/{prose_matches[0][1].name}"
+
+    # Tier 3: Multi-instrument register scoring by primary-key prefix distribution + domain overlap
+    if register_candidates:
         best_reg: Path | None = None
         best_score = 0.0
-        for reg, content_lower, reg_tokens in register_candidates:
-            overlap = len(inferred_terms & reg_tokens)
-            exact_prefix_hits = (
-                len(re.findall(rf"\b{re.escape(p_code)}[-_0-9]", content_lower))
-                if p_code
-                else 0
+        for reg, content_lower, reg_tokens, stem_tokens, primary_keys in register_candidates:
+            score = _score_register_candidate(
+                reg, content_lower, reg_tokens, stem_tokens, primary_keys
             )
-            family_prefix_hits = (
-                len(re.findall(rf"\b{re.escape(p_code[:2])}[a-z]{{0,2}}[-_0-9]", content_lower))
-                if len(p_code) >= 2
-                else 0
-            )
-            score = (overlap * 5.0) + (exact_prefix_hits * 3.0) + (family_prefix_hits * 0.5)
             if score > best_score:
                 best_score = score
                 best_reg = reg
 
-        if best_reg is not None:
+        if best_reg is not None and best_score > 0.0:
             return f"/instruments/{best_reg.name}"
+        if (inst_dir / "index.md").exists():
+            return "/instruments/index.md"
         return f"/instruments/{register_candidates[0][0].name}"
 
     if (inst_dir / "index.md").exists():
         return "/instruments/index.md"
     return f"/instruments/{cached_regs[0][0].name}"
+
+
+_EQUIP_SLUG_RESOLVE_CACHE: dict[tuple[str, int, int, int], dict[str, str | None]] = {}
+_EQUIP_DIR_INDEX_CACHE: dict[tuple[str, int, int, int], tuple[dict[str, str], dict[str, str]]] = {}
+
+
+def _resolve_bundle_equipment_slug(raw_tag: str, bundle_root: Path | None) -> str | None:
+    """Resolve an equipment tag token against bundle_root/equipment/*.md using exact stem, alias, or base-ID matching."""
+    if bundle_root is None:
+        return None
+    equip_dir = bundle_root / "equipment"
+    if not equip_dir.is_dir():
+        return None
+    clean = sanitize_tag_filename(raw_tag).upper()
+    if not clean:
+        return None
+
+    direct = equip_dir / f"{clean}.md"
+    if direct.exists():
+        return direct.stem
+
+    stems: list[str] = []
+    max_child_ns = 0
+    with os.scandir(equip_dir) as it:
+        for de in it:
+            if not de.name.endswith(".md") or de.name in ("index.md", "log.md") or not de.is_file():
+                continue
+            st_ns = de.stat().st_mtime_ns
+            if st_ns > max_child_ns:
+                max_child_ns = st_ns
+            stems.append(de.name[:-3])
+
+    dir_key = (os.path.abspath(equip_dir), equip_dir.stat().st_mtime_ns, len(stems), max_child_ns)
+    memo = _EQUIP_SLUG_RESOLVE_CACHE.setdefault(dir_key, {})
+    probe_token = raw_tag.strip()
+    if probe_token in memo:
+        return memo[probe_token]
+
+    idx_pair = _EQUIP_DIR_INDEX_CACHE.get(dir_key)
+    if idx_pair is None:
+        by_upper: dict[str, str] = {}
+        by_base: dict[str, str] = {}
+        for stem in sorted(stems):
+            st_up = stem.upper()
+            by_upper[st_up] = stem
+            b_id = _extract_equipment_base_id(st_up)
+            if b_id:
+                prev = by_base.get(b_id)
+                if prev is None or len(stem) > len(prev):
+                    by_base[b_id] = stem
+        idx_pair = (by_upper, by_base)
+        _EQUIP_DIR_INDEX_CACHE[dir_key] = idx_pair
+
+    by_upper, by_base = idx_pair
+    if clean in by_upper:
+        memo[probe_token] = by_upper[clean]
+        return by_upper[clean]
+    base_id = _extract_equipment_base_id(clean)
+    if base_id and base_id in by_base:
+        memo[probe_token] = by_base[base_id]
+        return by_base[base_id]
+
+    alias_cand = derive_canonical_equipment_tag(raw_tag, bundle_root=bundle_root)
+    if alias_cand.upper() in by_upper:
+        resolved_stem = by_upper[alias_cand.upper()]
+        memo[probe_token] = resolved_stem
+        return resolved_stem
+    alias_file = equip_dir / f"{alias_cand}.md"
+    if alias_file.exists():
+        memo[probe_token] = alias_file.stem
+        return alias_file.stem
+    memo[probe_token] = None
+    return None
+
+
+def format_equipment_endpoint_cell(
+    raw_endpoint: str | None,
+    bundle_root: Path | None,
+) -> str:
+    """Format an equipment endpoint cell with clickable Markdown links to canonical /equipment/<Slug>.md files."""
+    if not raw_endpoint or raw_endpoint.strip() in ("", "—"):
+        return "—"
+    unlinked = re.sub(r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", raw_endpoint.strip())
+    if bundle_root is None or not (bundle_root / "equipment").exists():
+        return unlinked
+
+    def _replace_tag(m: re.Match[str]) -> str:
+        tok = m.group(0)
+        slug = _resolve_bundle_equipment_slug(tok, bundle_root)
+        if slug:
+            return f"[{tok}](/equipment/{slug}.md)"
+        return tok
+
+    return re.sub(
+        r"\b(?:[A-Z]{1,4}-\d{3,5}[A-Z0-9]*(?:/[A-Z0-9]+)*)\b",
+        _replace_tag,
+        unlinked,
+    )
 
 
 def synthesize_equipment_concept(
@@ -178,11 +561,16 @@ def synthesize_equipment_concept(
             }
         )
 
+    clean_func_summary = deduplicate_engineering_prose(entity.function_summary)
+    short_description = (
+        deduplicate_engineering_prose(clean_func_summary, max_sentences=2)
+        or f"{entity.name} in {entity.unit} unit."
+    )
+
     frontmatter: dict[str, Any] = {
         "type": "Equipment Concept",
         "title": f"{entity.tag} — {entity.name}",
-        "description": entity.function_summary
-        or f"{entity.name} in {entity.unit} unit.",
+        "description": short_description,
         "resource": resource_uri,
         "tags": sorted(
             set(
@@ -208,6 +596,26 @@ def synthesize_equipment_concept(
         },
     }
 
+    if entity.aliases:
+        frontmatter["entity_metadata"]["aliases"] = list(dict.fromkeys(entity.aliases))
+    if entity.superseded_sources:
+        frontmatter["entity_metadata"]["superseded_sources"] = list(
+            dict.fromkeys(entity.superseded_sources)
+        )
+    if entity.removed_instruments:
+        frontmatter["entity_metadata"]["removed_instruments"] = list(
+            dict.fromkeys(entity.removed_instruments)
+        )
+    if entity.removed_connections:
+        frontmatter["entity_metadata"]["removed_connections"] = list(
+            dict.fromkeys(entity.removed_connections)
+        )
+    if entity.moc_history:
+        frontmatter["entity_metadata"]["moc_history"] = [
+            m.model_dump() if isinstance(m, MOCChangeRecord) else dict(m)
+            for m in entity.moc_history
+        ]
+
     if entity.instruments:
         frontmatter["entity_metadata"]["instruments"] = [
             {
@@ -227,8 +635,14 @@ def synthesize_equipment_concept(
             {
                 "stream_id": conn.stream_id,
                 "direction": conn.direction,
-                "source_tag": conn.source_tag,
-                "target_tag": conn.target_tag,
+                "source_tag": re.sub(
+                    r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", conn.source_tag or ""
+                )
+                or None,
+                "target_tag": re.sub(
+                    r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", conn.target_tag or ""
+                )
+                or None,
                 "line_size": conn.line_size,
                 "inline_components": list(conn.inline_components or []),
                 "temperature": conn.temperature,
@@ -245,7 +659,7 @@ def synthesize_equipment_concept(
         "",
         "## Function",
         "",
-        entity.function_summary,
+        clean_func_summary,
         "",
     ]
 
@@ -326,8 +740,8 @@ def synthesize_equipment_concept(
         )
         for conn in entity.connections:
             direction_val = conn.direction or "—"
-            src_val = conn.source_tag or "—"
-            tgt_val = conn.target_tag or "—"
+            src_val = format_equipment_endpoint_cell(conn.source_tag, bundle_root)
+            tgt_val = format_equipment_endpoint_cell(conn.target_tag, bundle_root)
             lsize_val = conn.line_size or "—"
             inline_val = (
                 ", ".join(conn.inline_components) if conn.inline_components else "—"
@@ -351,6 +765,52 @@ def synthesize_equipment_concept(
         )
         for h in entity.hazards:
             body_lines.append(f"- {h}")
+        body_lines.append("")
+
+    # Management of Change (MOC) & Revision History
+    if (
+        entity.moc_history
+        or entity.superseded_sources
+        or entity.removed_instruments
+        or entity.removed_connections
+    ):
+        body_lines.extend(
+            [
+                "## Management of Change (MOC) & Revision History",
+                "",
+            ]
+        )
+        if entity.moc_history:
+            body_lines.extend(
+                [
+                    "| MOC / Change ID | Date | Change Type | Summary | Affected Items | Pending Redraft Drawings |",
+                    "| :--- | :--- | :--- | :--- | :--- | :--- |",
+                ]
+            )
+            for m in entity.moc_history:
+                m_obj = m if isinstance(m, MOCChangeRecord) else MOCChangeRecord(**dict(m))
+                aff = ", ".join(m_obj.affected_items) if m_obj.affected_items else "—"
+                pend = (
+                    ", ".join(m_obj.pending_redraft_drawings)
+                    if m_obj.pending_redraft_drawings
+                    else "—"
+                )
+                body_lines.append(
+                    f"| {m_obj.moc_id} | {m_obj.date or '—'} | {m_obj.change_type} | {m_obj.summary} | {aff} | {pend} |"
+                )
+            body_lines.append("")
+        if entity.superseded_sources:
+            body_lines.append(
+                f"- **Superseded Documents Retired:** {', '.join(entity.superseded_sources)}"
+            )
+        if entity.removed_instruments:
+            body_lines.append(
+                f"- **Decommissioned / Removed Instruments:** {', '.join(entity.removed_instruments)}"
+            )
+        if entity.removed_connections:
+            body_lines.append(
+                f"- **Decommissioned / Removed Process Streams:** {', '.join(entity.removed_connections)}"
+            )
         body_lines.append("")
 
     # Markdown footnotes for sources
@@ -502,7 +962,12 @@ def _normalize_base_source_id(src: str) -> str:
     # Strip parenthetical or inline revision qualifiers: 'Rev Z0', 'Rev. 1', '(Rev A)', '_Z1', '-R3'
     s = re.sub(r"\([^)]*(?:rev(?:ision)?\.?\s*[a-z0-9]+)[^)]*\)", "", s)
     s = re.sub(r"\b(?:rev(?:ision)?\.?\s*[a-z0-9]+)\b", "", s)
-    s = re.sub(r"(?:_z[0-9a-z]+|[-_]r[0-9]+|[-_]rev[0-9a-z]+)$", "", s)
+    s = re.sub(
+        r"[_-](?:z\d{1,2}[a-z0-9]*|r\d{1,2}[a-z0-9]*|rev[0-9a-z]+|as[-_]*built|ifc|draft)$",
+        "",
+        s,
+    )
+    s = re.sub(r"_(?:[a-oq-y]\d{1,2}[a-z0-9]*)$", "", s)
     if "_" in s and "-" in s.split("_")[0]:
         s = s.split("_")[0]
     m_code = re.search(
@@ -510,17 +975,300 @@ def _normalize_base_source_id(src: str) -> str:
         s,
     )
     base = m_code.group(1) if m_code else s
-    base = re.sub(r"(?:_z[0-9a-z]+|[-_]r[0-9]+|[-_]rev[0-9a-z]+)$", "", base)
+    base = re.sub(
+        r"(?:[-_\s]+(?:rev(?:ision)?\.?\s*[a-z0-9]+|z\d{1,2}[a-z0-9]*|r\d{1,2}[a-z0-9]*|as[-_\s]*built|ifc|draft))+$",
+        "",
+        base,
+    )
     return re.sub(r"[^a-z0-9]+", "", base)
 
 
-def _is_same_source_or_revision_update(old_src: str, new_src: str) -> bool:
+def extract_revision_token(src: str) -> str:
+    """Extract canonical revision token (e.g. 'AS-BUILT', 'IFC', 'Z1', 'R2', 'A1', 'DRAFT') from a source citation."""
+    if not src:
+        return ""
+    s = src.strip()
+    s_up = re.sub(r"_+", " ", s.upper())
+    if re.search(r"\bAS[-\s]*BUILT\b", s_up):
+        return "AS-BUILT"
+    if re.search(r"\b(?:IFC|ISSUED\s+FOR\s+CONSTRUCTION)\b", s_up):
+        return "IFC"
+    if re.search(r"\b(?:DRAFT|PRELIMINARY|IFR|IFA)\b", s_up):
+        return "DRAFT"
+
+    # Match explicit 'Rev Z1', 'Rev. 2', '(Rev A)', 'Rev A2', 'Revision 03'
+    m_rev = re.search(
+        r"\bREV(?:ISION)?\.?\s*([A-Z]?\d+[A-Z0-9]*|[A-Z])\b",
+        s_up,
+    )
+    if m_rev:
+        tok = m_rev.group(1).strip()
+        if re.match(r"^\d+$", tok):
+            return f"R{int(tok)}"
+        return tok
+
+    # Match filename suffix patterns at the end of the stem like '_Z0', '_Z1', '-R2', '_A1'
+    stem = s.split("/")[-1].removesuffix(".pdf").removesuffix(".PDF")
+    m_suf = re.search(
+        r"(?:[_.\-\s(\[])(Z\d{1,2}[A-Z0-9]*|R\d{1,2}[A-Z0-9]*|[A-OQ-Y]\d{1,2}[A-Z0-9]*)[)\]]*$",
+        stem.upper(),
+    )
+    if m_suf:
+        return m_suf.group(1).strip()
+
+    return ""
+
+
+def _parse_revision_rank(rev_tok: str) -> tuple[int, int, str]:
+    """Map a canonical revision token to a comparable rank tuple (tier, numeric_ver, sub_suffix).
+
+    Tiers:
+      5: AS-BUILT (5, 1) / IFC (5, 0)
+      4: Z-series (Z0, Z1, Z2, ...)
+      3: Numeric R-series (R0, R1, R2, ...)
+      2: Alphabetic / Alphanumeric Preliminary (A, A1, A2, B, B1, ... Y)
+      1: DRAFT / PRELIMINARY
+      0: Unspecified
+    """
+    tok = (rev_tok or "").strip().upper()
+    if not tok:
+        return (0, 0, "")
+    if tok == "AS-BUILT":
+        return (5, 1, "")
+    if tok == "IFC":
+        return (5, 0, "")
+    if tok in ("DRAFT", "PRELIMINARY", "IFR", "IFA"):
+        return (1, 0, "")
+    m_z = re.match(r"^Z(\d+)([A-Z0-9]*)$", tok)
+    if m_z:
+        return (4, int(m_z.group(1)), m_z.group(2))
+    m_r = re.match(r"^R(\d+)([A-Z0-9]*)$", tok)
+    if m_r:
+        return (3, int(m_r.group(1)), m_r.group(2))
+    if re.match(r"^\d+$", tok):
+        return (3, int(tok), "")
+    m_alpha = re.match(r"^([A-OQ-Y])(\d+)?([A-Z0-9]*)$", tok)
+    if m_alpha:
+        letter_ord = ord(m_alpha.group(1)) - ord("A")
+        sub_num = int(m_alpha.group(2)) if m_alpha.group(2) is not None else 0
+        return (2, letter_ord * 100 + sub_num, m_alpha.group(3))
+    return (0, 0, tok)
+
+
+def compare_revision_tokens(old_src: str, new_src: str) -> int:
+    """Compare revision rank of old_src and new_src.
+
+    Returns:
+      +1 if new_src is strictly newer than old_src,
+      -1 if new_src is strictly older than old_src,
+       0 if equal or if revision order is indeterminate.
+    """
+    old_tok = extract_revision_token(old_src)
+    new_tok = extract_revision_token(new_src)
+    if not old_tok or not new_tok:
+        return 0
+    old_rank = _parse_revision_rank(old_tok)
+    new_rank = _parse_revision_rank(new_tok)
+    if new_rank > old_rank:
+        return 1
+    if new_rank < old_rank:
+        return -1
+    return 0
+
+
+def _is_strictly_older_same_doc_revision(old_src: str, new_src: str) -> bool:
+    """Return True if new_src is a strictly older revision of the same document than old_src.
+
+    Guards against false out-of-order rejection when synthetic or converted citations
+    switch between different middle revision numbering schemes (e.g. Z0 -> Rev 1 or -R1 -> Rev B).
+    """
+    if compare_revision_tokens(old_src, new_src) >= 0:
+        return False
+    old_tok = extract_revision_token(old_src)
+    new_tok = extract_revision_token(new_src)
+    old_rank = _parse_revision_rank(old_tok)
+    new_rank = _parse_revision_rank(new_tok)
+    if old_rank[0] == new_rank[0]:
+        return True
+    if new_rank[0] == 1 or old_rank[0] == 5:
+        return True
+    if new_tok.startswith("A") and old_rank[0] in (3, 4):
+        return True
+    return False
+
+
+def is_moc_source(src: str, explicit_moc_sources: set[str] | None = None) -> bool:
+    """Return True if src is an authoritative Management of Change (MOC / ECN / FCR) document.
+
+    Strictly enforces Boundary Guard #1: only matches explicit moc/ paths, MOC-/ECN-/FCR-
+    identifiers, or sources listed in explicit_moc_sources (never standard P&IDs, PFDs, or datasheets).
+    """
+    if not src:
+        return False
+    s_clean = src.strip()
+    s_low = s_clean.lower()
+    if explicit_moc_sources:
+        norm_explicit = {x.strip().lower() for x in explicit_moc_sources if x.strip()}
+        norm_explicit_base = {
+            _normalize_base_source_id(x) for x in explicit_moc_sources if x.strip()
+        } - {""}
+        for part in [s_low, *[p.strip().lower() for p in s_low.split(";") if p.strip()]]:
+            if part in norm_explicit or part.removeprefix("reference/raw/") in norm_explicit:
+                return True
+            part_base = _normalize_base_source_id(part)
+            if part_base and part_base in norm_explicit_base:
+                return True
+
+    if re.search(r"(?:^|/|\\)moc(?:/|\\)", s_low):
+        return True
+    if re.search(
+        r"\b(?:moc|ecn|fcr|pcr|dcn)[-_#\s]*(?:\d{2,}|[a-z0-9]{2,}[-_]\d+)",
+        s_low,
+    ):
+        return True
+    if re.search(
+        r"\b(?:management\s+of\s+change|engineering\s+change\s+notice|field\s+change\s+request)\b",
+        s_low,
+    ):
+        return True
+    return False
+
+
+_PROSE_STOPWORDS: set[str] = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "into",
+    "that",
+    "this",
+    "are",
+    "was",
+    "were",
+    "has",
+    "have",
+    "had",
+    "its",
+    "via",
+    "which",
+    "where",
+    "while",
+    "during",
+    "under",
+    "between",
+    "through",
+    "within",
+    "serves",
+    "used",
+    "designed",
+    "provides",
+    "operates",
+}
+
+
+def deduplicate_engineering_prose(
+    text: str,
+    max_sentences: int | None = None,
+) -> str:
+    """Eliminate exact and near-duplicate sentences in multi-turn engineering prose while preserving 100% of unique tags and numerical facts."""
+    if not text or not text.strip():
+        return ""
+    cleaned = re.sub(r"\s+", " ", text.strip())
+    # Protect common engineering abbreviations before sentence splitting
+    protected = re.sub(
+        r"\b(e\.g|i\.e|wt|vol|deg|ca|approx|fig|no|rev|sh|min|max|abs|atm|vs|st|dr|mr|eq)\.",
+        r"\1<DOT>",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    raw_sentences = [
+        s.replace("<DOT>", ".").strip()
+        for s in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\[⚠️🔄])", protected)
+        if s.strip()
+    ]
+    if not raw_sentences:
+        return cleaned
+
+    kept: list[tuple[str, str, set[str], set[str]]] = []
+    # Each entry: (sentence_text, norm_str, content_words, eng_facts)
+    for sent in raw_sentences:
+        norm_s = re.sub(r"[^a-z0-9]+", " ", sent.lower()).strip()
+        if not norm_s:
+            continue
+        words = {
+            w
+            for w in re.findall(r"[a-z0-9]{2,}", sent.lower())
+            if w not in _PROSE_STOPWORDS
+        }
+        eng_facts = set(
+            re.findall(
+                r"\b(?:(?:\d+-)?[a-z]{1,4}-\d{3,5}[a-z0-9]*|\d+(?:\.\d+)?%?)\b",
+                sent.lower(),
+            )
+        )
+
+        is_dup = False
+        for idx, (k_sent, k_norm, k_words, k_facts) in enumerate(kept):
+            if norm_s == k_norm or norm_s in k_norm:
+                is_dup = True
+                break
+            if k_norm in norm_s:
+                kept[idx] = (sent, norm_s, words, eng_facts)
+                is_dup = True
+                break
+            if words and k_words:
+                min_len = max(1, min(len(words), len(k_words)))
+                union_len = max(1, len(words | k_words))
+                overlap_ratio = len(words & k_words) / min_len
+                jaccard = len(words & k_words) / union_len
+                if overlap_ratio >= 0.72 or jaccard >= 0.60:
+                    if eng_facts.issubset(k_facts):
+                        if (
+                            eng_facts == k_facts
+                            and len(sent) > len(k_sent)
+                            and overlap_ratio >= 0.85
+                        ):
+                            kept[idx] = (sent, norm_s, words, eng_facts)
+                        is_dup = True
+                        break
+                    if k_facts.issubset(eng_facts) and overlap_ratio >= 0.72:
+                        kept[idx] = (sent, norm_s, words, eng_facts)
+                        is_dup = True
+                        break
+        if not is_dup:
+            kept.append((sent, norm_s, words, eng_facts))
+
+    selected = [item[0] for item in kept]
+    if max_sentences is not None and max_sentences > 0:
+        selected = selected[:max_sentences]
+    return " ".join(selected).strip()
+
+
+def _is_same_source_or_revision_update(
+    old_src: str,
+    new_src: str,
+    superseded_sources: set[str] | None = None,
+) -> bool:
     """Return True if old_src and new_src refer to the same document (in-place update or newer revision),
-    and False if they refer to different documents or different sheets within the same document."""
+    or if old_src is explicitly listed in superseded_sources.
+    Returns False if they refer to different documents or different sheets within the same document."""
     if not old_src or not new_src:
         return True
     if old_src.strip().lower() == new_src.strip().lower():
         return True
+
+    if superseded_sources:
+        norm_sup = {s.strip().lower() for s in superseded_sources if s.strip()}
+        norm_sup_base = {_normalize_base_source_id(s) for s in superseded_sources if s.strip()} - {""}
+        old_low = old_src.strip().lower()
+        old_base_cand = _normalize_base_source_id(old_src)
+        if (
+            old_low in norm_sup
+            or old_low.removeprefix("reference/raw/") in norm_sup
+            or (old_base_cand and old_base_cand in norm_sup_base)
+        ):
+            return True
 
     old_sheet = _extract_sheet_qualifier(old_src)
     new_sheet = _extract_sheet_qualifier(new_src)
@@ -650,16 +1398,28 @@ def _extract_conflict_topic_key(bullet: str) -> str | None:
 def _merge_parameter_lists(
     existing_params: list[EngineeringParameter],
     new_params: list[EngineeringParameter],
+    explicit_moc_sources: set[str] | None = None,
+    superseded_sources: set[str] | None = None,
+    resolved_topics_out: set[str] | None = None,
 ) -> tuple[list[EngineeringParameter], list[str]]:
-    """Merge two lists of EngineeringParameter, updating in-place on same-source/revision updates and flagging cross-document or multi-sheet conflicts."""
+    """Merge two lists of EngineeringParameter.
+
+    Supports:
+    - Authoritative MOC overrides (`🔄 MOC PENDING REDRAFT`, zero false `⚠️ CONFLICT` bullets).
+    - Deterministic revision ordering (`_is_strictly_older_same_doc_revision`: older revisions never overwrite newer).
+    - Explicit `superseded_sources` retirement.
+    - Returns `(merged_params, conflict_bullets)` and populates `resolved_topics_out` if provided.
+    """
     merged: list[EngineeringParameter] = [p.model_copy(deep=True) for p in existing_params]
     index_by_key: dict[str, int] = {
         p.parameter.strip().lower(): idx for idx, p in enumerate(merged)
     }
     conflicts: list[str] = []
+    resolved_topics: set[str] = resolved_topics_out if resolved_topics_out is not None else set()
 
     for new_p in new_params:
         key = new_p.parameter.strip().lower()
+        topic_norm = re.sub(r"[^a-z0-9]+", " ", key).strip()
         if key not in index_by_key:
             index_by_key[key] = len(merged)
             merged.append(new_p.model_copy(deep=True))
@@ -672,21 +1432,39 @@ def _merge_parameter_lists(
         old_src = (old_p.source or "").strip()
         new_src = (new_p.source or "").strip()
 
+        new_is_moc = is_moc_source(new_src, explicit_moc_sources)
+        old_is_moc = is_moc_source(old_src, explicit_moc_sources) or (
+            old_p.note is not None and "MOC PENDING REDRAFT" in old_p.note.upper()
+        )
+        same_or_superseded = _is_same_source_or_revision_update(
+            old_src, new_src, superseded_sources=superseded_sources
+        )
+
         if _are_parameter_values_equivalent(old_val, new_val, old_p.note, new_p.note):
-            if _is_same_source_or_revision_update(old_src, new_src):
-                combined_src = new_src or old_src
+            if same_or_superseded:
+                if _is_strictly_older_same_doc_revision(old_src, new_src) and not new_is_moc:
+                    combined_src = old_src
+                else:
+                    combined_src = new_src or old_src
+                # If a newer revision/document confirms the same value, clear any prior conflict note
+                if old_p.note and ":" in old_p.note and "MOC PENDING REDRAFT" not in old_p.note.upper():
+                    combined_note = new_p.note
+                    if topic_norm:
+                        resolved_topics.add(topic_norm)
+                else:
+                    combined_note = new_p.note or old_p.note
             else:
                 combined_src = old_src
                 if new_src and new_src not in old_src:
                     combined_src = f"{old_src}; {new_src}" if old_src else new_src
-            combined_note = new_p.note or old_p.note
-            if (
-                old_p.note
-                and new_p.note
-                and old_p.note.strip() != new_p.note.strip()
-                and old_p.note.strip() not in new_p.note.strip()
-            ):
-                combined_note = f"{new_p.note.strip()}; {old_p.note.strip()}"
+                combined_note = new_p.note or old_p.note
+                if (
+                    old_p.note
+                    and new_p.note
+                    and old_p.note.strip() != new_p.note.strip()
+                    and old_p.note.strip() not in new_p.note.strip()
+                ):
+                    combined_note = f"{new_p.note.strip()}; {old_p.note.strip()}"
             chosen_val = (
                 old_val
                 if (len(old_val) > len(new_val) and ("[" in old_val or "(" in old_val))
@@ -700,10 +1478,96 @@ def _merge_parameter_lists(
                 note=combined_note,
             )
         else:
-            # Differing values across extractions: check if different document/sheet vs. revision update of same document
-            if not _is_same_source_or_revision_update(old_src, new_src):
-                old_u = "" if not old_p.unit or old_p.unit == "—" else f" {old_p.unit}"
-                new_u = "" if not new_p.unit or new_p.unit == "—" else f" {new_p.unit}"
+            old_u = "" if not old_p.unit or old_p.unit == "—" else f" {old_p.unit}"
+            new_u = "" if not new_p.unit or new_p.unit == "—" else f" {new_p.unit}"
+
+            # Case 1: New source is an authoritative MOC / ECN / FCR
+            if new_is_moc:
+                base_src_display = old_src or "Base Drawing"
+                moc_note = f"🔄 MOC PENDING REDRAFT: supersedes {base_src_display} ({old_val}{old_u})"
+                if new_p.note and new_p.note.strip() not in moc_note:
+                    moc_note = f"{new_p.note.strip()}; {moc_note}"
+                comb_src = (
+                    f"{new_src}; {old_src}"
+                    if old_src and old_src not in new_src
+                    else (new_src or old_src or "Engineering Reference Document")
+                )
+                merged[idx] = EngineeringParameter(
+                    parameter=new_p.parameter or old_p.parameter,
+                    value=new_val,
+                    unit=(new_p.unit if new_p.unit and new_p.unit != "—" else old_p.unit),
+                    source=comb_src,
+                    note=moc_note,
+                )
+                if topic_norm:
+                    resolved_topics.add(topic_norm)
+            # Case 2: Existing value is already governed by an authoritative MOC and an un-redrafted base drawing is re-ingested
+            elif old_is_moc and not same_or_superseded:
+                existing_note = old_p.note or ""
+                redraft_clause = f"supersedes {new_src} ({new_val}{new_u})"
+                if new_src and new_src not in existing_note:
+                    if "MOC PENDING REDRAFT" in existing_note.upper():
+                        existing_note = f"{existing_note}; {redraft_clause}"
+                    else:
+                        existing_note = f"🔄 MOC PENDING REDRAFT: {redraft_clause}"
+                comb_src = (
+                    f"{old_src}; {new_src}"
+                    if new_src and new_src not in old_src
+                    else old_src
+                )
+                merged[idx] = EngineeringParameter(
+                    parameter=old_p.parameter,
+                    value=old_val,
+                    unit=old_p.unit,
+                    source=comb_src,
+                    note=existing_note or None,
+                )
+                if topic_norm:
+                    resolved_topics.add(topic_norm)
+            # Case 3: Same source document or explicit superseded source
+            elif same_or_superseded:
+                if _is_strictly_older_same_doc_revision(old_src, new_src):
+                    # Out-of-order older revision ingested after newer revision -> retain newer old_p
+                    continue
+                merged[idx] = new_p.model_copy(deep=True)
+                if topic_norm:
+                    resolved_topics.add(topic_norm)
+            # Case 4: Check if old_src is a semicolon-joined multi-source string where new_src updates one of its constituent documents
+            elif ";" in old_src and any(
+                _is_same_source_or_revision_update(part.strip(), new_src, superseded_sources=superseded_sources)
+                for part in old_src.split(";")
+                if part.strip()
+            ):
+                other_parts = [
+                    part.strip()
+                    for part in old_src.split(";")
+                    if part.strip()
+                    and not _is_same_source_or_revision_update(
+                        part.strip(), new_src, superseded_sources=superseded_sources
+                    )
+                ]
+                updated_parts = [
+                    part.strip()
+                    for part in old_src.split(";")
+                    if part.strip()
+                    and _is_same_source_or_revision_update(
+                        part.strip(), new_src, superseded_sources=superseded_sources
+                    )
+                ]
+                if updated_parts and any(_is_strictly_older_same_doc_revision(up, new_src) for up in updated_parts):
+                    continue
+                comb_src = "; ".join([*other_parts, new_src]) if other_parts else new_src
+                merged[idx] = EngineeringParameter(
+                    parameter=new_p.parameter or old_p.parameter,
+                    value=new_val,
+                    unit=(new_p.unit if new_p.unit and new_p.unit != "—" else old_p.unit),
+                    source=comb_src or "Engineering Reference Document",
+                    note=new_p.note,
+                )
+                if topic_norm:
+                    resolved_topics.add(topic_norm)
+            # Case 5: Genuine cross-document / multi-sheet discrepancy
+            else:
                 conflict_note = f"{old_src}: {old_val}{old_u}".strip()
                 if old_p.note and conflict_note not in old_p.note:
                     conflict_note = f"{old_p.note}; {conflict_note}"
@@ -729,9 +1593,6 @@ def _merge_parameter_lists(
                     f"⚠️ CONFLICT — {new_p.parameter}: {old_src} specifies {old_val}{old_u}, "
                     f"whereas {new_src} specifies {new_val}{new_u} — verify with engineer before HAZOP"
                 )
-            else:
-                # Same source document (in-place update or newer revision): supersede with new value & source
-                merged[idx] = new_p.model_copy(deep=True)
 
     return merged, conflicts
 
@@ -741,8 +1602,14 @@ def _merge_non_destructive_field(
     new_val: str | None,
     old_src: str | None = None,
     new_src: str | None = None,
+    explicit_moc_sources: set[str] | None = None,
+    superseded_sources: set[str] | None = None,
 ) -> str | None:
-    """Merge a scalar string attribute across two turns without dropping prior engineering numbers or notes."""
+    """Merge a scalar string attribute across two turns.
+
+    Replaces in-place when updated by an authoritative MOC, explicit superseded source,
+    or newer revision of the same document; retains old_val if new_src is an older revision.
+    """
     ov = (old_val or "").strip()
     nv = (new_val or "").strip()
     if nv in ("", "—"):
@@ -751,10 +1618,23 @@ def _merge_non_destructive_field(
         return new_val
     if ov == nv or ov in nv:
         return new_val
+
+    osrc = (old_src or "").strip()
+    nsrc = (new_src or "").strip()
+    if is_moc_source(nsrc, explicit_moc_sources):
+        return new_val
+    if is_moc_source(osrc, explicit_moc_sources) and not is_moc_source(nsrc, explicit_moc_sources):
+        return old_val
+    if _is_same_source_or_revision_update(osrc, nsrc, superseded_sources=superseded_sources):
+        if _is_strictly_older_same_doc_revision(osrc, nsrc):
+            return old_val
+        return new_val
+    if _is_strictly_older_same_doc_revision(nsrc, osrc):
+        return new_val
+    if _is_strictly_older_same_doc_revision(osrc, nsrc):
+        return old_val
     if nv in ov:
         return old_val
-    if _is_same_source_or_revision_update((old_src or "").strip(), (new_src or "").strip()):
-        return new_val
     return f"{nv} ({ov})"
 
 
@@ -765,6 +1645,77 @@ def merge_equipment_entity_with_existing(
     """Merge a newly extracted EquipmentEntity with an existing OKFDocument for incremental file-by-file extraction."""
     fm = existing_doc.frontmatter or {}
     body = existing_doc.body or ""
+    ent_meta = fm.get("entity_metadata") or {}
+
+    # 0. Extract existing lifecycle metadata (aliases, superseded_sources, removed_instruments, removed_connections, moc_history)
+    existing_aliases: list[str] = [
+        str(a).strip() for a in (ent_meta.get("aliases") or []) if str(a).strip()
+    ]
+    existing_tag_meta = str(ent_meta.get("tag") or "").strip()
+    if (
+        existing_tag_meta
+        and new_entity.tag.strip()
+        and existing_tag_meta.upper() != new_entity.tag.strip().upper()
+    ):
+        existing_aliases.append(existing_tag_meta)
+
+    existing_superseded: list[str] = [
+        str(s).strip()
+        for s in (ent_meta.get("superseded_sources") or [])
+        if str(s).strip()
+    ]
+    all_superseded_list = list(
+        dict.fromkeys(existing_superseded + list(new_entity.superseded_sources or []))
+    )
+    all_superseded_set = set(all_superseded_list)
+
+    existing_removed_insts: list[str] = [
+        str(i).strip()
+        for i in (ent_meta.get("removed_instruments") or [])
+        if str(i).strip()
+    ]
+    all_removed_insts_list = list(
+        dict.fromkeys(existing_removed_insts + list(new_entity.removed_instruments or []))
+    )
+    removed_inst_keys = {i.strip().upper() for i in all_removed_insts_list if i.strip()}
+
+    existing_removed_conns: list[str] = [
+        str(c).strip()
+        for c in (ent_meta.get("removed_connections") or [])
+        if str(c).strip()
+    ]
+    all_removed_conns_list = list(
+        dict.fromkeys(existing_removed_conns + list(new_entity.removed_connections or []))
+    )
+    removed_conn_keys = {c.strip().upper() for c in all_removed_conns_list if c.strip()}
+
+    existing_moc_history: list[MOCChangeRecord] = []
+    for item in ent_meta.get("moc_history") or []:
+        if isinstance(item, MOCChangeRecord):
+            existing_moc_history.append(item)
+        elif isinstance(item, dict) and item.get("moc_id"):
+            existing_moc_history.append(MOCChangeRecord(**item))
+
+    merged_moc_history: list[MOCChangeRecord] = list(existing_moc_history)
+    seen_moc_ids = {m.moc_id.strip().upper() for m in merged_moc_history}
+    for m in new_entity.moc_history or []:
+        m_obj = m if isinstance(m, MOCChangeRecord) else MOCChangeRecord(**dict(m))
+        m_key = m_obj.moc_id.strip().upper()
+        if m_key not in seen_moc_ids:
+            seen_moc_ids.add(m_key)
+            merged_moc_history.append(m_obj)
+        else:
+            for idx, em in enumerate(merged_moc_history):
+                if em.moc_id.strip().upper() == m_key:
+                    merged_moc_history[idx] = m_obj
+                    break
+
+    explicit_moc_sources: set[str] = {
+        m.moc_id.strip() for m in merged_moc_history if m.moc_id.strip()
+    }
+    for s in new_entity.sources or []:
+        if is_moc_source(s, explicit_moc_sources):
+            explicit_moc_sources.add(s.strip())
 
     # 1. Extract existing design_data
     existing_design: list[EngineeringParameter] = []
@@ -772,7 +1723,7 @@ def merge_equipment_entity_with_existing(
         if len(cells) >= 4:
             p_name, val_cell, unit_cell, src_cell = cells[0], cells[1], cells[2], cells[3]
             note_val: str | None = None
-            m_note = re.match(r"^([^()]+?)\s+\(([^()]+)\)$", val_cell)
+            m_note = re.match(r"^([^()]+?)\s+\((.+)\)$", val_cell)
             if m_note:
                 val_cell = m_note.group(1).strip()
                 note_val = m_note.group(2).strip()
@@ -792,7 +1743,7 @@ def merge_equipment_entity_with_existing(
         if len(cells) >= 4:
             p_name, val_cell, unit_cell, src_cell = cells[0], cells[1], cells[2], cells[3]
             note_val = None
-            m_note = re.match(r"^([^()]+?)\s+\(([^()]+)\)$", val_cell)
+            m_note = re.match(r"^([^()]+?)\s+\((.+)\)$", val_cell)
             if m_note:
                 val_cell = m_note.group(1).strip()
                 note_val = m_note.group(2).strip()
@@ -809,7 +1760,7 @@ def merge_equipment_entity_with_existing(
     # 3. Extract existing instruments (union of structured entity_metadata AND Markdown table rows)
     existing_insts: list[InstrumentLoop] = []
     existing_inst_by_key: dict[str, int] = {}
-    meta_insts = (fm.get("entity_metadata") or {}).get("instruments") or []
+    meta_insts = ent_meta.get("instruments") or []
     if isinstance(meta_insts, list):
         for item in meta_insts:
             if isinstance(item, dict) and item.get("tag"):
@@ -823,7 +1774,7 @@ def merge_equipment_entity_with_existing(
                     source=str(item.get("source") or "Engineering Reference Document"),
                 )
                 ikey = inst_obj.tag.strip().upper()
-                if ikey and ikey not in existing_inst_by_key:
+                if ikey and ikey not in removed_inst_keys and ikey not in existing_inst_by_key:
                     existing_inst_by_key[ikey] = len(existing_insts)
                     existing_insts.append(inst_obj)
 
@@ -833,7 +1784,7 @@ def merge_equipment_entity_with_existing(
             m_link = re.match(r"^\[([^\]]+)\]\([^)]+\)$", raw_tag_cell)
             clean_tag = (m_link.group(1) if m_link else raw_tag_cell).strip()
             ikey = clean_tag.upper()
-            if ikey and ikey not in existing_inst_by_key:
+            if ikey and ikey not in removed_inst_keys and ikey not in existing_inst_by_key:
                 existing_inst_by_key[ikey] = len(existing_insts)
                 existing_insts.append(
                     InstrumentLoop(
@@ -850,15 +1801,21 @@ def merge_equipment_entity_with_existing(
     # 4. Extract existing connections (union of structured entity_metadata AND Markdown table rows)
     existing_conns: list[ConnectionStream] = []
     existing_conn_by_key: dict[str, int] = {}
-    meta_conns = (fm.get("entity_metadata") or {}).get("connections") or []
+    meta_conns = ent_meta.get("connections") or []
     if isinstance(meta_conns, list):
         for item in meta_conns:
             if isinstance(item, dict) and item.get("stream_id"):
                 conn_obj = ConnectionStream(
                     stream_id=str(item.get("stream_id", "")),
                     direction=item.get("direction"),
-                    source_tag=item.get("source_tag"),
-                    target_tag=item.get("target_tag"),
+                    source_tag=re.sub(
+                        r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", str(item.get("source_tag") or "")
+                    )
+                    or None,
+                    target_tag=re.sub(
+                        r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", str(item.get("target_tag") or "")
+                    )
+                    or None,
                     line_size=item.get("line_size"),
                     inline_components=item.get("inline_components") or [],
                     temperature=item.get("temperature"),
@@ -868,21 +1825,23 @@ def merge_equipment_entity_with_existing(
                     source=str(item.get("source") or "Engineering Reference Document"),
                 )
                 ckey = conn_obj.stream_id.strip().upper()
-                if ckey and ckey not in existing_conn_by_key:
+                if ckey and ckey not in removed_conn_keys and ckey not in existing_conn_by_key:
                     existing_conn_by_key[ckey] = len(existing_conns)
                     existing_conns.append(conn_obj)
 
     for cells in _parse_section_table_rows(body, "Connections & Stream Summary"):
         if len(cells) >= 10:
             ckey = cells[0].strip().upper()
-            if ckey and ckey not in existing_conn_by_key:
+            if ckey and ckey not in removed_conn_keys and ckey not in existing_conn_by_key:
                 existing_conn_by_key[ckey] = len(existing_conns)
+                src_clean = re.sub(r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", cells[2]).strip()
+                tgt_clean = re.sub(r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", cells[3]).strip()
                 existing_conns.append(
                     ConnectionStream(
                         stream_id=cells[0],
                         direction=None if cells[1] == "—" else cells[1],
-                        source_tag=None if cells[2] == "—" else cells[2],
-                        target_tag=None if cells[3] == "—" else cells[3],
+                        source_tag=None if src_clean in ("", "—") else src_clean,
+                        target_tag=None if tgt_clean in ("", "—") else tgt_clean,
                         line_size=None if cells[4] == "—" else cells[4],
                         inline_components=[] if cells[5] == "—" else cells[5],
                         temperature=None if cells[6] == "—" else cells[6],
@@ -898,7 +1857,7 @@ def merge_equipment_entity_with_existing(
                 )
         elif len(cells) >= 5:
             ckey = cells[0].strip().upper()
-            if ckey and ckey not in existing_conn_by_key:
+            if ckey and ckey not in removed_conn_keys and ckey not in existing_conn_by_key:
                 existing_conn_by_key[ckey] = len(existing_conns)
                 existing_conns.append(
                     ConnectionStream(
@@ -925,21 +1884,43 @@ def merge_equipment_entity_with_existing(
         elif isinstance(s, str):
             existing_sources.append(s)
 
-    # Merge parameters & collect automatic cross-document conflict warnings
+    # Merge parameters & collect automatic cross-document conflict warnings and resolved topics
+    resolved_design_topics: set[str] = set()
     merged_design, design_conflicts = _merge_parameter_lists(
-        existing_design, new_entity.design_data
+        existing_design,
+        new_entity.design_data,
+        explicit_moc_sources=explicit_moc_sources,
+        superseded_sources=all_superseded_set,
+        resolved_topics_out=resolved_design_topics,
     )
+    resolved_op_topics: set[str] = set()
     merged_ops, op_conflicts = _merge_parameter_lists(
-        existing_ops, new_entity.operating_conditions
+        existing_ops,
+        new_entity.operating_conditions,
+        explicit_moc_sources=explicit_moc_sources,
+        superseded_sources=all_superseded_set,
+        resolved_topics_out=resolved_op_topics,
     )
+    all_resolved_topics = resolved_design_topics | resolved_op_topics
+    new_conflict_topics = {
+        _extract_conflict_topic_key(c)
+        for c in (design_conflicts + op_conflicts)
+        if _extract_conflict_topic_key(c)
+    }
 
-    # Merge instruments by normalized tag with non-destructive field retention
-    merged_insts: list[InstrumentLoop] = [i.model_copy(deep=True) for i in existing_insts]
+    # Merge instruments by normalized tag with MOC/revision-aware field retention
+    merged_insts: list[InstrumentLoop] = [
+        i.model_copy(deep=True)
+        for i in existing_insts
+        if i.tag.strip().upper() not in removed_inst_keys
+    ]
     inst_idx: dict[str, int] = {
         i.tag.strip().upper(): idx for idx, i in enumerate(merged_insts)
     }
     for new_i in new_entity.instruments:
         ikey = new_i.tag.strip().upper()
+        if ikey in removed_inst_keys:
+            continue
         if ikey not in inst_idx:
             inst_idx[ikey] = len(merged_insts)
             merged_insts.append(new_i.model_copy(deep=True))
@@ -947,27 +1928,84 @@ def merge_equipment_entity_with_existing(
             old_i = merged_insts[inst_idx[ikey]]
             old_src = (old_i.source or "").strip()
             new_src = (new_i.source or "").strip()
-            if old_src and new_src and new_src not in old_src and not _is_same_source_or_revision_update(old_src, new_src):
-                comb_src = f"{old_src}; {new_src}"
+            if (
+                old_src
+                and new_src
+                and new_src not in old_src
+                and not _is_same_source_or_revision_update(
+                    old_src, new_src, superseded_sources=all_superseded_set
+                )
+            ):
+                comb_src = f"{new_src}; {old_src}" if is_moc_source(new_src, explicit_moc_sources) else f"{old_src}; {new_src}"
             else:
-                comb_src = new_src or old_src
+                comb_src = (
+                    old_src
+                    if (
+                        _is_strictly_older_same_doc_revision(old_src, new_src)
+                        and not is_moc_source(new_src, explicit_moc_sources)
+                    )
+                    else (new_src or old_src)
+                )
             merged_insts[inst_idx[ikey]] = InstrumentLoop(
                 tag=new_i.tag or old_i.tag,
-                service=_merge_non_destructive_field(old_i.service, new_i.service, old_src, new_src) or "",
-                instrument_type=_merge_non_destructive_field(old_i.instrument_type, new_i.instrument_type, old_src, new_src) or "",
-                location=_merge_non_destructive_field(old_i.location, new_i.location, old_src, new_src),
-                setpoint_or_range=_merge_non_destructive_field(old_i.setpoint_or_range, new_i.setpoint_or_range, old_src, new_src),
-                interlock_or_alarm=_merge_non_destructive_field(old_i.interlock_or_alarm, new_i.interlock_or_alarm, old_src, new_src),
+                service=_merge_non_destructive_field(
+                    old_i.service,
+                    new_i.service,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                )
+                or "",
+                instrument_type=_merge_non_destructive_field(
+                    old_i.instrument_type,
+                    new_i.instrument_type,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                )
+                or "",
+                location=_merge_non_destructive_field(
+                    old_i.location,
+                    new_i.location,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                setpoint_or_range=_merge_non_destructive_field(
+                    old_i.setpoint_or_range,
+                    new_i.setpoint_or_range,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                interlock_or_alarm=_merge_non_destructive_field(
+                    old_i.interlock_or_alarm,
+                    new_i.interlock_or_alarm,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
                 source=comb_src or "Engineering Reference Document",
             )
 
-    # Merge connections by normalized stream_id with non-destructive field retention
-    merged_conns: list[ConnectionStream] = [c.model_copy(deep=True) for c in existing_conns]
+    # Merge connections by normalized stream_id with MOC/revision-aware endpoint replacement
+    merged_conns: list[ConnectionStream] = [
+        c.model_copy(deep=True)
+        for c in existing_conns
+        if c.stream_id.strip().upper() not in removed_conn_keys
+    ]
     conn_idx: dict[str, int] = {
         c.stream_id.strip().upper(): idx for idx, c in enumerate(merged_conns)
     }
     for new_c in new_entity.connections:
         ckey = new_c.stream_id.strip().upper()
+        if ckey in removed_conn_keys:
+            continue
         if ckey not in conn_idx:
             conn_idx[ckey] = len(merged_conns)
             merged_conns.append(new_c.model_copy(deep=True))
@@ -975,32 +2013,122 @@ def merge_equipment_entity_with_existing(
             old_c = merged_conns[conn_idx[ckey]]
             old_src = (old_c.source or "").strip()
             new_src = (new_c.source or "").strip()
+            is_authoritative_replace = (
+                is_moc_source(new_src, explicit_moc_sources)
+                or _is_strictly_older_same_doc_revision(new_src, old_src)
+                or (
+                    bool(all_superseded_set)
+                    and _is_same_source_or_revision_update(
+                        old_src, new_src, superseded_sources=all_superseded_set
+                    )
+                    and old_src != new_src
+                )
+            )
             combined_inline: list[str] = []
             seen_inline: set[str] = set()
-            for comp in list(old_c.inline_components or []) + list(new_c.inline_components or []):
+            inline_pool = (
+                list(new_c.inline_components or [])
+                if (is_authoritative_replace and new_c.inline_components)
+                else list(old_c.inline_components or []) + list(new_c.inline_components or [])
+            )
+            for comp in inline_pool:
                 comp_clean = comp.strip()
                 if comp_clean and comp_clean.upper() not in seen_inline:
                     seen_inline.add(comp_clean.upper())
                     combined_inline.append(comp_clean)
+
+            chosen_conn_src = (
+                old_src
+                if (
+                    _is_strictly_older_same_doc_revision(old_src, new_src)
+                    and not is_moc_source(new_src, explicit_moc_sources)
+                )
+                else (new_c.source or old_c.source or "Engineering Reference Document")
+            )
             merged_conns[conn_idx[ckey]] = ConnectionStream(
                 stream_id=new_c.stream_id or old_c.stream_id,
-                direction=_merge_non_destructive_field(old_c.direction, new_c.direction, old_src, new_src),
-                source_tag=_merge_non_destructive_field(old_c.source_tag, new_c.source_tag, old_src, new_src),
-                target_tag=_merge_non_destructive_field(old_c.target_tag, new_c.target_tag, old_src, new_src),
-                line_size=_merge_non_destructive_field(old_c.line_size, new_c.line_size, old_src, new_src),
+                direction=_merge_non_destructive_field(
+                    old_c.direction,
+                    new_c.direction,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                source_tag=_merge_non_destructive_field(
+                    old_c.source_tag,
+                    new_c.source_tag,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                target_tag=_merge_non_destructive_field(
+                    old_c.target_tag,
+                    new_c.target_tag,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                line_size=_merge_non_destructive_field(
+                    old_c.line_size,
+                    new_c.line_size,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
                 inline_components=combined_inline,
-                temperature=_merge_non_destructive_field(old_c.temperature, new_c.temperature, old_src, new_src),
-                pressure=_merge_non_destructive_field(old_c.pressure, new_c.pressure, old_src, new_src),
-                flow_rate=_merge_non_destructive_field(old_c.flow_rate, new_c.flow_rate, old_src, new_src),
-                description=_merge_non_destructive_field(old_c.description, new_c.description, old_src, new_src),
-                source=new_c.source or old_c.source or "Engineering Reference Document",
+                temperature=_merge_non_destructive_field(
+                    old_c.temperature,
+                    new_c.temperature,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                pressure=_merge_non_destructive_field(
+                    old_c.pressure,
+                    new_c.pressure,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                flow_rate=_merge_non_destructive_field(
+                    old_c.flow_rate,
+                    new_c.flow_rate,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                description=_merge_non_destructive_field(
+                    old_c.description,
+                    new_c.description,
+                    old_src,
+                    new_src,
+                    explicit_moc_sources=explicit_moc_sources,
+                    superseded_sources=all_superseded_set,
+                ),
+                source=chosen_conn_src,
             )
 
-    # Merge hazards & conflicts (deduplicated by exact text and by conflict parameter topic, preserving order)
+    # Boundary Guard #2: Auto-clear stale '⚠️ CONFLICT — <Topic>:' bullets from existing_hazards
+    # ONLY when <Topic> was explicitly resolved in this merge (and did not re-conflict).
+    filtered_existing_hazards: list[str] = []
+    for eh in existing_hazards:
+        t_key = _extract_conflict_topic_key(eh)
+        if t_key and t_key in all_resolved_topics and t_key not in new_conflict_topics:
+            continue
+        filtered_existing_hazards.append(eh)
+
+    # Merge hazards & conflicts (deduplicated by exact text, near-duplicate prose, and conflict topic)
     merged_hazards: list[str] = []
     seen_hazards: set[str] = set()
     seen_conflict_topics: set[str] = set()
-    for h in existing_hazards + new_entity.hazards + design_conflicts + op_conflicts:
+    for h in filtered_existing_hazards + new_entity.hazards + design_conflicts + op_conflicts:
         h_clean = h.strip()
         if not h_clean or h_clean.lower() in seen_hazards:
             continue
@@ -1012,22 +2140,39 @@ def merge_equipment_entity_with_existing(
         seen_hazards.add(h_clean.lower())
         merged_hazards.append(h_clean)
 
-    # Merge sources (deduplicated by base document ID so newer revisions replace superseded revisions)
+    # Merge sources (pruning superseded_sources and retaining the highest revision rank per base document ID)
+    norm_superseded_exact = {
+        s.strip().removeprefix("reference/raw/").lower()
+        for s in all_superseded_list
+        if s.strip()
+    }
+    norm_superseded_files = {
+        s.strip().split("/")[-1].lower()
+        for s in all_superseded_list
+        if s.strip()
+    }
     merged_sources: list[str] = []
     source_idx_by_base: dict[str, int] = {}
     for s in existing_sources + new_entity.sources:
         s_clean = s.strip().removeprefix("reference/raw/")
         if not s_clean:
             continue
+        if (
+            s_clean.lower() in norm_superseded_exact
+            or s_clean.split("/")[-1].lower() in norm_superseded_files
+        ):
+            continue
         base_key = _normalize_base_source_id(s_clean) or s_clean.lower()
         if base_key not in source_idx_by_base:
             source_idx_by_base[base_key] = len(merged_sources)
             merged_sources.append(s_clean)
         else:
-            merged_sources[source_idx_by_base[base_key]] = s_clean
+            prev_s = merged_sources[source_idx_by_base[base_key]]
+            if not _is_strictly_older_same_doc_revision(prev_s, s_clean):
+                merged_sources[source_idx_by_base[base_key]] = s_clean
 
     existing_func = _extract_section_text(body, "Function")
-    merged_func = new_entity.function_summary or existing_func
+    raw_combined_func = new_entity.function_summary or existing_func
     if (
         existing_func
         and new_entity.function_summary
@@ -1036,21 +2181,26 @@ def merge_equipment_entity_with_existing(
         ef_clean = existing_func.strip()
         nf_clean = new_entity.function_summary.strip()
         if ef_clean in nf_clean:
-            merged_func = nf_clean
+            raw_combined_func = nf_clean
         elif nf_clean in ef_clean:
-            merged_func = ef_clean
+            raw_combined_func = ef_clean
         else:
-            merged_func = f"{ef_clean} {nf_clean}"
+            raw_combined_func = f"{ef_clean} {nf_clean}"
+    merged_func = deduplicate_engineering_prose(raw_combined_func)
 
     existing_tags = [
         str(t) for t in (fm.get("tags") or []) if isinstance(t, str) and str(t).strip()
     ]
+    merged_aliases = list(
+        dict.fromkeys(existing_aliases + [a.strip() for a in (new_entity.aliases or []) if a.strip()])
+    )
 
     return EquipmentEntity(
         tag=new_entity.tag,
         name=new_entity.name,
         equipment_class=new_entity.equipment_class,
         unit=new_entity.unit,
+        aliases=merged_aliases,
         function_summary=merged_func,
         design_data=merged_design,
         operating_conditions=merged_ops,
@@ -1058,6 +2208,10 @@ def merge_equipment_entity_with_existing(
         connections=merged_conns,
         hazards=merged_hazards,
         sources=merged_sources,
+        superseded_sources=all_superseded_list,
+        removed_instruments=all_removed_insts_list,
+        removed_connections=all_removed_conns_list,
+        moc_history=merged_moc_history,
         tags=sorted(set(existing_tags + new_entity.tags)),
     )
 

@@ -12,11 +12,17 @@ from typing import Any
 
 from extracter_agent.config import get_config
 from extracter_agent.models.domain import (
+    _BUNDLE_CATALOG_CACHE,
+    _GENERIC_SINGLE_WORD_EQUIP_NAMES,
     ConnectionStream,
     EngineeringParameter,
     EquipmentEntity,
     InstrumentLoop,
+    MOCChangeRecord,
     _extract_equipment_base_id,
+    _is_isa_equipment_tag,
+    _normalize_alias_key,
+    _units_are_compatible,
     derive_canonical_concept_id,
     derive_canonical_equipment_tag,
     sanitize_tag_filename,
@@ -24,11 +30,16 @@ from extracter_agent.models.domain import (
 from extracter_agent.okf.document import OKFDocument
 from extracter_agent.okf.indexer import (
     _BUNDLE_IO_LOCK,
+    _extract_canonical_isa_alias_keys,
+    _extract_extra_h2_blocks,
+    _extract_prose_equip_alias_keys,
     generate_bundle_indexes,
+    rewrite_bundle_internal_links,
     update_bundle_log,
 )
 from extracter_agent.okf.synthesizer import (
     _normalize_base_source_id,
+    compare_revision_tokens,
     merge_equipment_entity_with_existing,
     merge_markdown_bodies,
     synthesize_equipment_concept,
@@ -55,6 +66,119 @@ def _sync_file_to_gcs(local_file: Path, bundle_root: Path) -> str | None:
         return None
 
 
+_INSPECT_RAW_CHAR_THRESHOLD = 16_000
+_COMPACT_FM_CHAR_THRESHOLD = 6_000
+_INSPECT_MAX_BODY_CHARS = 10_000
+_MAX_SUMMARY_LIST_ITEMS = 40
+
+
+def _compact_frontmatter_for_context(
+    frontmatter: dict[str, Any],
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Build a bounded LLM-context representation of OKF frontmatter when serialized metadata is large."""
+    if not force and len(str(frontmatter)) <= _COMPACT_FM_CHAR_THRESHOLD:
+        return frontmatter
+
+    compact: dict[str, Any] = {}
+    for k, v in frontmatter.items():
+        if k == "sources" and isinstance(v, list) and len(v) > _MAX_SUMMARY_LIST_ITEMS:
+            compact["sources"] = v[:_MAX_SUMMARY_LIST_ITEMS]
+            compact["total_sources_count"] = len(v)
+        elif k == "tags" and isinstance(v, list) and len(v) > _MAX_SUMMARY_LIST_ITEMS:
+            compact["tags"] = v[:_MAX_SUMMARY_LIST_ITEMS]
+            compact["total_tags_count"] = len(v)
+        elif k == "entity_metadata" and isinstance(v, dict):
+            em_compact: dict[str, Any] = {}
+            for ek, ev in v.items():
+                if ek == "design_data" and isinstance(ev, list):
+                    em_compact["design_parameter_keys"] = [
+                        str(item.get("parameter", "")) for item in ev[:80] if isinstance(item, dict)
+                    ]
+                    em_compact["design_data_count"] = len(ev)
+                elif ek == "operating_conditions" and isinstance(ev, list):
+                    em_compact["operating_condition_keys"] = [
+                        str(item.get("parameter", "")) for item in ev[:80] if isinstance(item, dict)
+                    ]
+                    em_compact["operating_conditions_count"] = len(ev)
+                elif ek == "instruments" and isinstance(ev, list):
+                    em_compact["instrument_tags"] = [
+                        str(item.get("tag", "")) for item in ev[:100] if isinstance(item, dict)
+                    ]
+                    em_compact["instruments_count"] = len(ev)
+                elif ek == "connections" and isinstance(ev, list):
+                    em_compact["connection_stream_ids"] = [
+                        str(item.get("stream_id", "")) for item in ev[:100] if isinstance(item, dict)
+                    ]
+                    em_compact["connections_count"] = len(ev)
+                elif ek == "hazards" and isinstance(ev, list):
+                    em_compact["hazards_count"] = len(ev)
+                    em_compact["hazards_preview"] = [str(h)[:160] for h in ev[:10]]
+                elif ek == "moc_history" and isinstance(ev, list):
+                    em_compact["moc_ids"] = [
+                        str(item.get("moc_id", "")) for item in ev[:40] if isinstance(item, dict)
+                    ]
+                elif isinstance(ev, list) and len(ev) > _MAX_SUMMARY_LIST_ITEMS:
+                    em_compact[ek] = ev[:_MAX_SUMMARY_LIST_ITEMS]
+                    em_compact[f"{ek}_total_count"] = len(ev)
+                elif isinstance(ev, str) and len(ev) > 1000:
+                    em_compact[ek] = ev[:1000] + "..."
+                else:
+                    em_compact[ek] = ev
+            compact["entity_metadata"] = em_compact
+        else:
+            compact[k] = v
+    return compact
+
+
+def _build_bounded_body_digest(
+    body: str,
+    max_chars: int = _INSPECT_MAX_BODY_CHARS,
+) -> tuple[str, list[str], bool]:
+    """Return `(bounded_body, section_headings, was_truncated)` preserving all section headers & previews."""
+    headings = [ln.strip() for ln in body.splitlines() if ln.lstrip().startswith("#")]
+    if len(body) <= max_chars:
+        return body, headings, False
+
+    sections: list[list[str]] = []
+    current: list[str] = []
+    for ln in body.splitlines():
+        if ln.startswith("## ") and current:
+            sections.append(current)
+            current = [ln]
+        else:
+            current.append(ln)
+    if current:
+        sections.append(current)
+
+    footer = (
+        f"\n\n[Context Digest: Showing structured preview of {len(body)} chars across "
+        f"{len(sections)} sections. 100% of full Markdown on disk is preserved automatically "
+        f"during Read-Merge-Upsert in generate_equipment_okf_tool / generate_okf_concept_tool.]"
+    )
+    budget = max(500, max_chars - len(footer))
+    per_sec = max(240, budget // max(1, len(sections)))
+
+    chunks: list[str] = []
+    used = 0
+    for sec_lines in sections:
+        if used >= budget:
+            break
+        sec_text = "\n".join(sec_lines).strip()
+        allow = min(per_sec, budget - used)
+        if len(sec_text) > allow:
+            sec_text = sec_text[: max(60, allow - 24)].rstrip() + "\n... [section truncated]"
+        chunks.append(sec_text)
+        used += len(sec_text) + 2
+
+    digest = "\n\n".join(chunks)
+    if len(digest) + len(footer) > max_chars:
+        digest = digest[: max(0, max_chars - len(footer))].rstrip()
+    return digest + footer, headings, True
+
+
+
 def generate_equipment_okf_tool(
     tag: str,
     name: str,
@@ -67,6 +191,11 @@ def generate_equipment_okf_tool(
     hazards: list[str],
     source_files: list[str],
     instruments: list[dict[str, str]] | None = None,
+    aliases: list[str] | None = None,
+    superseded_sources: list[str] | None = None,
+    removed_instruments: list[str] | None = None,
+    removed_connections: list[str] | None = None,
+    moc_history: list[dict[str, Any]] | None = None,
     output_bundle_dir: str | None = None,
     merge_existing: bool = True,
 ) -> dict[str, Any]:
@@ -74,8 +203,8 @@ def generate_equipment_okf_tool(
 
     When to use:
         - When synthesizing extracted chemical equipment data into an OKF v0.2 concept.
-        - During file-by-file incremental extraction when a newly processed PDF adds design data,
-          operating conditions, instruments, connections, or hazards to an existing or new equipment tag.
+        - During file-by-file incremental extraction when a newly processed PDF or Management of Change (MOC)
+          adds or updates design data, operating conditions, instruments, connections, or hazards on an equipment tag.
         - Example: generate_equipment_okf_tool(tag="<TAG>", name="<Equipment Title>", unit="<UNIT>", ...)
 
     When NOT to use:
@@ -95,6 +224,11 @@ def generate_equipment_okf_tool(
         hazards: List of process safety hazard notes and precautions.
         source_files: List of reference source PDF paths.
         instruments: Optional list of P&ID instruments and control loops (tag, service, instrument_type, location, setpoint_or_range, interlock_or_alarm, source).
+        aliases: Optional list of prior equipment tags, superseded train identifiers, or alternate tag aliases.
+        superseded_sources: Optional list of document filenames or revision citations retired/superseded by newer revisions or MOCs.
+        removed_instruments: Optional list of instrument loop tags decommissioned or removed by a newer drawing revision or MOC.
+        removed_connections: Optional list of stream or piping line IDs decommissioned or removed by a newer drawing revision or MOC.
+        moc_history: Optional list of Management of Change (MOC) records (moc_id, date, change_type, summary, affected_items, pending_redraft_drawings).
         output_bundle_dir: Optional destination bundle directory path.
         merge_existing: When True (default), automatically merges new facts and sources with any existing equipment concept on disk instead of overwriting prior sources.
 
@@ -111,6 +245,7 @@ def generate_equipment_okf_tool(
         name=name,
         equipment_class=equipment_class,
         unit=unit,
+        aliases=list(aliases or []),
         function_summary=function_summary,
         design_data=[EngineeringParameter(**d) for d in design_data],
         operating_conditions=[
@@ -120,6 +255,10 @@ def generate_equipment_okf_tool(
         connections=[ConnectionStream(**c) for c in connections],
         hazards=hazards,
         sources=source_files,
+        superseded_sources=list(superseded_sources or []),
+        removed_instruments=list(removed_instruments or []),
+        removed_connections=list(removed_connections or []),
+        moc_history=[MOCChangeRecord(**m) for m in (moc_history or [])],
     )
 
     with _BUNDLE_IO_LOCK:
@@ -129,6 +268,37 @@ def generate_equipment_okf_tool(
         equip_dir = bundle_root / "equipment"
         equip_dir.mkdir(parents=True, exist_ok=True)
         output_file = equip_dir / f"{safe_tag}.md"
+
+        # Direction 1 (tag-first -> prose-second): when a prose service name resolves to an
+        # existing canonical ISA-tag concept, verify unit compatibility and promote entity.tag.
+        if (
+            not _is_isa_equipment_tag(requested_safe)
+            and _is_isa_equipment_tag(safe_tag)
+            and output_file.exists()
+        ):
+            try:
+                cand_doc = OKFDocument.parse(output_file.read_text(encoding="utf-8"))
+                cand_em = cand_doc.frontmatter.get("entity_metadata") or {}
+                if _units_are_compatible(unit, str(cand_em.get("unit") or "")):
+                    canonical_tag_val = str(cand_em.get("tag") or safe_tag).strip()
+                    prose_label = tag.strip()
+                    if prose_label and prose_label.upper() != canonical_tag_val.upper():
+                        entity.aliases = list(dict.fromkeys([*entity.aliases, prose_label]))
+                    entity.tag = canonical_tag_val
+                    if cand_em.get("name"):
+                        entity.name = str(cand_em["name"]).strip()
+                    if cand_em.get("equipment_class") and entity.equipment_class.strip().lower() in (
+                        "equipment",
+                        "general",
+                        "unknown",
+                    ):
+                        entity.equipment_class = str(cand_em["equipment_class"]).strip()
+                else:
+                    safe_tag = requested_safe
+                    output_file = equip_dir / f"{safe_tag}.md"
+            except Exception:
+                safe_tag = requested_safe
+                output_file = equip_dir / f"{safe_tag}.md"
 
         # If an earlier pass created a bare stem file (e.g. P-2301.md) and a subsequent pass
         # provides the full multi-unit tag (e.g. P-2301AB or P-2305ABCDEF) for the same base ID,
@@ -146,7 +316,9 @@ def generate_equipment_okf_tool(
             output_file = upgraded_file
 
         was_merged = False
-        existing_body_text = ""
+        extra_h2_chunks: list[str] = []
+        absorbed_rewrites: dict[str, str] = {}
+
         if merge_existing and output_file.exists():
             try:
                 existing_doc = OKFDocument.parse(output_file.read_text(encoding="utf-8"))
@@ -154,12 +326,73 @@ def generate_equipment_okf_tool(
                     (existing_doc.frontmatter.get("entity_metadata") or {}).get("tag")
                     or str(existing_doc.frontmatter.get("title", "")).split("—")[0].strip()
                 )
-                if not existing_tag or _extract_equipment_base_id(existing_tag) == _extract_equipment_base_id(tag):
-                    existing_body_text = existing_doc.body or ""
+                if not existing_tag or _extract_equipment_base_id(existing_tag) == _extract_equipment_base_id(entity.tag):
+                    extra_existing = _extract_extra_h2_blocks(existing_doc.body or "")
+                    if extra_existing:
+                        extra_h2_chunks.append(extra_existing)
                     entity = merge_equipment_entity_with_existing(entity, existing_doc)
                     was_merged = True
             except Exception:
                 was_merged = False
+
+        # Direction 2 (prose-first -> tag-second): when writing a canonical ISA-tag concept,
+        # absorb any pre-existing non-ISA prose twin file whose normalized service name uniquely matches.
+        if merge_existing and _is_isa_equipment_tag(safe_tag):
+            incoming_alias_keys = (
+                {
+                    _normalize_alias_key(cand)
+                    for cand in [entity.name, *(entity.aliases or [])]
+                    if cand and not _is_isa_equipment_tag(cand)
+                }
+                - _GENERIC_SINGLE_WORD_EQUIP_NAMES
+                - {""}
+            )
+            if incoming_alias_keys:
+                claimed_by_other_isa: set[str] = set()
+                for other_p in sorted(equip_dir.glob("*.md")):
+                    if (
+                        other_p == output_file
+                        or other_p.name in ("index.md", "log.md")
+                        or not _is_isa_equipment_tag(other_p.stem)
+                    ):
+                        continue
+                    try:
+                        other_doc = OKFDocument.parse(other_p.read_text(encoding="utf-8"))
+                        claimed_by_other_isa.update(_extract_canonical_isa_alias_keys(other_doc))
+                    except Exception:
+                        continue
+
+                for prose_p in sorted(equip_dir.glob("*.md")):
+                    if (
+                        prose_p == output_file
+                        or prose_p.name in ("index.md", "log.md")
+                        or _is_isa_equipment_tag(prose_p.stem)
+                    ):
+                        continue
+                    try:
+                        prose_doc = OKFDocument.parse(prose_p.read_text(encoding="utf-8"))
+                    except Exception:
+                        continue
+                    p_keys = _extract_prose_equip_alias_keys(prose_p, prose_doc)
+                    if not (p_keys & incoming_alias_keys) or (p_keys & claimed_by_other_isa):
+                        continue
+                    p_em = prose_doc.frontmatter.get("entity_metadata") or {}
+                    if not _units_are_compatible(entity.unit, str(p_em.get("unit") or "")):
+                        continue
+
+                    extra_prose = _extract_extra_h2_blocks(prose_doc.body or "")
+                    if extra_prose:
+                        extra_h2_chunks.append(extra_prose)
+                    entity = merge_equipment_entity_with_existing(entity, prose_doc)
+                    p_display = (
+                        str(p_em.get("name") or "").strip()
+                        or prose_p.stem.replace("_", " ").strip()
+                    )
+                    if p_display and p_display.upper() != entity.tag.upper():
+                        entity.aliases = list(dict.fromkeys([*entity.aliases, p_display]))
+                    was_merged = True
+                    absorbed_rewrites[f"equipment/{prose_p.name}"] = f"equipment/{safe_tag}.md"
+                    prose_p.unlink(missing_ok=True)
 
         doc = synthesize_equipment_concept(
             entity,
@@ -167,33 +400,14 @@ def generate_equipment_okf_tool(
             gcs_prefix=cfg.destination_gcs_prefix,
             bundle_root=bundle_root,
         )
-        if was_merged and existing_body_text.strip():
-            standard_h2 = {
-                "## function",
-                "## design data",
-                "## operating conditions",
-                "## instrumentation & control loops (p&id)",
-                "## connections & stream summary",
-                "## hazards & safeguards",
-            }
-            extra_h2_blocks: list[str] = []
-            curr_h2 = ""
-            curr_lines: list[str] = []
-            for ln in existing_body_text.splitlines():
-                if ln.startswith("## "):
-                    if curr_h2 and curr_h2.lower() not in standard_h2:
-                        extra_h2_blocks.append("\n".join([curr_h2, *curr_lines]).strip())
-                    curr_h2 = ln.strip()
-                    curr_lines = []
-                elif curr_h2:
-                    curr_lines.append(ln)
-            if curr_h2 and curr_h2.lower() not in standard_h2:
-                extra_h2_blocks.append("\n".join([curr_h2, *curr_lines]).strip())
-            if extra_h2_blocks:
-                doc.body = merge_markdown_bodies("\n\n".join(extra_h2_blocks), doc.body)
+        if was_merged and extra_h2_chunks:
+            doc.body = merge_markdown_bodies("\n\n".join(extra_h2_chunks), doc.body)
 
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(doc.serialize(), encoding="utf-8")
+        if absorbed_rewrites:
+            rewrite_bundle_internal_links(bundle_root, absorbed_rewrites)
+        _BUNDLE_CATALOG_CACHE.clear()
 
         # Update log
         log_action = "Concept Enrichment" if was_merged else "Concept Creation"
@@ -201,7 +415,7 @@ def generate_equipment_okf_tool(
         log_path = update_bundle_log(
             bundle_root,
             log_action,
-            f"{log_verb} OKF equipment concept for [{tag} — {entity.name}](/equipment/{safe_tag}.md)",
+            f"{log_verb} OKF equipment concept for [{entity.tag} — {entity.name}](/equipment/{safe_tag}.md)",
         )
 
     gcs_uri = None
@@ -222,7 +436,7 @@ def generate_equipment_okf_tool(
         "title": doc.frontmatter.get("title"),
         "type": doc.frontmatter.get("type"),
         "resource": doc.frontmatter.get("resource"),
-        "frontmatter": doc.frontmatter,
+        "frontmatter": _compact_frontmatter_for_context(doc.frontmatter),
     }
 
 
@@ -500,7 +714,7 @@ def generate_okf_concept_tool(
         "title": title,
         "type": concept_type,
         "resource": resource_uri,
-        "frontmatter": doc.frontmatter,
+        "frontmatter": _compact_frontmatter_for_context(doc.frontmatter),
     }
 
 
@@ -528,7 +742,8 @@ def inspect_existing_okf_concept_tool(
         output_bundle_dir: Optional bundle root directory path. Defaults to configured output_bundle_dir.
 
     Returns:
-        A dictionary containing the existing concept frontmatter and Markdown body if concept_id is specified,
+        A dictionary containing the existing concept frontmatter and Markdown body (or a bounded
+        structured context digest when the concept exceeds 16 KB on disk) if concept_id is specified,
         or a list of matching concept summaries if source_filter is specified.
     """
     cfg = get_config()
@@ -577,15 +792,39 @@ def inspect_existing_okf_concept_tool(
         raw_text = target_path.read_text(encoding="utf-8")
         try:
             doc = OKFDocument.parse(raw_text)
+            all_sources = doc.frontmatter.get("sources", [])
+            if len(raw_text) <= _INSPECT_RAW_CHAR_THRESHOLD:
+                return {
+                    "status": "found",
+                    "exists": True,
+                    "concept_id": clean_id,
+                    "title": doc.frontmatter.get("title"),
+                    "type": doc.frontmatter.get("type"),
+                    "sources": all_sources,
+                    "frontmatter": doc.frontmatter,
+                    "body_markdown": doc.body,
+                    "context_digest_applied": False,
+                }
+
+            bounded_body, headings, was_truncated = _build_bounded_body_digest(doc.body)
+            bounded_sources = (
+                all_sources[:_MAX_SUMMARY_LIST_ITEMS]
+                if isinstance(all_sources, list) and len(all_sources) > _MAX_SUMMARY_LIST_ITEMS
+                else all_sources
+            )
             return {
                 "status": "found",
                 "exists": True,
                 "concept_id": clean_id,
                 "title": doc.frontmatter.get("title"),
                 "type": doc.frontmatter.get("type"),
-                "sources": doc.frontmatter.get("sources", []),
-                "frontmatter": doc.frontmatter,
-                "body_markdown": doc.body,
+                "sources": bounded_sources,
+                "total_sources_count": len(all_sources) if isinstance(all_sources, list) else 0,
+                "section_headings": headings[:80],
+                "frontmatter": _compact_frontmatter_for_context(doc.frontmatter, force=True),
+                "body_markdown": bounded_body,
+                "total_disk_chars": len(raw_text),
+                "context_digest_applied": was_truncated or len(raw_text) > _INSPECT_RAW_CHAR_THRESHOLD,
             }
         except Exception as exc:
             return {
@@ -593,7 +832,7 @@ def inspect_existing_okf_concept_tool(
                 "exists": True,
                 "concept_id": clean_id,
                 "error": str(exc),
-                "raw_text": raw_text,
+                "raw_text": raw_text[:_INSPECT_MAX_BODY_CHARS],
             }
 
     query = (source_filter or "").strip().lower()
@@ -614,12 +853,16 @@ def inspect_existing_okf_concept_tool(
             haystack = (raw_text + " " + str(sources_list)).lower()
             if query not in haystack and (not query_prefix or query_prefix not in haystack):
                 continue
+        compact_sources = (
+            sources_list[:15] if isinstance(sources_list, list) and len(sources_list) > 15 else sources_list
+        )
         matches.append(
             {
                 "concept_id": rel_id,
                 "title": fm.get("title", md_file.stem),
                 "type": fm.get("type", "unknown"),
-                "sources": sources_list,
+                "sources": compact_sources,
+                "sources_count": len(sources_list) if isinstance(sources_list, list) else 0,
             }
         )
 
@@ -628,7 +871,7 @@ def inspect_existing_okf_concept_tool(
         "bundle_dir": str(bundle_root),
         "source_filter": source_filter,
         "total_matches": len(matches),
-        "matches": matches,
+        "matches": matches[:80],
     }
 
 

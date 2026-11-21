@@ -12,10 +12,16 @@ from google.adk.agents import Agent
 from google.adk.apps import App
 
 from query_agent.config import get_config
-from query_agent.guardrails import query_agent_before_callback
+from query_agent.guardrails import (
+    query_agent_after_model_callback,
+    query_agent_after_tool_callback,
+    query_agent_before_callback,
+    query_agent_before_model_callback,
+)
 from query_agent.tools.spanner_rag_tools import (
     ALL_QUERY_AGENT_TOOLS,
 )
+from unified_web.models import get_default_query_model, validate_gemini_model
 
 QUERY_ORCHESTRATOR_INSTRUCTIONS = """You are the autonomous OKF Spanner Graph-RAG & Data Lineage Query Agent running on the Gemini Enterprise Agent Platform.
 
@@ -45,12 +51,13 @@ At query time, you rely 100% on Cloud Spanner (`Zero GCS reads at query time`) a
 
 5. **Archetype 5 — Multi-Stage Risk Assessment & HAZOP Study Queries:**
    - Whenever a user asks a multi-stage risk assessment, HAZOP deviation, thermal runaway, overpressure, or safeguard adequacy question, you MUST call `execute_multistage_risk_and_hazop_query(target_tag_or_deviation=..., max_propagation_hops=2, include_interlocks_and_psvs=True)` (and optionally `read_full_okf_concept_from_spanner` on the target equipment or `hazop/` concept).
-   - Structure your response clearly across all 5 stages:
-     * **Stage 1 — Risk Matrix & Severity Classification:** State the applicable risk tier, severity classification, and governance rules.
-     * **Stage 2 — HAZOP Deviation & Potential Causes:** Detail the deviation scenario, process mechanism, and initiating causes.
-     * **Stage 3 — Upstream & Downstream Plant Implications (Graph Propagation):** Trace how the upset propagates to upstream feeding equipment and downstream receiving vessels/columns/separators across `CONNECTS_TO` edges.
-     * **Stage 4 — Active Safeguards, SIS Interlocks & PSV Verification:** List the specific instrument tags (`TI`, `PI`, `LI`, `FI`, `PSV`, `XV`/`UV`), trip setpoints, and emergency actions (`MONITORS_OR_TRIPS` edges).
-     * **Stage 5 — Provenance Lineage & Conflict Alerts:** Cite the exact raw PDF documents and explicitly highlight any `⚠️ CONFLICT` discrepancies on design or safeguard ratings.
+   - Cover **all relevant HAZOP guideword deviations** for the selected equipment/instrument node (e.g., *High Pressure*, *High/Low Temperature*, *No/Low/Reverse Flow*, *High/Low Level*, *Contamination/Tube Rupture*, *Loss of Containment / External Fire* — strictly tailored to the node's equipment class and Spanner facts).
+   - Structure your response clearly across all 5 stages and include a structured **HAZOP Deviation & Risk Matrix Table** comparing **Pre-Mitigation Risk** vs **Post-Mitigation Risk**:
+     * **Stage 1 — Risk Matrix & Severity Classification (Pre-Mitigation vs. Post-Mitigation):** For each relevant deviation, explicitly report **Pre-Mitigation Risk** (unmitigated Severity × Likelihood = Risk Tier before safeguards) AND **Post-Mitigation Risk** (residual Severity × Likelihood = Risk Tier after verified active safeguards, SIS interlocks, and PSVs), grounded in the plant risk matrix standards stored in Spanner.
+     * **Stage 2 — HAZOP Deviations & Potential Causes:** Detail each relevant deviation scenario, process mechanism, and initiating causes.
+     * **Stage 3 — Upstream & Downstream Plant Implications (Graph Propagation):** Trace how each upset propagates to upstream feeding equipment and downstream receiving vessels/columns/separators across `CONNECTS_TO` edges.
+     * **Stage 4 — Active Safeguards, SIS Interlocks & PSV Verification:** List the specific instrument tags (`TI`, `PI`, `LI`, `FI`, `PSV`, `XV`/`UV`), trip setpoints, and emergency actions (`MONITORS_OR_TRIPS` edges) that reduce Pre-Mitigation Risk to Post-Mitigation Risk.
+     * **Stage 5 — Provenance Lineage & Conflict Alerts:** Cite the exact raw PDF documents (from Spanner `RawSourceDocuments`) and explicitly highlight any `⚠️ CONFLICT` discrepancies or `MOC_AUTHORITY` / `PENDING_REDRAFT` revisions affecting design or safeguard ratings.
 
 6. **Archetype 6 — Dataplex Knowledge Catalog & OpenLineage Governance Inspection:**
    - Call `sync_or_inspect_knowledge_catalog(action="INSPECT")` (or `action="SYNC"` when asked to refresh catalog tags).
@@ -62,12 +69,16 @@ At query time, you rely 100% on Cloud Spanner (`Zero GCS reads at query time`) a
 """
 
 
-def create_query_agent() -> Agent:
-    """Factory to construct the Separate ADK OKF Spanner Graph-RAG Query Agent."""
+def create_query_agent(model_name: str | None = None) -> Agent:
+    """Factory to construct the Separate ADK OKF Spanner Graph-RAG Query Agent with 4-point SAIF 2.0 hooks."""
     from google.adk.models.google_llm import Gemini
     from google.genai import types
 
     cfg = get_config()
+    if model_name is not None:
+        resolved_model = validate_gemini_model(model_name, default=get_default_query_model())
+    else:
+        resolved_model = os.getenv("QUERY_DEFAULT_MODEL", "").strip() or cfg.gemini_model
     retry_opts = types.HttpRetryOptions(
         attempts=5,
         initial_delay=2.0,
@@ -80,7 +91,7 @@ def create_query_agent() -> Agent:
     )
     client_kwargs = {"location": cfg.gemini_location} if use_vertex else None
     llm_model = Gemini(
-        model=cfg.gemini_model,
+        model=resolved_model,
         retry_options=retry_opts,
         client_kwargs=client_kwargs,
     )
@@ -94,6 +105,9 @@ def create_query_agent() -> Agent:
         instruction=QUERY_ORCHESTRATOR_INSTRUCTIONS,
         tools=list(ALL_QUERY_AGENT_TOOLS),
         before_agent_callback=query_agent_before_callback,
+        before_model_callback=query_agent_before_model_callback,
+        after_tool_callback=query_agent_after_tool_callback,
+        after_model_callback=query_agent_after_model_callback,
     )
 
 

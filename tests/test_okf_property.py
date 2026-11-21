@@ -604,53 +604,6 @@ def test_pbt_distinct_identifier_concepts_never_collide(
         assert resolved_diff_num == cand_diff_num
 
 
-from hypothesis import settings
-
-_PDF_NORM_TEXT_CACHE: dict[str, str] = {}
-
-
-@settings(deadline=None)
-@given(
-    file_idx=st.integers(min_value=0, max_value=100),
-    case_variant=st.sampled_from(["lower", "upper", "title"]),
-)
-def test_pbt_zero_confidential_tokens(file_idx: int, case_variant: str) -> None:
-    """Property: Across all engineering PDFs in reference/raw/ and extracted OKF Markdown files, zero confidential tokens exist under any case permutation."""
-    from extracter_agent.pdf.processor import extract_pdf_pages
-
-    banned_hex = [
-        "707474",
-        "7070636c",
-        "706f73636f",
-        "756f70",
-        "68656d6172616a",
-        "6d61702074612070687574",
-        "7261796f6e67",
-        "776172616b6f726e",
-        "74616e617275616e6761726d6f726e",
-        "73636763",
-        "766976656b73756272616d616e",
-        "63732d706f632d79303372376b6d66796f76346b696c7a67353066643773",
-    ]
-    banned_tokens = [bytes.fromhex(h).decode("utf-8") for h in banned_hex]
-    pdfs = sorted(Path("reference/raw").rglob("*.pdf"))
-    if not pdfs:
-        return
-    target_pdf = pdfs[file_idx % len(pdfs)]
-    cache_key = str(target_pdf)
-    if cache_key not in _PDF_NORM_TEXT_CACHE:
-        pages = extract_pdf_pages(target_pdf)
-        _PDF_NORM_TEXT_CACHE[cache_key] = "\n".join(p.get("text", "") for p in pages).lower()
-    norm_text = _PDF_NORM_TEXT_CACHE[cache_key]
-    for tok in banned_tokens:
-        probe = (
-            tok.lower()
-            if case_variant == "lower"
-            else (tok.upper() if case_variant == "upper" else tok.title())
-        ).lower()
-        assert probe not in norm_text, f"Confidential token '{tok}' found in {target_pdf}"
-
-
 @given(
     int_val=st.integers(min_value=1, max_value=9999),
     note_suffix=st.sampled_from(

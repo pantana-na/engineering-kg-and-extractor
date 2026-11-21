@@ -9,8 +9,14 @@ from __future__ import annotations
 from google.adk.agents import Agent
 from google.adk.apps import App
 
-from extracter_agent.agent.guardrails import before_agent_callback
+from extracter_agent.agent.guardrails import (
+    after_model_callback,
+    after_tool_callback,
+    before_agent_callback,
+    before_model_callback,
+)
 from extracter_agent.config import get_config
+from unified_web.models import get_default_extracter_model, validate_gemini_model
 from extracter_agent.tools.gcs_tools import export_bundle_to_gcs_tool
 from extracter_agent.tools.okf_tools import (
     build_okf_indexes_and_validate_tool,
@@ -48,6 +54,7 @@ When fulfilling an extraction or bundle construction request (Mode A or Mode B),
      * PFDs: `pfd/*.pdf`
      * Operating Manuals: `operating_manuals/*.pdf`
      * Standards: `standards/*.pdf`
+     * Management of Change (MOC / ECN): `moc/*.pdf`
 
 2. STEP 2: INGESTION & DOCUMENT PARSING (`process_raw_pdf_tool`)
    - Call `process_raw_pdf_tool(pdf_filename=..., subfolder=...)` to extract textual content, tables, and tag candidates from the target PDF document(s).
@@ -74,6 +81,7 @@ When fulfilling an extraction or bundle construction request (Mode A or Mode B),
        Operating Manuals, licensor engineering standards, and SDS govern thermal runaway thresholds, auto-decomposition onset temperatures, utility header segregation, and emergency quench safeguards.
 
 4. STEP 4: OKF v0.2 SYNTHESIS (`generate_equipment_okf_tool` / `generate_okf_concept_tool`)
+   - **PARALLEL TOOL-CALL BATCHING FOR LOW LATENCY:** Whenever a multi-sheet P&ID, PFD, or datasheet defines multiple independent equipment items or concepts, emit **batches of 6–12 `generate_equipment_okf_tool` / `generate_okf_concept_tool` calls in parallel in the same model turn** rather than 1–2 at a time, then run `build_okf_indexes_and_validate_tool()` once after all concepts for the file are written.
    - When asked to process a **specific raw PDF file (File-by-File Mode)**:
      * Always synthesize or update the corresponding `sources/<document-slug>` concept via `generate_okf_concept_tool(concept_id="sources/<slug>", concept_type="Source Document", ...)` summarizing the document metadata, revision, scope, all piping line numbers, and extracted entities.
      * Depending on the document class, also create or incrementally enrich ALL domain concepts grounded in that file:
@@ -81,6 +89,7 @@ When fulfilling an extraction or bundle construction request (Mode A or Mode B),
        - **P&ID (`pid/*.pdf`)**: Call `generate_equipment_okf_tool` for EVERY distinct equipment tag depicted on the P&ID (including primary vessels/columns/heat exchangers and auxiliary pumps, lube oil pumps, filters, demineralizers, drums, scrubbers, sumps, protective chambers, expansion pieces, or package items) using the exact verbatim tag printed inside or beside the equipment symbol (and recording any General-Note default system prefix in `design_data` / `entity_metadata`, while NEVER double-prefixing tags that already carry an explicit system prefix) to record all P&ID instrumentation loops (including transmitters, controllers, analyzers, relief devices, control/block valves, in-line sight glasses/orifices, local skid gauges, switches, and verbatim status modifiers such as `NON-FUNCTIONAL` or `SPARE`), nozzle connections, and EVERY process and utility/cooling/flush/drain/vent piping line designation (including off-page continuation arrow lines along drawing borders). Enforce strict P&ID topological rules: (1) trace long perimeter, pipe-tunnel, and return headers continuously end-to-end across the sheet width and NEVER attach a passing header (or its inline valves, relief valves, or chemical/makeup tie-ins) to an adjacent equipment item unless a physical nozzle line or tee touches that equipment symbol; (2) verify printed line diameters (`4"`/`3"` reducer cones vs. `3/4"`/`1/2"` vents/instrument taps) so top-head `3/4"` vent/instrument lines to `WLD DR` or `PDIS-*` are never mistaken for main `4"`/`3"` process inlets/outlets, keep each vessel's bypass valve strictly attributed to that vessel, and NEVER reuse the same valve tag on two different nozzles/branches of the same vessel (Main Inlet, Main Outlet, Full-Flow Bypass, Top-Head Vent, and Bottom-Head Drain each have their own distinct valve number); (3) determine true flow direction strictly from inline arrowheads, check valve orientation, and pump discharge pressure gauge placement rather than assuming flow goes pump-to-filter; (4) never conflate an open equipment drain funnel (`DR <num>`) and a relief valve setpoint (`SET @ <pressure> PSIG`) into a restriction orifice (`RO-<num>`); (5) trace each instrument bubble's physical leader line or impulse tap to the exact pipe, guard pipe, sump, or equipment body it touches rather than associating by 2D proximity, carefully distinguish `8` vs `6` in circular instrument bubbles so `TI-*` never borrows an adjacent `FCV-*`/`HCV-*` loop number, include all inline header instruments (`FE`, `FT`, `FIS`, `FISL`, `FCV`, `TE`, `TI`, `PT`, `PI`, `RO`) along the upstream/downstream piping path between connected equipment items, keep train-specific vessel vent/drain valve numbers and drain header numbers strictly segregated per equipment item, and call `generate_okf_concept_tool` for instrument registers (`instruments/`), unit topology (`units/`), or HAZOP nodes (`hazop/`).
        - **PFD (`pfd/*.pdf`)**: Perform a multi-target upsert: (a) call `generate_equipment_okf_tool` to enrich stream balances (`connections`, `operating_conditions`) and title-block ratings on every depicted equipment item, AND (b) call `generate_okf_concept_tool(..., merge_existing=True)` to transcribe the complete multi-stream Heat & Material Balance table (all stream numbers, mass and molar flows, molecular weight, temperature, pressure, vapor fraction, density, and all individual component flows and weight fractions including trace components) into BOTH `sources/<pfd-slug>.md` AND `units/<unit-slug>.md`.
        - **Operating Manual (`operating_manuals/*.pdf`) or Engineering Standard / SDS (`standards/*.pdf`)**: Call `generate_okf_concept_tool` to create/enrich the applicable `procedures/`, `troubleshooting/`, `hazards/`, `parameters/`, or `hazop/` concepts. When ingesting any Safety Data Sheet (SDS), exhaustively transcribe all Section 8 occupational exposure limits (retaining both primary and parenthetical unit representations side-by-side) and all Section 9 physical and chemical properties (boiling/melting/flash/auto-ignition points, vapor pressure with reference temperature, relative density, solubility with reference temperature, LEL/UEL), Section 10 reactivity/inhibitor limits, and Section 14 transport classifications into `hazards/<chemical-slug>.md`.
+       - **Management of Change / Engineering Change Notice (`moc/*.pdf` or any `MOC-*`/`ECN-*` document)**: Approved MOCs override un-redrafted master P&IDs/Data Sheets (`MOC_AUTHORITY` / `PENDING_REDRAFT` — NOT an unauthorized `⚠️ CONFLICT`). Call `generate_equipment_okf_tool` for every affected equipment item passing: (a) updated parameter values, setpoints, or rerouted connections citing the MOC file; (b) `moc_history` with structured `MOCChangeRecord` entries (`moc_id`, `date`, `change_type`, `summary`, `affected_items`, `pending_redraft_drawings`); (c) `removed_instruments` for any decommissioned instrument loops; (d) `removed_connections` for any removed/isolated piping lines; and (e) `superseded_sources` whenever a renamed replacement document retires an older source filename. Also synthesize `sources/<moc-slug>` via `generate_okf_concept_tool`.
    - For equipment concepts, invoke `generate_equipment_okf_tool` with complete, rigorously typed arguments:
      * `tag`: Normalized equipment identifier matching the verbatim tag printed on the drawing or datasheet (never double-prefixed when the printed tag already begins with a system prefix).
      * `name`: Descriptive equipment title.
@@ -120,14 +129,18 @@ When fulfilling an extraction or bundle construction request (Mode A or Mode B),
 """
 
 
-def create_extracter_agent() -> Agent:
-    """Factory to construct the ADK Root Extracter Agent."""
+def create_extracter_agent(model_name: str | None = None) -> Agent:
+    """Factory to construct the ADK Root Extracter Agent with allowlisted Gemini 4 model & 4-point SAIF 2.0 hooks."""
     import os
 
     from google.adk.models.google_llm import Gemini
     from google.genai import types
 
     cfg = get_config()
+    if model_name is not None:
+        resolved_model = validate_gemini_model(model_name, default=get_default_extracter_model())
+    else:
+        resolved_model = os.getenv("EXTRACTER_DEFAULT_MODEL", "").strip() or cfg.gemini_model
     retry_opts = types.HttpRetryOptions(
         attempts=5,
         initial_delay=2.0,
@@ -140,7 +153,7 @@ def create_extracter_agent() -> Agent:
     )
     client_kwargs = {"location": cfg.gemini_location} if use_vertex else None
     llm_model = Gemini(
-        model=cfg.gemini_model,
+        model=resolved_model,
         retry_options=retry_opts,
         client_kwargs=client_kwargs,
     )
@@ -160,6 +173,9 @@ def create_extracter_agent() -> Agent:
             export_bundle_to_gcs_tool,
         ],
         before_agent_callback=before_agent_callback,
+        before_model_callback=before_model_callback,
+        after_tool_callback=after_tool_callback,
+        after_model_callback=after_model_callback,
     )
 
 

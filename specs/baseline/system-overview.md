@@ -1,87 +1,184 @@
-# Baseline Specification: Multi-Agent System Architecture & Reference Invariants
+# Brownfield Baseline Specification: Engineering OKF Multi-Agent Knowledge Platform (Pre-v2)
 
-**Document ID:** BASELINE-20260922-EXTRACTER-AGENT-SYSTEM  
-**Status:** Approved & Sanitized Open-Share Baseline  
-**Last Updated:** 2026-10-05  
+## Document Control
 
----
-
-## 1. System Overview & Baseline Context
-
-This repository (`https://github.com/pantana-na/engineering-kg-and-extractor.git`) hosts the **Chemical Engineering OKF Multi-Agent Knowledge Platform**, consisting of two autonomous cognitive AI agents built on the official **Google Agent Development Kit (`google-adk`)** and deployed on the **Gemini Enterprise Agent Platform (`agent_runtime`)**, paired with two dedicated 3-pane web workbenches deployed on **Google Cloud Run (`cloud_run`)**:
-
-1. **Agent 1 — Autonomous OKF Extracter Agent (`extracter_agent` / `extracter_orchestrator`):** Ingests complex chemical engineering PDFs (process data sheets, P&IDs, PFDs, operating manuals, standards, and Management of Change `MOC`/`ECN` packages) from `reference/raw/` (locally and in GCS), extracts structured domain knowledge via 300 DPI multimodal Gemini vision and native text parsing, and compiles cross-linked **Open Knowledge Format (OKF v0.2)** Markdown (`.md`) bundles stored in **Google Cloud Storage (GCS)**.
-2. **Consolidated `.md`-Only Spanner Ingestion Engine (`sync_markdown_bundle_to_spanner`):** Deterministically synchronizes the OKF `.md` bundle extracted by `extracter_agent` (`ADDED`, `UPDATED`, `REMOVED`, `UNCHANGED`) into **Google Cloud Spanner (`okf-knowledge-spanner / okf_knowledge_graph`)** and **Google Cloud Dataplex Universal Catalog (`dataplex_v1`)** with zero raw PDF reads and zero LLM calls.
-3. **Agent 2 — OKF Spanner Graph-RAG & Data Lineage Query Agent (`query_agent` / `okf_spanner_query_orchestrator`):** Answers engineering parameter lookups, multi-hop P&ID/PFD connectivity traversals (ISO GQL), hybrid 768-d Vector + Full-Text Search (RRF) queries, bidirectional PDF provenance, conflict (`⚠️ CONFLICT`) & MOC pending-redraft (`🔄 MOC PENDING REDRAFT`) audits, 5-stage HAZOP & risk assessments, and Dataplex Catalog governance queries **100% from Cloud Spanner and Dataplex**.
-
----
-
-## 2. Baseline Architecture & Runtime Decoupling
-
-The repository enforces strict separation of concerns across two runtime environments:
-
-| Dimension | Autonomous AI Agents & Reasoning Engines | Web Frontends, API Gateways & Workbenches |
-| :--- | :--- | :--- |
-| **Target Runtime** | **Gemini Enterprise Agent Platform (`agent_runtime`)** | **Google Cloud Run (`cloud_run`)** |
-| **Deployed Artifacts** | 1. **`extracter_orchestrator`** (8 ADK `FunctionTool`s)<br>2. **`okf_spanner_query_orchestrator`** (7 ADK `FunctionTool`s) | 1. **`extracter-agent-web`** (`extracter_agent/web_server.py`)<br>2. **`okf-query-agent-web`** (`query_agent/web_server.py`) |
-| **Deployment Mechanism** | `./deploy.sh --target agent_runtime` & `./deploy.sh --target query_agent` (`adk deploy agent_engine`) | `./deploy.sh --target cloud_run` & `./deploy.sh --target query_web` + Terraform (`terraform/`) |
-| **Core Responsibilities** | LLM reasoning (`gemini-3.8-flash` via `GEMINI_LOCATION=global`), pre-flight Model Armor guardrails (`before_agent_callback`), tool execution, and live evaluation (`Rule 12`). | HTTP/HTTPS ingress, 3-pane interactive UI rendering, `/healthz` liveness probes, async job polling, and proxying to `agent_runtime` / Cloud Spanner / GCS / Dataplex. |
-| **Governance Rule** | `_agents/rules/google_adk_and_agent_runtime.md` | `_agents/rules/devops_security_and_quality_standards.md` |
+| Field | Value |
+| :--- | :--- |
+| **Baseline ID** | `BASELINE-20261120-EXTRACTER-AGENT-SYSTEM` |
+| **Workload Type** | `Hybrid` |
+| **Assessment Track** | `Track B: Modern Cloud-Native (Undocumented/Untested)` |
+| **Status** | `Verified Baseline` |
+| **Author** | Platform Engineering Team |
+| **Date** | `2026-11-20` |
+| **Version** | `2.0` |
+| **Discovery Reference** | `N/A` |
+| **Companion Artifacts** | `docs/high-level-system-architecture.md`, `docs/data-ingestion-architecture.md`, `docs/codemender-sast-report.md` |
 
 ---
 
-## 3. Sanitized Synthetic Raw Reference Materials (`reference/raw/` Only)
+## 1. Executive Summary & Problem Framing (As-Is)
 
-To ensure zero confidential or proprietary plant information is stored or shared in the repository while enabling a true end-to-end agentic workflow, `reference/wiki/` is completely removed and `reference/raw/` contains **21 synthetic chemical engineering PDF documents** (`Acme Petrochemical Demo Complex — Unit 2300`) generated deterministically by `scripts/generate_synthetic_reference.py` covering **all engineering document types and subtypes**:
+### 1.1 Business Context, As-Is Purpose & Brownfield Track Classification
+- **Current System Purpose & Footprint:** This repository (`https://github.com/pantana-na/engineering-kg-and-extractor.git`) hosts the **Chemical Engineering OKF Multi-Agent Knowledge Platform**, currently deployed as two separate Cloud Run web workbenches (`extracter-agent-web` and `okf-query-agent-web`) paired with two official Google ADK (`google-adk`) conversational agents (`extracter_orchestrator` and `okf_spanner_query_orchestrator`) on the **Gemini Enterprise Agent Platform (`agent_runtime`)**, backed by **Google Cloud Storage (GCS)**, **Google Cloud Spanner (Enterprise Edition — Property Graph, Vector, Full-Text & Lineage)**, and **Google Cloud Dataplex Universal Catalog (`dataplex_v1`)**.
+- **Upstream Evolution (`engineering-kg-gc` commit `2f8035b`):** A parallel repository (`https://github.com/pantana-na/engineering-kg-gc.git`) has progressed 16 commits ahead with native Office OOXML ingestion (`ooxml_parser.py`), alias twin consolidation, MOC authority tiering, fast memoized OKF indexing, externalized Cloud Run/Cloud Build config (`deploy_config.py` with Native IAP + Direct VPC egress + universal scale-to-zero `min_instances=0`), and `gemini-4-argon` defaults.
+- **Brownfield Track Classification:**
+  - [x] **Track B — Modern Cloud-Native Codebase:** Modern Python 3.11+ / FastAPI / Google ADK / Terraform stack requiring consolidation into a single unified workbench UI, Cloud Run Job offloading for long-running batch extraction & Spanner sync, native Spanner `ML.PREDICT` embeddings + ANN vector indexing, selectable Gemini 4 models, and WAF/SAIF 2.0 hardening.
 
-### 3.1 Synthetic Raw Engineering Documents (`reference/raw/`)
-Contains **21 primary synthetic engineering PDF files** across all 6 canonical subdirectories:
-- `data_sheets/` (`8` PDFs): Multi-page equipment and instrument process data sheets covering every subtype:
-  - Column/Vessel (`DS-V2301_Preflash_Column_Z1.pdf`)
-  - Reactor/Decomposer Drum (`DS-D2304_Decomposer_Reactor_Z1.pdf`)
-  - Shell & Tube Heat Exchanger (`DS-E2307_Reactor_Cooler_Z1.pdf`)
-  - Centrifugal Pump (`DS-P2301_Preflash_Bottoms_Pump_Z1.pdf`)
-  - Vacuum Ejector System (`DS-X2301_Flash_Column_Vacuum_System_Z1.pdf`)
-  - Control Valves (`DS-PS-0010_Control_Valve_Process_Datasheet_Z1.pdf`)
-  - Pressure Relief Valves (`DS-PS-0018_Pressure_Relief_Valve_Datasheet_Z1.pdf`)
-  - Flow, Pressure, Level & Temperature Instruments (`DS-PS-0031_Instrument_Process_Datasheet_Z1.pdf`)
-- `pid/` (`5` PDFs): Piping and Instrumentation Diagrams covering every subtype:
-  - Master Drawing Index & Equipment List (`PID-23-0000_Equipment_and_Drawing_List_Z1.pdf`)
-  - Safety Instrumented System (SIS) Cause & Effect Interlock Matrix (`PID-23-0002_Cause_and_Effect_Matrix_Z1.pdf`)
-  - Vector CAD P&ID Drawing without embedded text stream (`PID-23-0004_Preflash_Column_Z1.pdf`)
-  - Decomposer Reactor & Circulation P&ID with intentional cross-document design pressure discrepancy (`PID-23-0013_Decomposer_Reactor_Z1.pdf`)
-  - Pressure Relief & Flare Header P&ID (`PID-23-0022_Pressure_Relief_Header_Z1.pdf`)
-- `pfd/` (`2` PDFs): Process Flow Diagrams with Heat & Material Balances:
-  - Concentration & Preflash Section (`PFD-23-0001_Concentration_and_Preflash_Section_Z1.pdf`)
-  - Decomposer & Neutralization Section (`PFD-23-0005_Decomposer_and_Neutralization_Section_Z1.pdf`)
-- `standards/` (`4` PDFs): Corporate Engineering Standards, Risk/HAZOP Procedures & Safety Data Sheets:
-  - Corporate Risk Assessment, 5x5 Risk Matrix & HAZOP Study Procedure (`STD-PHA-001_Risk_Assessment_and_HAZOP_Procedure_R1.pdf`)
-  - Pressure Relief & Flare System Design Standard (`STD-ENG-014_Pressure_Relief_and_Flare_System_Design_R1.pdf`)
-  - Safety Data Sheet — Cumene Hydroperoxide (`SDS_80-15-9_cumene-hydroperoxide.pdf`)
-  - Safety Data Sheet — Phenol & Acetone (`SDS_108-95-2_phenol.pdf`)
-- `operating_manuals/` (`1` PDF): Plant Operating Manual covering Normal Operation, Startup/Shutdown & Emergency Trip Response (`OM-2300_Operating_Manual_Z1.pdf`).
-- `moc/` (`1` PDF): Approved Management of Change / Engineering Change Notice package (`MOC-2026-042_D2304_Quench_and_Setpoint_Upgrade_R1.pdf`) authorizing setpoint/parameter overrides and topological updates prior to P&ID/Data Sheet redrafting.
+### 1.2 As-Is Operational Scope & Autonomy Boundaries
+- **Automated Legacy Workflows & Batch Jobs:** Single-document extraction via in-process background Python `threading.Thread` inside `extracter_agent/web_server.py`; batch extraction and Cloud Spanner ingestion exist only as local CLI scripts (`scripts/ingest_okf_bundle_to_spanner.py`, `scripts/run_clean_pdf_extract_and_spanner_sync.sh`).
+- **Manual / Role-Gated Processes & Out-of-Scope Modules:** `reference/raw/` holds 11 immutable public reference PDFs (Seabrook P&IDs, Heat Exchanger Inspection Manual, HAZOP Training Guide, Risk Assessment Matrix) that must remain strictly read-only and preserved unchanged during v2 upgrades.
+- **Existing LLM / Agent Autonomy & HITL Gaps:** Both ADK agents implement `before_agent_callback` Model Armor screening, but lack `after_tool_callback` Indirect Prompt Injection (`PIJ`) screening, `after_model_callback` outbound DLP/URL allowlisting, and an externalized deterministic HITL confirmation gate for destructive Spanner purge operations from the UI.
 
-### 3.2 End-to-End Post-Deployment Extraction & Spanner Seeding Pipeline
-Instead of shipping pre-baked Markdown files in `reference/wiki/`, all OKF v0.2 `.md` files are produced dynamically by **`extracter_agent`** from `reference/raw/` after deployment and then ingested into **Cloud Spanner** via `scripts/ingest_okf_bundle_to_spanner.py`.
+### 1.3 Observed Baseline SLAs, Traffic & Quality Metrics
+- **Observed Operational Metrics:** Regional Cloud Run (`asia-southeast1`) + Regional Cloud Spanner Enterprise (`100` PUs). Initial `/api/status` and `/api/files` calls perform O(N) GCS listing, full `.md` parsing, SHA-256 hashing, and full `validate_okf_bundle_tool()` on every 8-second poll; `/api/spanner/hierarchy` runs 3 unpaginated full-table scans and ships the entire equipment tree to the browser.
+- **Observed Agent / LLM Baseline Metrics:** `query_agent` achieves `100%` trajectory precision and `1.000` groundedness in prior live evals (`specs/plan/QUERY_AGENT_EVAL_REPORT.md`), while model selection is static per deployment via `GEMINI_MODEL` env var (`gemini-3.8-flash` locally / `gemini-4-argon` in `engineering-kg-gc`).
 
 ---
 
-## 4. Open Knowledge Format (OKF v0.2) & Spanner Graph-RAG Baseline Contracts
+## 2. "As-Is" System Architecture, Topology & Reverse-Engineered Contracts
 
-1. **OKF v0.2 Markdown Document Structure (`extracter_agent` output & `sync_markdown_bundle_to_spanner` input):**
-   - UTF-8 Markdown file with `---` delimited YAML frontmatter (`type`, `title`, `description`, `resource`, `tags`, `sources: [{id, resource, title}]`, `generated`, `verified`, `status`, and `entity_metadata` including `moc_history`).
-   - Structured Markdown body sections (`## Design Data`, `## Operating Conditions`, `## Instrumentation & Control Loops (P&ID)`, `## Connections & Stream Summary`, `## Management of Change (MOC) & Revision History`, `## Hazards & Safeguards`) with inline `Source` columns, `⚠️ CONFLICT` callouts for unauthorized discrepancies, and `🔄 MOC PENDING REDRAFT` callouts for authorized MOC overrides.
-2. **Cloud Spanner Graph-RAG & Lineage Schema (`query_agent/spanner/schema.sql`):**
-   - 9 relational tables (`OkfConcepts`, `OkfSectionChunks`, `EngineeringEntities`, `FactAssertions`, `RawSourceDocuments`, `ProcessConnections`, `InstrumentControlEdges`, `ConceptWikiLinks`, `FactLineageEdges`) and ISO GQL Property Graph `OkfKnowledgeGraph`.
-   - 100% `.md`-only deterministic lifecycle sync (`sync_markdown_bundle_to_spanner`) supporting `ADDED`, `UPDATED`, `REMOVED`, and `UNCHANGED` `.md` states, and `FactLineageEdges.source_role` values `PRIMARY`, `CONFLICTING`, `MOC_AUTHORITY`, `PENDING_REDRAFT`, and `CONCEPT_CITATION`.
+### 2.1 "As-Is" Architecture Diagram
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Process Engineer
+    participant ExtUI as extracter-agent-web (Cloud Run #1)
+    participant QryUI as okf-query-agent-web (Cloud Run #2)
+    participant Agents as ADK Agents (agent_runtime)
+    participant GCS as Cloud Storage (Raw + OKF .md)
+    participant Spanner as Cloud Spanner (9 Tables + Graph)
+    participant Dataplex as Dataplex Universal Catalog
+
+    User->>ExtUI: Browse PDFs / Chat Extract (8s full-tree poll)
+    ExtUI->>GCS: Full list_blobs + parse/hash every .md
+    ExtUI->>Agents: In-process thread / ADK extraction
+    Note over GCS,Spanner: Manual CLI script required to sync GCS .md -> Spanner
+    User->>QryUI: Open separate URL for Query & Graph UI
+    QryUI->>Spanner: Full-table hierarchy scan + brute-force COSINE_DISTANCE
+    QryUI->>Dataplex: Inspect 3 asset entries (Catalog tab)
+```
+
+### 2.2 Tier / Component Interaction Flow & Existing Agent Topology
+| Tier / Layer | Existing Component | Technology & Version | Source Path(s) | Key Responsibilities & State Coupling |
+| :--- | :--- | :--- | :--- | :--- |
+| **Presentation / UI Tier** | Two separate 3-pane vanilla HTML/CSS/JS UIs | Vanilla JS + CSS + Cytoscape/Canvas | `extracter_agent/static/`, `query_agent/static/` | Eager DOM rendering of all files/tree nodes; 8s full-tree polling in Extractor; 450ms job polling in Query. |
+| **Business / Service Tier** | Two separate FastAPI servers + CLI ingestion scripts | Python 3.11+, FastAPI, Uvicorn | `extracter_agent/web_server.py`, `query_agent/web_server.py`, `scripts/ingest_okf_bundle_to_spanner.py` | In-memory `_EXTRACTION_JOBS`, `_QUERY_JOBS`, `_SESSIONS_META` dicts (lost on container restart/scale-out); synchronous sequential Spanner RPCs. |
+| **Data & Persistence Tier** | GCS buckets + Cloud Spanner Enterprise + Dataplex | GCS, Spanner SQL/GQL, `dataplex_v1` | `query_agent/spanner/schema.sql`, `query_agent/spanner/repository.py`, `query_agent/spanner/catalog_sync.py` | 9 Spanner tables + `OkfKnowledgeGraph`; Python-side `text-embedding-005` batching; missing ANN `VECTOR INDEX` and edge secondary indexes; 3 Dataplex asset entries. |
+| **LLM / Agent Layer** | Dual Google ADK Orchestrators | `google-adk`, Vertex AI Gemini | `extracter_agent/agent/`, `query_agent/orchestrator.py` | 8 Extractor `FunctionTool`s, 7 Query `FunctionTool`s; single static `GEMINI_MODEL` env var; pre-flight `before_agent_callback` only. |
+
+### 2.3 Current Compute Runtime, Config Inventory & Model Usage
+- **Current Compute & Hosting:** Two separate Cloud Run v2 services (`extracter-agent-web`, `okf-query-agent-web`) in `asia-southeast1` + two Vertex AI Agent Engine runtimes + one Cloud Spanner Enterprise instance (`100` PUs). No Cloud Run Job exists yet.
+- **Configuration Inventory (`.env` / `deploy_config.py`):**
+  | Config Key | Current Source | Purpose | Target Unified `.env` / Secret Manager Mapping |
+  | :--- | :--- | :--- | :--- |
+  | `GEMINI_MODEL` | `.env` (`gemini-3.8-flash` / `gemini-4-argon`) | Shared default model | Keep `GEMINI_MODEL`, add `EXTRACTER_DEFAULT_MODEL=gemini-4-carbon`, `QUERY_DEFAULT_MODEL=gemini-4-hydrogen`, `ALLOWED_GEMINI_MODELS` |
+  | `CLOUD_RUN_WEB_SERVICE` / `QUERY_WEB_SERVICE_NAME` | `.env` (two services) | Separate web service names | Consolidate to `UNIFIED_WEB_SERVICE_NAME=okf-engineering-workbench` + `PIPELINE_JOB_NAME=okf-pipeline-job` |
+  | `CLOUD_RUN_SECURITY_MODE` / `INGRESS` / `VPC_*` | `extracter_agent/deploy_config.py` | Externalized IAP/Direct VPC flags | Reuse 4-level precedence for unified web service & Cloud Run Job |
+  | `SPANNER_INSTANCE_ID` / `SPANNER_DATABASE_ID` / `EMBEDDING_MODEL` | `.env` | Spanner + `text-embedding-005` | Add `SPANNER_NATIVE_EMBEDDING_MODE=native_ml_predict`, `SPANNER_EMBEDDING_LOCATION` |
+- **Current Model Selection & Runtime Coupling:** Single global `GEMINI_MODEL` env variable with no UI model selector and no per-request allowlist validation.
+
+### 2.4 Reverse-Engineered Data Models, API Contracts & Hidden Business Logic Matrix
+- **Core Data Entities & Schemas:** `query_agent/spanner/schema.sql` defines 9 tables (`RawSourceDocuments`, `OkfConcepts`, `OkfSectionChunks`, `EngineeringEntities`, `FactAssertions`, `ProcessConnections`, `InstrumentControlEdges`, `ConceptWikiLinks`, `FactLineageEdges`) and `PROPERTY GRAPH OkfKnowledgeGraph`.
+- **Existing Endpoints:**
+  - Extractor: `GET /healthz`, `GET /api/status`, `GET /api/files`, `GET /api/raw-pdf/{sub}/{file}`, `GET /api/okf/{id}`, `POST /api/chat/extract`, `GET /api/chat/jobs/{id}`.
+  - Query: `GET /healthz`, `GET /api/status`, `GET /api/spanner/hierarchy`, `GET /api/spanner/graph`, `GET /api/spanner/concept/{id}`, `GET /api/catalog`, `POST /api/catalog/sync`, `POST /api/query/session/new`, `POST /api/query/chat`, `GET /api/query/jobs/{id}`.
+- **Hidden Business Logic Extraction Matrix:**
+  | Logic ID | Source Location | Discovered Business Rule / Calculation | Side Effects / State Mutations | Target Destination in Modernized SDD |
+  | :--- | :--- | :--- | :--- | :--- |
+  | `BL-001` | `extracter_agent/web_server.py:_normalize_seeded_bundle` | Auto-repairs missing YAML `type` and `sources.resource` on disk after GCS sync | Re-reads and rewrites `.md` files on local disk during status polling | Move normalization exclusively to write/extraction time & Cloud Run Job; keep read/status endpoints pure read-only. |
+  | `BL-002` | `extracter_agent/web_server.py:extract_live_endpoint` | Runs single-doc extraction in a daemon Python `threading.Thread` inside the web container | Lost on scale-to-zero or container eviction; times out on batch runs | Offload batch extraction & Spanner sync to `okf-pipeline-job` Cloud Run Job (`JOB_MODE=extract\|sync\|extract_and_sync`). |
+  | `BL-003` | `query_agent/spanner/repository.py:hybrid_rrf_search` | Computes query embedding in Python SDK and scans all rows with exact `COSINE_DISTANCE` | O(N) full-table scan over `OkfSectionChunks` | Upgrade to Spanner native `CREATE MODEL` + `ML.PREDICT` + `CREATE VECTOR INDEX` (`APPROX_COSINE_DISTANCE`) with small-table fallback. |
+  | `BL-004` | `query_agent/spanner/catalog_sync.py:_emit_openlineage_events` | Emits OpenLineage events with static hardcoded `runId` UUIDs | Overwrites run history in Dataplex Lineage | Generate fresh UUID per sync execution (`job_execution_id`). |
 
 ---
 
-## 5. System Invariants & Quality Rules
+## 3. "As-Is" Security, Privacy & SAIF Gap Assessment
 
-1. **Reference Immutability & Confidentiality Invariant (Rule 14):** Under no circumstances may any agent or tool modify, delete, or write into `reference/raw/` at runtime, and zero confidential customer/licensor documents or hardcoded GCP project identifiers may be committed to version control.
-2. **Zero Regex / Keyword Routing Invariant (Rule 11):** Intent classification, tool routing, and entity resolution in both `extracter_agent` and `query_agent` use cognitive model-driven reasoning (`gemini-3.8-flash`) with structured schemas; hardcoded keyword heuristics are prohibited.
-3. **100% `.md`-Only Spanner Ingestion Invariant:** `sync_markdown_bundle_to_spanner()` derives all Spanner nodes, edges, chunks, and PDF source provenance strictly from `.md` files extracted by `extracter_agent` without scanning `reference/raw/`.
-4. **100% Spanner-Only Query Execution Invariant:** `query_agent` executes all engineering, graph, lineage, and HAZOP queries against Cloud Spanner and Dataplex Universal Catalog with zero GCS or PDF reads at query time.
-5. **Dual-Value Conflict & MOC Lineage Preservation Invariant:** Whenever unauthorized cross-document conflicts (`has_conflict = TRUE` / `⚠️ CONFLICT`) or authorized MOC overrides (`🔄 MOC PENDING REDRAFT`) exist, both `extracter_agent` and `query_agent` preserve and surface both competing values alongside their respective source PDF citations and lineage roles (`PRIMARY`/`CONFLICTING` vs `MOC_AUTHORITY`/`PENDING_REDRAFT`).
+### 3.1 Existing Input/Output Validation & Guardrail Gaps
+- **Application Security & SAST Baseline:** Prior CodeMender SAST scans remediated path traversal, focus_tag injection, and XSS vectors in `engineering-kg-gc` (`docs/codemender-security-audit-summary.md`).
+- **Prompt Injection & DLP Callback Gaps:** Both agents enforce `before_agent_callback` Model Armor checks, but lack `after_tool_callback` Indirect Prompt Injection (`PIJ`) inspection on untrusted document/tool payloads and `after_model_callback` outbound DLP/URL allowlist enforcement.
+
+### 3.2 Existing Identity, Authorization & Execution Isolation
+- **As-Is Auth & IAM Posture:** `engineering-kg-gc` uses Pattern 1B Direct Cloud Run Native IAP (`--iap`, `--no-allow-unauthenticated`, zero `allUsers`), but the FastAPI backend does not yet cryptographically verify `x-goog-iap-jwt-assertion` headers on every request.
+- **Confused-Deputy & Sandboxing Gaps:** Need IAP verified user identity propagation (`X-Goog-Authenticated-User-Email` validated via IAP JWT) into audit logs and externalized deterministic HITL gate (`X-Confirm-Purge` + `X-Idempotency-Key`) for destructive Spanner purge triggers.
+
+### 3.3 Existing Network Perimeter, Secrets & Compliance Posture
+- **Perimeter & Encryption Gaps:** Direct VPC Egress (`--vpc-egress=all-traffic`) is externalized in `deploy_config.py`; Terraform lacks Cloud Run Job resource, Spanner AI Platform IAM binding (`roles/aiplatform.user` for Spanner service agent), and unified FinOps labels (`env`, `service`, `owner`, `cost_center`).
+
+### 3.4 Governance (Rules 1–13), WAF 6-Pillar & SAIF Gap Matrix
+| Governance Rule / Framework | Applicability | Current Brownfield State ("As-Is") | Status | Target SDD Remediation |
+| :--- | :--- | :--- | :--- | :--- |
+| **Google Cloud WAF 6 Pillars** | **Universal** | Missing ANN vector index, missing edge secondary indexes, full-table hierarchy scans, missing IAP JWT verification, no Cloud Run Job offloading. | `Partial` | Remediate across Sections 2–6 of `SPEC-20261120-UNIFIED-WORKBENCH-V2.md`. |
+| **Pre-Build CodeMender SAST & SLSA L3 (Rules 3–4)** | **Universal** | Remediated in `engineering-kg-gc`, must re-verify after unified v2 UI/API/Job changes. | `Audited` | Re-run CodeMender SAST & unit/PBT suite before Phase 3 deploy. |
+| **Cloud Run `/healthz`, Unified `.env` & Zero-Trust IAM (Rules 6, 8, 10)** | **Universal** | `/healthz`, unified `.env`, and Pattern 1B Native IAP flags exist; backend IAP JWT verification missing. | `Partial` | Add cryptographic `x-goog-iap-jwt-assertion` verifier middleware + unified service config. |
+| **4-Step RCA & Zero Mockup Fallbacks (Rule 13)** | **Universal** | Compliant across existing agents; must preserve typed degraded responses for Job API / Spanner outages. | `Compliant` | Maintain typed `UPSTREAM_UNAVAILABLE_DEGRADED` responses in all v2 endpoints. |
+| **Dual-Runtime, Google ADK, SAIF 2.0 & Live Eval (Rules 11–12)** | **`[AI-Agent Only]`** | `before_agent_callback` present; missing `after_tool_callback` Indirect `PIJ`, `after_model_callback` URL/DLP scrub, and per-session step/token budgets (`DMS`). | `Partial` | Add complete 4-point callbacks, execution budgets, and deterministic purge HITL gate. |
+
+---
+
+## 4. "As-Is" Resiliency, Reliability & State Integrity
+
+### 4.1 Timeouts, Rate Limits & Anti-Loop Gaps
+- **Universal:** Cloud Run web timeout is `900s`, insufficient for large batch extractions (100–5,000 docs) or full Spanner re-ingestion with embeddings; no explicit per-user rate limit middleware for Pattern 1B.
+- **AI-Agent Only:** ADK runners lack explicit max-turn / tool-hop budget enforcement per session (`DMS`).
+
+### 4.2 Idempotency, Stateful Coupling & Transactions
+- **State Integrity:** `_EXTRACTION_JOBS`, `_QUERY_JOBS`, and `_SESSIONS_META` live in process RAM (non-shared across Cloud Run instances); no `X-Idempotency-Key` deduplication on batch job triggers or Spanner sync calls.
+
+### 4.3 Current HA, Error Handling & Model Fallback Gaps
+- **Universal:** Cloud Run scales to zero (`min_instances=0`) in regional multi-zone deployment; Spanner runs in regional multi-zone `asia-southeast1`.
+- **AI-Agent Only:** Single static model ID; v2 adds allowlisted selectable Gemini 4 models (`gemini-4-carbon`, `gemini-4-hydrogen`, `gemini-4-argon`, `gemini-4-neon`) with `HttpRetryOptions` exponential backoff.
+
+---
+
+## 5. "As-Is" Observability, Characterization Safety Net & AgentOps
+
+### 5.1 Current Health Probes, Tracing & Monitoring Gaps
+- **Universal:** Both servers expose `GET /healthz`; structured JSON logging with `trace`/`spanId` and dependency readiness checks need standardization across the unified service and `okf-pipeline-job`.
+
+### 5.2 Current Logging & Audit Trail Posture
+- **Universal:** Standard Python `logging` to stdout; needs consistent JSON formatting and verified IAP user principal attribution for pipeline job triggers.
+
+### 5.3 Characterization Test Suite (Golden Master), Baseline PBTs, CI/CD & Baseline Eval
+- **Deterministic Characterization Tests:** `tests/test_agent_unit.py`, `tests/test_models_unit.py`, `tests/test_okf_unit.py`, `tests/test_query_agent_unit.py`, `tests/test_alias_twin_consolidation.py`, `tests/test_deploy_and_model_config.py`, `tests/test_moc_and_revision_lifecycle.py`, `tests/test_multiformat_ingestion.py`.
+- **Generative Property-Based Tests (PBT):** `tests/test_okf_property.py` and Hypothesis PBTs inside `tests/test_deploy_and_model_config.py` and `tests/test_moc_and_revision_lifecycle.py`.
+- **As-Is CI/CD Pipeline:** `cloudbuild.yaml` + `deploy.sh` + `terraform/` (Infrastructure Manager compatible).
+- **Baseline Agent Evaluation:** `specs/plan/QUERY_AGENT_EVAL_REPORT.md` (`100%` pass rate, `1.000` trajectory precision, `1.000` groundedness).
+
+---
+
+## 6. "As-Is" Performance, Caching & Cost / FinOps Baseline
+
+### 6.1 Observed Latency Bottlenecks & Current Caching
+- **Extractor UI Bottlenecks:** `sync_bundle_from_gcs()` lists all blobs every 6s; `list_all_okf_files()` reads, parses YAML, and hashes every `.md` file on every `/api/status` and `/api/files` request; `/api/status` additionally executes `validate_okf_bundle_tool()` across the full bundle; frontend polls every 8s and renders all DOM nodes eagerly.
+- **Query UI & Spanner Bottlenecks:** Unindexed brute-force `COSINE_DISTANCE`, missing secondary indexes on graph edge tables, 3 full-table scans on `/api/spanner/hierarchy`, sequential RPCs in `/api/spanner/concept/{id}`, and 9 sequential `SELECT COUNT(*)` queries in `get_live_counts()`.
+
+### 6.2 Current Infrastructure Run-Rate, Sustainability (`CFE %`) & Token Spend
+- **Universal:** Universal scale-to-zero (`min_instances=0`) on Cloud Run minimizes idle compute cost; primary fixed baseline cost is Cloud Spanner Enterprise (`100` PUs in `asia-southeast1`). Dataplex catalog overhead is negligible (3 asset entries).
+
+---
+
+## 7. Ambiguity Triage Log (`ask_question`) & Modernization ADRs
+
+### 7.1 Ambiguities, Legacy Quirks & Defect Triage Log (`ask_question` Decisions)
+| Item ID | Source Location | Observed Behavior / Anomaly | User Decision (`ask_question`) | Action in Target Spec |
+| :--- | :--- | :--- | :--- | :--- |
+| `AMB-01` | `engineering-kg-gc` sync | Contains `extracted_gc_knowledge_temp/` (350 GC `.md` files), GC eval datasets, and old `_agents/` | Exclude `extracted_gc_knowledge_temp/` & GC evals; preserve local `reference/`, `_agents/`, `AGENTS.md`, and custom `docs/` | Codified in `SPEC-20261120-UNIFIED-WORKBENCH-V2` Step 1. |
+| `AMB-02` | `extracter_agent` + `query_agent` | Two separate Cloud Run services & static UIs | Merge into one unified Cloud Run service (`okf-engineering-workbench`) using modernized zero-build Vanilla ES Modules + CSS Design System | Codified in `SPEC-20261120-UNIFIED-WORKBENCH-V2` §§2 & 9. |
+| `AMB-03` | `scripts/ingest_okf_bundle_to_spanner.py` | Batch extraction & Spanner sync only runnable via CLI; risk of HTTP timeout | Deploy single parameterized Cloud Run Job (`okf-pipeline-job`) with `JOB_MODE=extract\|sync\|extract_and_sync`, triggered from Extractor UI | Codified in `SPEC-20261120-UNIFIED-WORKBENCH-V2` §§2 & 4. |
+| `AMB-04` | `query_agent/spanner/schema.sql` | Python-side embeddings + brute-force `COSINE_DISTANCE` + missing edge indexes | Upgrade to Spanner Native `CREATE MODEL` + `ML.PREDICT` embeddings + ANN `VECTOR INDEX` + edge secondary indexes | Codified in `SPEC-20261120-UNIFIED-WORKBENCH-V2` §§2 & 6. |
+
+### 7.2 Confirmed Modernization Strategy & Architectural Decision Records (`ADRs`)
+- **Confirmed Modernization Strategy (via `ask_question`):**
+  - [x] **ADR-01 (In-Place Cloud-Native Hardening & Consolidation — Track B):** Sync upstream code improvements from `engineering-kg-gc`, consolidate the two web workbenches into a single Cloud Run service (`okf-engineering-workbench`) + single parameterized Cloud Run Job (`okf-pipeline-job`), upgrade Spanner to native `ML.PREDICT` embeddings + ANN vector/edge indexes, and harden under WAF 6 Pillars + SAIF 2.0.
+- **ADR-02 (Reference Data Immutability Invariant):** `reference/raw/` remains strictly immutable and untouched by upstream syncs or runtime agents.
+
+---
+
+## 8. "As-Is" Failure Mode & Effects Analysis (FMEA) & Migration Risks
+
+| ID | Legacy Component / Migration Boundary | Failure Mode / Cutover Risk | Impact | Detection Signal | Mitigation & Cutover Safeguard |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **FMEA-01** | Upstream Sync (`engineering-kg-gc`) | Accidentally overwriting `reference/`, `_agents/`, `AGENTS.md`, or leaking GC-specific data | Loss of local reference PDFs or v2 governance rules | `git status` & automated sync diff audit | Explicit exclusion list during sync + regression test asserting `reference/raw/` integrity. |
+| **FMEA-02** | In-Process Async Threads (`web_server.py`) | Container scale-to-zero or 900s timeout terminates batch extraction or Spanner sync | Partial OKF bundle or incomplete Spanner graph | Job status 404 or timeout | Offload batch extraction & Spanner sync to Cloud Run Job (`okf-pipeline-job`, up to 3600s+ timeout) with GCS manifest progress. |
+| **FMEA-03** | Cloud Spanner DDL Migration | Existing live Spanner DB lacks `OkfTextEmbeddingModel`, `idx_okf_chunks_vec`, or new edge indexes | Query failures if code assumes indexes exist unconditionally | Spanner `NotFound` / DDL error | Provide idempotent `ensure_schema_v2()` DDL migration helper + automatic graceful fallback from `APPROX_COSINE_DISTANCE` / `ML.PREDICT` when running in-memory or pre-migration. |

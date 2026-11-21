@@ -22,9 +22,27 @@ from query_agent.config import get_config
 logger = logging.getLogger(__name__)
 
 try:
+    from extracter_agent.models.domain import _extract_equipment_base_id
+    from extracter_agent.okf.synthesizer import is_moc_source
     from extracter_agent.tools.pdf_tools import _match_pdf_candidate
 except ImportError:
     _match_pdf_candidate = None  # type: ignore[assignment]
+
+    def _extract_equipment_base_id(tag: str) -> str:
+        clean = re.sub(r"[\s/_]+", "", (tag or "").strip().upper())
+        m = re.match(r"^((?:(?:1-)?[A-Z]{2,3}-)?[A-Z]{1,4}-\d+)", clean)
+        return m.group(1) if m else clean
+
+    def is_moc_source(src: str, explicit_moc_sources: set[str] | None = None) -> bool:
+        if not src:
+            return False
+        s_low = src.strip().lower()
+        return bool(
+            re.search(r"(?:^|/|\\)moc(?:/|\\)", s_low)
+            or re.search(r"\b(?:moc|ecn|fcr|pcr|dcn)[-_#\s]*\d+", s_low)
+        )
+
+
 from query_agent.models.schemas import (
     BundleGraphExtractionResult,
     ConceptWikiLinkEdge,
@@ -40,9 +58,14 @@ from query_agent.models.schemas import (
 )
 
 _EQUIP_TAG_RE = re.compile(r"\b((?:(?:1-)?[A-Z]{2,3}-)?[A-Z]{1,3}-\d{1,4}[A-Z0-9/]*)\b")
+_STRICT_PLANT_EQUIP_TAG_RE = re.compile(
+    r"^(?:(?:1-)?[A-Z]{2,3}-)?(?:D|E|P|K|C|R|T|V|F|B|G|H|M|S|U|W|X|Z|OX)-\d{3,4}[A-Z0-9]*$",
+    re.IGNORECASE,
+)
 _INST_TAG_RE = re.compile(r"\b((?:(?:1-)?[A-Z]{2,3}-)?[A-Z]{2,5}[- ](?:\d{2}-)?\d{3,4}[A-Z0-9/\-]*)\b")
 _LINE_ID_RE = re.compile(r"\b([A-Z]{1,4}-\d{2}-\d{6}[A-Z0-9-]*)\b")
 _WIKILINK_RE = re.compile(r"\[\[([^\[\]|#]+)(?:#[^\[\]|]+)?(?:\|[^\[\]]+)?\]\]")
+_MD_LINK_RE = re.compile(r"\[([^\[\]]+)\]\(([^()\s]+)\)")
 _BRACKET_CIT_RE = re.compile(r"\[([^\[\]]{3,120})\]")
 
 
@@ -425,8 +448,13 @@ def extract_bundle_graph_and_lineage(
 
     # Pass 1: Build the .md-derived RawSourceNode catalog & concept metadata map 100% from .md files
     known_concept_ids: set[str] = set()
+    known_concept_ids_lower: dict[str, str] = {}
     stem_to_concept_id: dict[str, str] = {}
+    stem_lower_to_concept_id: dict[str, str] = {}
     equipment_meta_by_slug: dict[str, tuple[str, str, str, str]] = {}
+    alias_to_equip_slug: dict[str, str] = {}
+    base_id_to_equip_slugs: dict[str, list[str]] = {}
+
     for scan_md in all_bundle_md_files or target_md_files:
         try:
             try:
@@ -435,12 +463,25 @@ def extract_bundle_graph_and_lineage(
                 scan_rel = (
                     f"{scan_md.parent.name}/{scan_md.name}"
                     if scan_md.parent.name
-                    in ("equipment", "units", "hazards", "hazop", "instruments", "logs")
+                    in (
+                        "equipment",
+                        "units",
+                        "hazards",
+                        "hazop",
+                        "instruments",
+                        "procedures",
+                        "troubleshooting",
+                        "parameters",
+                        "sources",
+                        "logs",
+                    )
                     else scan_md.name
                 )
             scan_cid = scan_rel.removesuffix(".md")
             known_concept_ids.add(scan_cid)
+            known_concept_ids_lower[scan_cid.lower()] = scan_cid
             stem_to_concept_id.setdefault(scan_md.stem, scan_cid)
+            stem_lower_to_concept_id.setdefault(scan_md.stem.lower(), scan_cid)
 
             scan_text = scan_md.read_text(encoding="utf-8", errors="replace")
             fm_scan, _ = _parse_md_frontmatter_and_body(scan_text, scan_md.stem)
@@ -467,9 +508,164 @@ def extract_bundle_graph_and_lineage(
                                 break
                 s_unit = s_unit[:64]
                 equipment_meta_by_slug[scan_md.stem] = (s_title, s_class, s_unit, scan_cid)
+                alias_to_equip_slug[scan_md.stem.upper()] = scan_md.stem
+                meta_tag_str = str(s_em.get("tag") or "").strip()
+                if meta_tag_str:
+                    alias_to_equip_slug.setdefault(
+                        meta_tag_str.replace("/", "").upper(), scan_md.stem
+                    )
+                for al in s_em.get("aliases") or []:
+                    if isinstance(al, str) and al.strip():
+                        alias_to_equip_slug.setdefault(
+                            al.strip().replace("/", "").upper(), scan_md.stem
+                        )
+                b_id = _extract_equipment_base_id(scan_md.stem.upper())
+                if b_id:
+                    slug_list = base_id_to_equip_slugs.setdefault(b_id, [])
+                    if scan_md.stem not in slug_list:
+                        slug_list.append(scan_md.stem)
         except Exception as exc:
             logger.debug("Skipping scan_md %s in Pass 1: %s", scan_md, exc)
             continue
+
+    def _resolve_graph_equip_slugs(raw_tag_str: str) -> list[str]:
+        """Resolve an equipment endpoint string to one or more canonical equipment or boundary slugs.
+
+        Supports:
+        1. Explicit Markdown links `[Label](/equipment/<Slug>.md)` and WikiLinks `[[equipment/<Slug>]]`.
+        2. Multi-target strings (`'P-2302AB / P-2303AB'` -> `['P-2302AB', 'P-2303AB']`).
+        3. Frontmatter `aliases` and structural base-ID family matching (`'E-2307'` -> `'E-2307AB'`, `'X-2309A'` -> `'X-2309AB'`).
+        4. Non-equipment process boundary / header endpoints (`'ATMOSPHERE'`, `'CLOSED-DRAIN'`, `'53-0051'`).
+        """
+        raw_s = (raw_tag_str or "").strip()
+        if not raw_s:
+            return []
+
+        resolved: list[str] = []
+
+        def _add_slug(s: str) -> None:
+            if s and s not in resolved:
+                resolved.append(s)
+
+        # 1. Check explicit /equipment/ links first
+        for m_md in _MD_LINK_RE.finditer(raw_s):
+            href = m_md.group(2).strip().split("#")[0].strip("/").removesuffix(".md")
+            if href.startswith("equipment/"):
+                eq_s = href.split("/")[-1]
+                if eq_s in equipment_meta_by_slug:
+                    _add_slug(eq_s)
+                elif eq_s.upper() in alias_to_equip_slug:
+                    _add_slug(alias_to_equip_slug[eq_s.upper()])
+        for m_wl in _WIKILINK_RE.finditer(raw_s):
+            w_t = m_wl.group(1).strip().removesuffix(".md").removeprefix("wiki/")
+            if w_t.startswith("equipment/"):
+                eq_s = w_t.split("/")[-1]
+                if eq_s in equipment_meta_by_slug:
+                    _add_slug(eq_s)
+                elif eq_s.upper() in alias_to_equip_slug:
+                    _add_slug(alias_to_equip_slug[eq_s.upper()])
+
+        # Strip Markdown links & formatting to inspect the text tokens
+        t_clean = re.sub(r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", raw_s)
+        t_clean = re.sub(r"\[\[([^\[\]|#]+)(?:#[^\[\]|]+)?(?:\|([^\[\]]+))?\]\]", lambda m: m.group(2) or m.group(1), t_clean)
+        t_clean = t_clean.strip("*_` ")
+        if not t_clean or t_clean.upper() in ("—", "-", "N/A", "NONE", "TBD", "VARIOUS"):
+            return resolved
+
+        def _resolve_single_token(tok: str) -> list[str]:
+            cand = tok.strip().replace("/", "").upper()
+            if not cand:
+                return []
+            if cand in equipment_meta_by_slug:
+                return [cand]
+            if cand in alias_to_equip_slug:
+                return [alias_to_equip_slug[cand]]
+            # Strip leading unit prefix (e.g. '1-CDN-D-2304' -> 'D-2304')
+            stripped_unit = re.sub(r"^(?:1-)?[A-Z]{2,3}-(?=[A-Z]{1,3}-\d)", "", cand)
+            if stripped_unit in alias_to_equip_slug:
+                return [alias_to_equip_slug[stripped_unit]]
+
+            # Structural base-ID family matching (e.g. 'E-2307' -> 'E-2307AB', 'X-2309A' -> 'X-2309AB')
+            for probe in (cand, stripped_unit):
+                b_id = _extract_equipment_base_id(probe)
+                if b_id and b_id in base_id_to_equip_slugs:
+                    fam_slugs = base_id_to_equip_slugs[b_id]
+                    if len(fam_slugs) == 1:
+                        return [fam_slugs[0]]
+                    suffix = probe[len(b_id) :]
+                    if suffix:
+                        matching_train = [
+                            fs
+                            for fs in fam_slugs
+                            if suffix in fs.upper()[len(b_id) :]
+                        ]
+                        if matching_train:
+                            matching_train.sort(key=len, reverse=True)
+                            return [matching_train[0]]
+                    fam_sorted = sorted(fam_slugs, key=len, reverse=True)
+                    return [fam_sorted[0]]
+            return [cand]
+
+        # Extract all plant equipment tag tokens in t_clean
+        tag_tokens = re.findall(
+            r"\b(?:(?:1-)?[A-Z]{2,3}-)?(?:D|E|P|K|C|R|T|V|F|B|G|H|M|S|U|W|X|Z|OX)-\d{3,4}[A-Z0-9]*(?:/[A-Z0-9]+)*\b",
+            t_clean,
+            re.IGNORECASE,
+        )
+        if tag_tokens:
+            for tok in tag_tokens:
+                for r_slug in _resolve_single_token(tok):
+                    _add_slug(r_slug)
+            return resolved
+
+        # Check if any known equipment slug appears as a whole token
+        for known_slug in sorted(equipment_meta_by_slug, key=len, reverse=True):
+            if re.search(
+                rf"(?<![A-Z0-9]){re.escape(known_slug)}(?![A-Z0-9])",
+                t_clean,
+                re.IGNORECASE,
+            ):
+                _add_slug(known_slug)
+        if resolved:
+            return resolved
+
+        # Non-equipment process boundary / header / line endpoint
+        bnd_slug = re.sub(r"[^\w\-]+", "-", t_clean.upper()).strip("-_")[:120]
+        if bnd_slug:
+            _add_slug(bnd_slug)
+        return resolved
+
+    def _resolve_graph_equip_slug(raw_tag_str: str) -> str:
+        slugs = _resolve_graph_equip_slugs(raw_tag_str)
+        return slugs[0] if slugs else ""
+
+    def _resolve_concept_link_target(raw_target: str) -> str:
+        """Resolve a WikiLink or Markdown link target to a canonical concept_id in known_concept_ids."""
+        t = (raw_target or "").strip()
+        if not t or t.startswith(("http://", "https://", "mailto:", "gs://", "#")):
+            return ""
+        t = t.split("#")[0].split("?")[0].strip()
+        if not t or t.lower().endswith(".pdf"):
+            return ""
+        t = re.sub(r"^(?:\.\./|\./|/)+", "", t)
+        t = t.removeprefix("wiki/").removesuffix(".md").strip("/")
+        if not t or t in ("index", "log") or t.endswith(("/index", "/log")):
+            return ""
+        if t in known_concept_ids:
+            return t
+        if t.lower() in known_concept_ids_lower:
+            return known_concept_ids_lower[t.lower()]
+        if t in stem_to_concept_id:
+            return stem_to_concept_id[t]
+        if t.lower() in stem_lower_to_concept_id:
+            return stem_lower_to_concept_id[t.lower()]
+        if t.startswith("equipment/"):
+            eq_part = t.split("/", 1)[-1]
+            eq_slugs = _resolve_graph_equip_slugs(eq_part)
+            for es in eq_slugs:
+                if es in equipment_meta_by_slug:
+                    return equipment_meta_by_slug[es][3]
+        return ""
 
     # Pass 2: Extract concepts, chunks, entities, parameters, conflicts, and graph/lineage edges for target_md_files
     for md_path in target_md_files:
@@ -479,7 +675,18 @@ def extract_bundle_graph_and_lineage(
             rel_path = (
                 f"{md_path.parent.name}/{md_path.name}"
                 if md_path.parent.name
-                in ("equipment", "units", "hazards", "hazop", "instruments", "logs")
+                in (
+                    "equipment",
+                    "units",
+                    "hazards",
+                    "hazop",
+                    "instruments",
+                    "procedures",
+                    "troubleshooting",
+                    "parameters",
+                    "sources",
+                    "logs",
+                )
                 else md_path.name
             )
         concept_id = rel_path.removesuffix(".md")[:256]
@@ -565,6 +772,20 @@ def extract_bundle_graph_and_lineage(
                     if r_node not in concept_source_nodes:
                         concept_source_nodes.append(r_node)
 
+        # Also register any MOC sources from entity_metadata.moc_history
+        explicit_moc_ids: set[str] = set()
+        for m_item in em.get("moc_history") or []:
+            if isinstance(m_item, dict) and m_item.get("moc_id"):
+                m_id_str = str(m_item["moc_id"]).strip()
+                explicit_moc_ids.add(m_id_str)
+                m_node = _source_node_from_md_reference(
+                    m_id_str,
+                    bucket_name=cfg.destination_gcs_bucket,
+                    raw_prefix=cfg.source_gcs_raw_prefix,
+                )
+                if m_node:
+                    raw_sources_by_id.setdefault(m_node.source_id, m_node)
+
         # Build Header-Preserved Section Chunks
         concept_chunks = chunk_markdown_preserving_headers(
             concept_id=concept_id,
@@ -626,16 +847,23 @@ def extract_bundle_graph_and_lineage(
                 ),
             )
 
-        # Extract [[wikilinks]] -> ConceptWikiLinkEdge (and Hazard/Equipment edges)
+        # Dual-syntax ConceptWikiLinkEdge extraction: [[wikilinks]] AND standard Markdown [label](/cat/slug.md)
         current_sec = "Overview"
         for line in (body_md or raw_text).splitlines():
             if line.startswith("## "):
                 current_sec = line[3:].strip()
             for m in _WIKILINK_RE.finditer(line):
-                target_cid = m.group(1).strip().removesuffix(".md")
-                target_cid = target_cid.removeprefix("wiki/")
-                if target_cid not in known_concept_ids and target_cid in stem_to_concept_id:
-                    target_cid = stem_to_concept_id[target_cid]
+                target_cid = _resolve_concept_link_target(m.group(1))
+                if target_cid and target_cid != concept_id:
+                    e_id = compute_deterministic_id(concept_id, target_cid, current_sec, prefix="WL")
+                    wikilink_edges_by_id[e_id] = ConceptWikiLinkEdge(
+                        edge_id=e_id,
+                        from_concept_id=concept_id,
+                        to_concept_id=target_cid,
+                        section_heading=current_sec,
+                    )
+            for m_md in _MD_LINK_RE.finditer(line):
+                target_cid = _resolve_concept_link_target(m_md.group(2))
                 if target_cid and target_cid != concept_id:
                     e_id = compute_deterministic_id(concept_id, target_cid, current_sec, prefix="WL")
                     wikilink_edges_by_id[e_id] = ConceptWikiLinkEdge(
@@ -645,38 +873,44 @@ def extract_bundle_graph_and_lineage(
                         section_heading=current_sec,
                     )
 
-        def _resolve_graph_equip_slug(raw_tag_str: str) -> str:
-            t_clean = re.sub(r"^\[([^\]]+)\]\([^)]+\)$", r"\1", (raw_tag_str or "").strip()).strip("*_` ")
-            if not t_clean or t_clean in ("—", "-", "N/A", "None"):
-                return ""
-            cand_slug = t_clean.replace("/", "")
-            if cand_slug in equipment_meta_by_slug:
-                return cand_slug
-            for known_slug in sorted(equipment_meta_by_slug, key=len, reverse=True):
-                if (
-                    cand_slug.upper().endswith(f"-{known_slug.upper()}")
-                    or cand_slug.upper() == known_slug.upper()
-                    or re.search(rf"(?<![A-Z0-9]){re.escape(known_slug)}(?![A-Z0-9])", t_clean, re.IGNORECASE)
-                ):
-                    return known_slug
-            return re.sub(r"[^\w\-]+", "_", cand_slug).strip("_")[:120]
+        def _ensure_graph_endpoint_entity(eq_slug: str) -> str:
+            """Ensure a graph node exists for a connection endpoint.
 
-        def _ensure_equip_entity(eq_slug: str) -> str:
-            ent_id = f"EQ:{eq_slug}"[:256]
+            Classifies indexed equipment and valid plant equipment tags as EQUIPMENT ('EQ:<slug>'),
+            and non-equipment headers/boundaries (e.g. 'ATMOSPHERE', 'CLOSED-DRAIN', '53-0051')
+            as PROCESS_BOUNDARY ('BND:<slug>').
+            """
             eq_meta = equipment_meta_by_slug.get(eq_slug)
+            if eq_meta is not None or _STRICT_PLANT_EQUIP_TAG_RE.match(eq_slug):
+                ent_id = f"EQ:{eq_slug}"[:256]
+                entities_by_id.setdefault(
+                    ent_id,
+                    EngineeringEntityNode(
+                        entity_id=ent_id,
+                        entity_type="EQUIPMENT",
+                        canonical_tag=eq_slug[:128],
+                        name=(eq_meta[0] if eq_meta else eq_slug)[:512],
+                        equipment_class=(eq_meta[1] if eq_meta else "Equipment")[:128],
+                        unit=((eq_meta[2] if eq_meta and eq_meta[2] else unit) or "")[:64],
+                        concept_id=(eq_meta[3] if eq_meta else f"equipment/{eq_slug}")[:256],
+                    ),
+                )
+                return ent_id
+
+            bnd_id = f"BND:{eq_slug}"[:256]
             entities_by_id.setdefault(
-                ent_id,
+                bnd_id,
                 EngineeringEntityNode(
-                    entity_id=ent_id,
-                    entity_type="EQUIPMENT",
+                    entity_id=bnd_id,
+                    entity_type="PROCESS_BOUNDARY",
                     canonical_tag=eq_slug[:128],
-                    name=(eq_meta[0] if eq_meta else eq_slug)[:512],
-                    equipment_class=(eq_meta[1] if eq_meta else "Equipment")[:128],
-                    unit=((eq_meta[2] if eq_meta and eq_meta[2] else unit) or "")[:64],
-                    concept_id=(eq_meta[3] if eq_meta else f"equipment/{eq_slug}")[:256],
+                    name=f"Process Boundary / Header {eq_slug}"[:512],
+                    equipment_class="Process Boundary",
+                    unit=(unit or "")[:64],
+                    concept_id=concept_id[:256],
                 ),
             )
-            return ent_id
+            return bnd_id
 
         # Extract deterministic Spanner Graph edges from YAML frontmatter entity_metadata.connections & entity_metadata.instruments
         default_src_id = concept_source_nodes[0].source_id if concept_source_nodes else ""
@@ -688,37 +922,39 @@ def extract_bundle_graph_and_lineage(
             if not s_id:
                 continue
             c_dir = str(c_item.get("direction") or "").strip().upper()
-            src_slug = _resolve_graph_equip_slug(str(c_item.get("source_tag") or ""))
-            tgt_slug = _resolve_graph_equip_slug(str(c_item.get("target_tag") or ""))
-            if not src_slug and not tgt_slug:
+            src_slugs = _resolve_graph_equip_slugs(str(c_item.get("source_tag") or ""))
+            tgt_slugs = _resolve_graph_equip_slugs(str(c_item.get("target_tag") or ""))
+            if not src_slugs and not tgt_slugs:
                 continue
-            if not src_slug:
-                src_slug = slug_tail if c_dir not in ("INLET", "SUPPLY", "SUCTION") else tgt_slug
-            if not tgt_slug:
-                tgt_slug = slug_tail if c_dir in ("INLET", "SUPPLY", "SUCTION") else src_slug
-            if src_slug and tgt_slug and src_slug != tgt_slug:
-                src_ent = _ensure_equip_entity(src_slug)
-                dst_ent = _ensure_equip_entity(tgt_slug)
-                inline_list = c_item.get("inline_components") or []
-                inline_str = ", ".join(str(x) for x in inline_list) if isinstance(inline_list, list) else str(inline_list)
-                l_size = str(c_item.get("line_size") or "").strip()
-                desc_str = str(c_item.get("description") or "").strip()
-                svc_parts = [p for p in [c_dir, f"Size: {l_size}" if l_size else "", f"Inline: {inline_str}" if inline_str else "", desc_str] if p]
-                pe_id = compute_deterministic_id(
-                    src_ent, dst_ent, s_id, concept_id, prefix="CONN"
-                )
-                process_edges_by_id[pe_id] = ProcessConnectionEdge(
-                    edge_id=pe_id,
-                    from_entity_id=src_ent,
-                    to_entity_id=dst_ent,
-                    stream_or_line_id=s_id[:256],
-                    fluid_service=(" | ".join(svc_parts) or s_id)[:512],
-                    temperature=str(c_item.get("temperature") or "")[:128],
-                    pressure=str(c_item.get("pressure") or "")[:128],
-                    flow_rate=str(c_item.get("flow_rate") or "")[:128],
-                    source_concept_id=concept_id,
-                    source_id=default_src_id,
-                )
+            if not src_slugs:
+                src_slugs = [slug_tail] if c_dir not in ("INLET", "SUPPLY", "SUCTION") else list(tgt_slugs)
+            if not tgt_slugs:
+                tgt_slugs = [slug_tail] if c_dir in ("INLET", "SUPPLY", "SUCTION") else list(src_slugs)
+            inline_list = c_item.get("inline_components") or []
+            inline_str = ", ".join(str(x) for x in inline_list) if isinstance(inline_list, list) else str(inline_list)
+            l_size = str(c_item.get("line_size") or "").strip()
+            desc_str = str(c_item.get("description") or "").strip()
+            svc_parts = [p for p in [c_dir, f"Size: {l_size}" if l_size else "", f"Inline: {inline_str}" if inline_str else "", desc_str] if p]
+            for src_slug in src_slugs:
+                for tgt_slug in tgt_slugs:
+                    if src_slug and tgt_slug and src_slug != tgt_slug:
+                        src_ent = _ensure_graph_endpoint_entity(src_slug)
+                        dst_ent = _ensure_graph_endpoint_entity(tgt_slug)
+                        pe_id = compute_deterministic_id(
+                            src_ent, dst_ent, s_id, concept_id, prefix="CONN"
+                        )
+                        process_edges_by_id[pe_id] = ProcessConnectionEdge(
+                            edge_id=pe_id,
+                            from_entity_id=src_ent,
+                            to_entity_id=dst_ent,
+                            stream_or_line_id=s_id[:256],
+                            fluid_service=(" | ".join(svc_parts) or s_id)[:512],
+                            temperature=str(c_item.get("temperature") or "")[:128],
+                            pressure=str(c_item.get("pressure") or "")[:128],
+                            flow_rate=str(c_item.get("flow_rate") or "")[:128],
+                            source_concept_id=concept_id,
+                            source_id=default_src_id,
+                        )
 
         fm_insts = em.get("instruments") if isinstance(em.get("instruments"), list) else []
         for i_item in fm_insts:
@@ -815,10 +1051,18 @@ def extract_bundle_graph_and_lineage(
                 )
 
                 full_row_str = " | ".join(row)
+                is_moc_override_row = (
+                    "MOC PENDING REDRAFT" in full_row_str.upper()
+                    or "🔄" in full_row_str
+                    or is_moc_source(row_source_str, explicit_moc_ids)
+                )
                 row_has_conflict = (
                     "CONFLICT" in full_row_str
                     or "⚠️" in full_row_str
-                    or bool(re.search(r"\bvs\.?\b", full_row_str))
+                    or (
+                        bool(re.search(r"\bvs\.?\b", full_row_str))
+                        and not is_moc_override_row
+                    )
                     or any(
                         param_key.lower() in c_line.lower()
                         for c_line in conflict_lines
@@ -832,7 +1076,11 @@ def extract_bundle_graph_and_lineage(
                 conflict_note = (
                     " ; ".join(matching_conflict_notes)
                     if matching_conflict_notes
-                    else (full_row_str if row_has_conflict else "")
+                    else (
+                        full_row_str
+                        if (row_has_conflict or is_moc_override_row)
+                        else ""
+                    )
                 )
 
                 fact_id = compute_deterministic_id(
@@ -852,25 +1100,96 @@ def extract_bundle_graph_and_lineage(
                 )
 
                 # Automated Lineage Edge Resolution for this FactAssertion
-                primary_src_nodes = resolve_citation_to_source_nodes(
-                    row_source_str,
-                    list(raw_sources_by_id.values()),
-                    fallback_sources=concept_source_nodes,
-                )
-                for p_src in primary_src_nodes:
-                    raw_sources_by_id.setdefault(p_src.source_id, p_src)
-                    lin_id = compute_deterministic_id(
-                        fact_id, p_src.source_id, "PRIMARY", prefix="LIN"
+                if is_moc_override_row and not row_has_conflict:
+                    # Split row_source_str into MOC authority vs pending-redraft base drawings
+                    src_parts = [
+                        p.strip() for p in row_source_str.split(";") if p.strip()
+                    ]
+                    if not src_parts and row_source_str:
+                        src_parts = [row_source_str]
+                    moc_cits = [
+                        p for p in src_parts if is_moc_source(p, explicit_moc_ids)
+                    ]
+                    redraft_cits = [
+                        p for p in src_parts if not is_moc_source(p, explicit_moc_ids)
+                    ]
+                    m_sup = re.search(
+                        r"supersedes\s+([^\s()]+)",
+                        full_row_str,
+                        re.IGNORECASE,
                     )
-                    lineage_edges_by_id[lin_id] = FactLineageEdge(
-                        lineage_id=lin_id,
-                        fact_id=fact_id,
-                        concept_id=concept_id,
-                        source_id=p_src.source_id,
-                        raw_citation_string=(row_source_str or p_src.filename)[:512],
-                        source_role="PRIMARY",
-                        bundle_version=bundle_version,
+                    if m_sup and m_sup.group(1).strip(";,)") not in redraft_cits:
+                        redraft_cits.append(m_sup.group(1).strip(";,)"))
+
+                    for m_cit in moc_cits or (src_parts[:1] if src_parts else []):
+                        m_nodes = resolve_citation_to_source_nodes(
+                            m_cit,
+                            list(raw_sources_by_id.values()),
+                            fallback_sources=concept_source_nodes,
+                        )
+                        if not m_nodes:
+                            direct_m = _source_node_from_md_reference(
+                                m_cit,
+                                bucket_name=cfg.destination_gcs_bucket,
+                                raw_prefix=cfg.source_gcs_raw_prefix,
+                            )
+                            if direct_m:
+                                m_nodes = [direct_m]
+                        for m_src in m_nodes:
+                            raw_sources_by_id.setdefault(m_src.source_id, m_src)
+                            lin_id = compute_deterministic_id(
+                                fact_id, m_src.source_id, "MOC_AUTHORITY", prefix="LIN"
+                            )
+                            lineage_edges_by_id[lin_id] = FactLineageEdge(
+                                lineage_id=lin_id,
+                                fact_id=fact_id,
+                                concept_id=concept_id,
+                                source_id=m_src.source_id,
+                                raw_citation_string=m_cit[:512],
+                                source_role="MOC_AUTHORITY",
+                                bundle_version=bundle_version,
+                            )
+
+                    for r_cit in redraft_cits:
+                        r_nodes = resolve_citation_to_source_nodes(
+                            r_cit,
+                            list(raw_sources_by_id.values()),
+                            fallback_sources=concept_source_nodes,
+                        )
+                        for r_src in r_nodes:
+                            raw_sources_by_id.setdefault(r_src.source_id, r_src)
+                            lin_id = compute_deterministic_id(
+                                fact_id, r_src.source_id, "PENDING_REDRAFT", prefix="LIN"
+                            )
+                            lineage_edges_by_id[lin_id] = FactLineageEdge(
+                                lineage_id=lin_id,
+                                fact_id=fact_id,
+                                concept_id=concept_id,
+                                source_id=r_src.source_id,
+                                raw_citation_string=r_cit[:512],
+                                source_role="PENDING_REDRAFT",
+                                bundle_version=bundle_version,
+                            )
+                else:
+                    primary_src_nodes = resolve_citation_to_source_nodes(
+                        row_source_str,
+                        list(raw_sources_by_id.values()),
+                        fallback_sources=concept_source_nodes,
                     )
+                    for p_src in primary_src_nodes:
+                        raw_sources_by_id.setdefault(p_src.source_id, p_src)
+                        lin_id = compute_deterministic_id(
+                            fact_id, p_src.source_id, "PRIMARY", prefix="LIN"
+                        )
+                        lineage_edges_by_id[lin_id] = FactLineageEdge(
+                            lineage_id=lin_id,
+                            fact_id=fact_id,
+                            concept_id=concept_id,
+                            source_id=p_src.source_id,
+                            raw_citation_string=(row_source_str or p_src.filename)[:512],
+                            source_role="PRIMARY",
+                            bundle_version=bundle_version,
+                        )
 
                 if row_has_conflict:
                     competing_cits = _extract_conflicting_citations(
@@ -915,119 +1234,190 @@ def extract_bundle_graph_and_lineage(
                             ),
                         )
 
-                    primary_src_id = primary_src_nodes[0].source_id if primary_src_nodes else ""
+                    row_src_nodes = resolve_citation_to_source_nodes(
+                        row_source_str,
+                        list(raw_sources_by_id.values()),
+                        fallback_sources=concept_source_nodes,
+                    )
+                    primary_src_id = row_src_nodes[0].source_id if row_src_nodes else default_src_id
 
                     # Direct 10-column Spanner Graph table edge extraction (Stream | Direction | From (Source) | To (Target) | ...)
                     if len(row) >= 10:
-                        t_src_slug = _resolve_graph_equip_slug(row[2])
-                        t_dst_slug = _resolve_graph_equip_slug(row[3])
-                        if t_src_slug and t_dst_slug and t_src_slug != t_dst_slug:
-                            s_ent = _ensure_equip_entity(t_src_slug)
-                            d_ent = _ensure_equip_entity(t_dst_slug)
+                        t_src_slugs = _resolve_graph_equip_slugs(row[2])
+                        t_dst_slugs = _resolve_graph_equip_slugs(row[3])
+                        for t_src_slug in t_src_slugs:
+                            for t_dst_slug in t_dst_slugs:
+                                if t_src_slug and t_dst_slug and t_src_slug != t_dst_slug:
+                                    s_ent = _ensure_graph_endpoint_entity(t_src_slug)
+                                    d_ent = _ensure_graph_endpoint_entity(t_dst_slug)
+                                    pe_id = compute_deterministic_id(
+                                        s_ent, d_ent, stream_or_line, concept_id, prefix="CONN"
+                                    )
+                                    process_edges_by_id.setdefault(
+                                        pe_id,
+                                        ProcessConnectionEdge(
+                                            edge_id=pe_id,
+                                            from_entity_id=s_ent,
+                                            to_entity_id=d_ent,
+                                            stream_or_line_id=stream_or_line[:256],
+                                            fluid_service=param_val[:512],
+                                            temperature=("" if row[6] == "—" else row[6])[:128],
+                                            pressure=("" if row[7] == "—" else row[7])[:128],
+                                            flow_rate=("" if row[8] == "—" else row[8])[:128],
+                                            source_concept_id=concept_id,
+                                            source_id=primary_src_id,
+                                        ),
+                                    )
+                    else:
+                        # For non-10-col connection/nozzle tables, only inspect endpoint/service columns (never inline valve columns)
+                        endpoint_col_indices = [
+                            idx
+                            for idx, h in enumerate(norm_headers)
+                            if any(
+                                k in h
+                                for k in (
+                                    "from",
+                                    "to",
+                                    "source",
+                                    "target",
+                                    "connect",
+                                    "dest",
+                                    "origin",
+                                    "service",
+                                    "description",
+                                    "equipment",
+                                )
+                            )
+                            and "inline" not in h
+                            and "valve" not in h
+                        ]
+                        endpoint_text = (
+                            " | ".join(row[i] for i in endpoint_col_indices if i < len(row))
+                            if endpoint_col_indices
+                            else full_row_str
+                        )
+                        eq_mentions: list[str] = []
+                        for w_m in _WIKILINK_RE.finditer(endpoint_text):
+                            w_target = w_m.group(1).strip().removesuffix(".md").removeprefix("wiki/")
+                            if w_target.startswith("equipment/"):
+                                for es in _resolve_graph_equip_slugs(w_target.split("/")[-1]):
+                                    if es not in eq_mentions:
+                                        eq_mentions.append(es)
+                        for m_md in _MD_LINK_RE.finditer(endpoint_text):
+                            href = m_md.group(2).strip().split("#")[0].strip("/").removesuffix(".md")
+                            if href.startswith("equipment/"):
+                                for es in _resolve_graph_equip_slugs(href.split("/")[-1]):
+                                    if es not in eq_mentions:
+                                        eq_mentions.append(es)
+                        for eq_m in _EQUIP_TAG_RE.finditer(endpoint_text):
+                            for cand_eq in _resolve_graph_equip_slugs(eq_m.group(1)):
+                                if (
+                                    cand_eq
+                                    and cand_eq != slug_tail
+                                    and (
+                                        cand_eq in equipment_meta_by_slug
+                                        or _STRICT_PLANT_EQUIP_TAG_RE.match(cand_eq)
+                                    )
+                                    and cand_eq not in eq_mentions
+                                ):
+                                    eq_mentions.append(cand_eq)
+
+                        for target_eq_slug in eq_mentions:
+                            target_ent_id = _ensure_graph_endpoint_entity(target_eq_slug)
+                            is_inbound = bool(
+                                re.search(r"\b(from|inlet|feed|suction|supply)\b", endpoint_text, re.IGNORECASE)
+                                and not re.search(r"\b(to|outlet|discharge|return)\b", endpoint_text, re.IGNORECASE)
+                            )
+                            src_ent = target_ent_id if is_inbound else primary_entity_id
+                            dst_ent = primary_entity_id if is_inbound else target_ent_id
                             pe_id = compute_deterministic_id(
-                                s_ent, d_ent, stream_or_line, concept_id, prefix="CONN"
+                                src_ent, dst_ent, stream_or_line, concept_id, prefix="CONN"
                             )
                             process_edges_by_id.setdefault(
                                 pe_id,
                                 ProcessConnectionEdge(
                                     edge_id=pe_id,
-                                    from_entity_id=s_ent,
-                                    to_entity_id=d_ent,
+                                    from_entity_id=src_ent,
+                                    to_entity_id=dst_ent,
                                     stream_or_line_id=stream_or_line[:256],
                                     fluid_service=param_val[:512],
-                                    temperature=( "" if row[6] == "—" else row[6])[:128],
-                                    pressure=("" if row[7] == "—" else row[7])[:128],
-                                    flow_rate=("" if row[8] == "—" else row[8])[:128],
+                                    temperature="",
+                                    pressure="",
+                                    flow_rate="",
                                     source_concept_id=concept_id,
                                     source_id=primary_src_id,
                                 ),
                             )
 
-                    # Find connected equipment tags mentioned in the row
-                    eq_mentions: list[str] = []
-                    for w_m in _WIKILINK_RE.finditer(full_row_str):
-                        w_target = w_m.group(1).strip().removesuffix(".md")
-                        if w_target.startswith("equipment/"):
-                            eq_mentions.append(w_target.split("/")[-1])
-                    for eq_m in _EQUIP_TAG_RE.finditer(full_row_str):
-                        cand_eq = _resolve_graph_equip_slug(eq_m.group(1))
-                        if cand_eq and cand_eq != slug_tail and cand_eq not in eq_mentions:
-                            eq_mentions.append(cand_eq)
-
-                    for target_eq_slug in eq_mentions:
-                        target_ent_id = _ensure_equip_entity(target_eq_slug)
-                        is_inbound = bool(
-                            re.search(r"\b(from|inlet|feed|suction|supply)\b", full_row_str, re.IGNORECASE)
-                            and not re.search(r"\b(to|outlet|discharge|return)\b", full_row_str, re.IGNORECASE)
-                        )
-                        src_ent = target_ent_id if is_inbound else primary_entity_id
-                        dst_ent = primary_entity_id if is_inbound else target_ent_id
-                        pe_id = compute_deterministic_id(
-                            src_ent, dst_ent, stream_or_line, concept_id, prefix="CONN"
-                        )
-                        process_edges_by_id.setdefault(
-                            pe_id,
-                            ProcessConnectionEdge(
-                                edge_id=pe_id,
-                                from_entity_id=src_ent,
-                                to_entity_id=dst_ent,
-                                stream_or_line_id=stream_or_line[:256],
-                                fluid_service=param_val[:512],
-                                temperature="",
-                                pressure="",
-                                flow_rate="",
-                                source_concept_id=concept_id,
-                                source_id=primary_src_id,
-                            ),
-                        )
-
-                # Extract Instrument Control & SIS Interlock Edges from Instrumentation tables
-                if any(k in sec_lower for k in ("instrument", "loop", "valve", "relief", "analyzer", "interlock", "cause")):
-                    inst_matches = _INST_TAG_RE.findall(param_key) or _INST_TAG_RE.findall(full_row_str)
+                # Extract Instrument Control & SIS Interlock Edges from Instrumentation & Register tables
+                if category == "instruments" or any(
+                    k in sec_lower
+                    for k in ("instrument", "loop", "valve", "relief", "analyzer", "interlock", "cause", "register", "schedule")
+                ):
+                    clean_pk = re.sub(r"\[([^\[\]]+)\]\([^()\s]+\)", r"\1", param_key).strip()
+                    inst_matches = _INST_TAG_RE.findall(clean_pk) or _INST_TAG_RE.findall(full_row_str)
                     if inst_matches:
-                        inst_tag = inst_matches[0]
-                        inst_ent_id = f"INST:{inst_tag.replace('/', '-')}"
+                        inst_tag = inst_matches[0].strip()
+                        inst_ent_id = f"INST:{re.sub(r'[^A-Za-z0-9_-]+', '-', inst_tag).strip('-')}"[:256]
                         entities_by_id.setdefault(
                             inst_ent_id,
                             EngineeringEntityNode(
                                 entity_id=inst_ent_id,
                                 entity_type="INSTRUMENT",
-                                canonical_tag=inst_tag,
-                                name=f"{inst_tag} ({param_val[:80]})",
+                                canonical_tag=inst_tag[:128],
+                                name=f"{inst_tag} ({param_val[:80]})"[:512],
                                 equipment_class=sec_heading[:128],
-                                unit=unit,
+                                unit=unit[:64],
                                 concept_id=concept_id,
                             ),
                         )
                         loop_num_m = re.search(r"(\d{4})", inst_tag)
                         loop_prefix = inst_tag.split("-")[0][0] if "-" in inst_tag else "I"
                         loop_id = f"{loop_prefix}-{loop_num_m.group(1)}" if loop_num_m else inst_tag
-                        primary_src_id = primary_src_nodes[0].source_id if primary_src_nodes else ""
+                        row_src_nodes = resolve_citation_to_source_nodes(
+                            row_source_str,
+                            list(raw_sources_by_id.values()),
+                            fallback_sources=concept_source_nodes,
+                        )
+                        primary_src_id = row_src_nodes[0].source_id if row_src_nodes else default_src_id
 
-                        # Link instrument to current equipment concept or any equipment mentioned in row
+                        # Link instrument to current equipment concept or any equipment mentioned in row (via WikiLink, Markdown link, or tag)
                         target_eq_ids: list[str] = []
                         if category == "equipment":
                             target_eq_ids.append(primary_entity_id)
+
+                        row_equip_slugs: list[str] = []
                         for w_m in _WIKILINK_RE.finditer(full_row_str):
-                            w_t = w_m.group(1).strip().removesuffix(".md")
+                            w_t = w_m.group(1).strip().removesuffix(".md").removeprefix("wiki/")
                             if w_t.startswith("equipment/"):
-                                eq_s = w_t.split("/")[-1]
-                                t_id = f"EQ:{eq_s}"
-                                eq_meta = equipment_meta_by_slug.get(eq_s)
-                                entities_by_id.setdefault(
-                                    t_id,
-                                    EngineeringEntityNode(
-                                        entity_id=t_id,
-                                        entity_type="EQUIPMENT",
-                                        canonical_tag=eq_s,
-                                        name=eq_meta[0] if eq_meta else eq_s,
-                                        equipment_class=eq_meta[1] if eq_meta else "Equipment",
-                                        unit=(eq_meta[2] if eq_meta and eq_meta[2] else unit),
-                                        concept_id=eq_meta[3] if eq_meta else f"equipment/{eq_s}",
-                                    ),
-                                )
-                                if t_id not in target_eq_ids:
-                                    target_eq_ids.append(t_id)
+                                for es in _resolve_graph_equip_slugs(w_t.split("/")[-1]):
+                                    if es in equipment_meta_by_slug and es not in row_equip_slugs:
+                                        row_equip_slugs.append(es)
+                        for m_md in _MD_LINK_RE.finditer(full_row_str):
+                            href = m_md.group(2).strip().split("#")[0].strip("/").removesuffix(".md")
+                            if href.startswith("equipment/"):
+                                for es in _resolve_graph_equip_slugs(href.split("/")[-1]):
+                                    if es in equipment_meta_by_slug and es not in row_equip_slugs:
+                                        row_equip_slugs.append(es)
+                        for eq_m in _EQUIP_TAG_RE.finditer(full_row_str):
+                            raw_eq_tok = eq_m.group(1)
+                            if raw_eq_tok.upper() == inst_tag.upper():
+                                continue
+                            for es in _resolve_graph_equip_slugs(raw_eq_tok):
+                                if es in equipment_meta_by_slug and es not in row_equip_slugs:
+                                    row_equip_slugs.append(es)
+
+                        # If this is an equipment-specific instrument register (e.g. ox-2202-vacuum-relief-valves.md)
+                        if not row_equip_slugs and category == "instruments":
+                            for eq_m in _EQUIP_TAG_RE.finditer(f"{slug_tail} {title}"):
+                                for es in _resolve_graph_equip_slugs(eq_m.group(1)):
+                                    if es in equipment_meta_by_slug and es not in row_equip_slugs:
+                                        row_equip_slugs.append(es)
+
+                        for eq_s in row_equip_slugs:
+                            t_id = _ensure_graph_endpoint_entity(eq_s)
+                            if t_id.startswith("EQ:") and t_id not in target_eq_ids:
+                                target_eq_ids.append(t_id)
 
                         for t_eq_id in target_eq_ids:
                             ie_id = compute_deterministic_id(

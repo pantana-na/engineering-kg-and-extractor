@@ -34,9 +34,11 @@ Thumbs.db
 .terraform/
 .terraform.lock.hcl
 
-# ADK Agent Engine Deployment Temp Folders & Local Eval Backups
+# ADK Agent Engine Deployment Temp Folders, CodeMender Markers & Local Eval Backups
 extracter_agent_tmp*/
+query_agent_tmp*/
+.cm_project
+**/.cm_project
 backups/
 cache/
-
-
+evals/reports/

@@ -55,7 +55,7 @@ class EngineeringEntityNode(BaseModel):
     entity_id: str = Field(..., min_length=1)
     entity_type: str = Field(
         ...,
-        description="EQUIPMENT, INSTRUMENT, PIPING_LINE, HAZARD, UNIT, PROCEDURE, SOURCE, CONCEPT",
+        description="EQUIPMENT, INSTRUMENT, PIPING_LINE, PROCESS_BOUNDARY, HAZARD, UNIT, PROCEDURE, SOURCE, CONCEPT",
     )
     canonical_tag: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1)
@@ -141,7 +141,7 @@ class FactLineageEdge(BaseModel):
     raw_citation_string: str = Field(..., min_length=1)
     source_role: str = Field(
         default="PRIMARY",
-        description="PRIMARY, CONFLICTING, or CONCEPT_CITATION",
+        description="PRIMARY, CONFLICTING, MOC_AUTHORITY, PENDING_REDRAFT, or CONCEPT_CITATION",
     )
     bundle_version: str = Field(default="v3-by-equipment")
 

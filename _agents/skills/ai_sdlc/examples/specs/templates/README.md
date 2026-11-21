@@ -1,29 +1,22 @@
 # Specification Templates (`specs/templates/`)
 
-This directory contains standardized templates for authoring **Spec-Driven Development (SDD)** documents.
+This directory contains standardized **Enterprise Solution Design & Spec-Driven Development (SDD)** templates supporting both **Regular (Non-AI) Applications** (`Workload Type: Regular App`) and **AI Agent / Hybrid Workloads** (`Workload Type: AI Agent | Hybrid`).
 
 ## Available Templates
 
-- **[`sdd-template.md`](./sdd-template.md):** Standardized Feature Specification Document template (`specs/features/SPEC-*.md`) with embedded:
-  - Runtime separation matrix (Gemini Enterprise Agent Platform vs Google Cloud Run)
-  - Interactive Mermaid sequence diagrams
-  - Type and API contract schemas
-  - 13-rule DevOps, Security, ADK, and RCA governance checklist
-  - Step-by-step implementation plan requiring **Unit Tests** and **Property-Based Tests (PBT)** for every step
-  - Live agent evaluation (`agents-cli eval`) verification criteria
-  - Plan progress tracking protocol
-- **[`baseline-template.md`](./baseline-template.md):** Standardized Brownfield Baseline & Modernization Assessment template (`specs/baseline/*.md`) supporting:
-  - **Track A (Legacy 3-Tier / `.NET Framework` Apps):** 3-Tier component inventory, stateful `Session`/`ViewState` coupling, `Web.config` mapping, and **Hidden Business Logic Extraction** from SQL Stored Procedures, Triggers, and WCF services.
-  - **Track B (Modern Cloud-Native Code Lacking Docs & Tests):** Implicit route/schema reverse-engineering, type drift reconciliation, and **13-Rule Governance & Dual-Runtime Gap Matrix**.
-  - **Characterization Test + Property-Based Test (PBT) Safety Net** and confirmed Modernization Strategy (*Strangler Fig*, *Full Dual-Runtime Re-Architecture*, or *In-Place Hardening*).
+- **[`discovery-template.md`](./discovery-template.md):** *(Optional Pre-Inception)* 15-Section Consolidated Discovery Document (`specs/discovery/DISCOVERY-*.md`) used by [`requirements-discovery`](../../_agents/skills/requirements_discovery/SKILL.md) to synthesize raw interview scripts, drawings/diagrams, emails, and manuals into verbatim-cited `FR`/`NFR`/`CON` registers, stakeholder tensions, cross-artifact contradictions, WAF 6-Pillar quality attribute coverage checks, a ranked Phase 1 cut line, and a targeted open-question queue for `ai-sdlc`.
+- **[`sdd-template.md`](./sdd-template.md):** Standardized Feature & Solution Design Specification (`specs/features/SPEC-*.md`) structured across **Document Control + 10 Sections**:
+  - **Document Control:** `Spec ID`, **`Workload Type` (`Regular App` | `AI Agent` | `Hybrid`)**, `Author`, `Date`, `Version`, `Status` — with explicit **`[AI-Agent Only]`** markers on subsections/rows that must be omitted or marked `N/A` for regular non-AI apps.
+  - **1–8 (Enterprise Solution Design Core):** Executive Summary & Scope/Autonomy Boundaries (§1), System Architecture, Topology, WAF 6-Pillar & Code Contracts (§2), Security, Privacy, Rules 1–13 & `[AI-Agent Only]` SAIF Alignment (§3), Resiliency, Reliability & State Integrity (§4), Observability, Operations & `[AI-Agent Only]` AgentOps (§5), Performance, FinOps & Sustainability (§6), Architectural Decision Records / ADRs (§7), and Failure Mode & Effects Analysis / FMEA (§8).
+  - **9–10 (Executable SDD Delivery):** Step-by-Step Implementation Plan & Test Design requiring **Deterministic Unit Tests** + **Generative Property-Based Tests (PBT)** *(+ `[AI-Agent Only]` DLP-Safe Live `agents-cli eval`)* (§9) and Living Plan Progress Tracking (§10).
+- **[`baseline-template.md`](./baseline-template.md):** Standardized Brownfield `"As-Is"` Baseline & Gap Specification (`specs/baseline/*.md`) mirroring **Document Control + Sections 1–8**:
+  - Preserves **Track A (Legacy 3-Tier / `.NET`/SQL)** and **Track B (Undocumented Modern Cloud/AI)** classification (§1.1), **Hidden Business Logic Extraction** from SQL Stored Procedures/Triggers/UI (§2.4), **Governance + WAF[/SAIF] Gap Matrix** (§3.4), **Characterization Test + Baseline PBT Safety Net** (§5.3), **`ask_question` Quirk/Defect Triage + Modernization ADRs** (§7), and **As-Is FMEA & Cutover Risks** (§8), with **`[AI-Agent Only]`** markers throughout.
 
 ## Usage
 
-1. **For Brownfield Systems (Step 0 — Baseline First):**
-   - Copy `baseline-template.md` to `specs/baseline/system-overview.md` or `specs/baseline/<subsystem>-baseline.md`.
-   - Complete the reverse-engineering, hidden logic catalog, `ask_question` defect triage, and Characterization + PBT safety net before authoring delta features.
-2. **For New Features or Modernization Deltas (Step 1 — Feature Spec):**
-   - Copy `sdd-template.md` to `specs/features/SPEC-<YYYYMMDD>-<FEATURE_NAME>.md`.
-   - Fill out all sections completely and align with stakeholders via `ask_question` before writing production code.
-   - Execute implementation step-by-step with continuous progress updates in [`specs/plan/`](../plan/).
-
+0. **Optional Pre-Inception Consolidation (`requirements-discovery`):** When starting from raw multi-modal artifacts (transcripts, drawings, emails, manuals), copy `discovery-template.md` to `specs/discovery/DISCOVERY-<YYYYMMDD>-<PROJECT>.md` first; `ai-sdlc` will ingest it automatically to pre-populate the SDD and focus `ask_question` strictly on §2.5 / §8 / §10.1 blockers.
+1. **Select `Workload Type` in Document Control:**
+   - Choose **`Regular App`** for standard web, API, microservice, or data workloads (omit/mark `N/A` all `[AI-Agent Only]` items; enforces Google Cloud WAF 6 Pillars + Rules 1–10 & 13).
+   - Choose **`AI Agent`** or **`Hybrid`** when building conversational or autonomous agents (enforces Dual-Runtime `cloud_run` + `agent_runtime`, WAF 6 Pillars, SAIF 2.0, and all Rules 1–13).
+2. **For Brownfield Systems (Step 2.0 — Baseline First):** Copy `baseline-template.md` to `specs/baseline/system-overview.md` (or `<subsystem>-baseline.md`), extract hidden logic, triage quirks via `ask_question`, and lock in Characterization + PBT tests before authoring feature specs.
+3. **For New Features or Deltas (Step 2.1 — Feature SDD):** Copy `sdd-template.md` to `specs/features/SPEC-<YYYYMMDD>-<FEATURE_NAME>.md`, obtain stakeholder sign-off via `ask_question`, and track execution in [`specs/plan/`](../plan/).

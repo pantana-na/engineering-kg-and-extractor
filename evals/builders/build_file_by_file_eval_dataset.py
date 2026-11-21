@@ -1,9 +1,10 @@
 """Automated File-by-File (Document-Centric) Evaluation Dataset Builder.
 
-Scans all raw engineering PDF documents in reference/raw/ across all 5 subfolders
-(data_sheets, pid, standards, pfd, operating_manuals), maps each raw PDF to its
-extracted OKF concepts in build/okf_bundle/, and generates the
-evals/datasets/raw_file_by_file_eval.jsonl benchmark dataset.
+Scans all supported raw engineering documents (.pdf, .xlsx, .xlsm, .csv, .docx,
+.png, .jpg, .jpeg, .webp) in reference/raw/ across all 6 subfolders
+(data_sheets, operating_manuals, pfd, pid, standards, moc), maps each raw file
+to its extracted OKF concepts in build/okf_bundle/, and generates the
+evals/datasets/raw_file_by_file_eval.jsonl benchmark dataset with moc ordered last.
 """
 
 from __future__ import annotations
@@ -19,6 +20,19 @@ from evals.builders.build_wiki_eval_dataset import (
     _parse_frontmatter,
     is_synthesized_analysis,
 )
+from extracter_agent.pdf.processor import (
+    SUPPORTED_RAW_EXTENSIONS,
+    is_supported_raw_file,
+)
+
+SUBFOLDER_PRIORITY: dict[str, int] = {
+    "data_sheets": 0,
+    "operating_manuals": 1,
+    "pfd": 2,
+    "pid": 3,
+    "standards": 4,
+    "moc": 5,
+}
 
 
 def _extract_parameters_from_tables(tables: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -110,7 +124,7 @@ def build_raw_file_eval_record(
     raw_dir: Path,
     wiki_entries: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Construct a file-by-file evaluation test case for a single raw PDF in reference/raw/."""
+    """Construct a file-by-file evaluation test case for a single supported raw file in reference/raw/."""
     rel_to_raw = pdf_path.relative_to(raw_dir)
     subfolder = rel_to_raw.parts[0] if len(rel_to_raw.parts) > 1 else "root"
     rel_repo_path = f"reference/raw/{str(rel_to_raw).replace(chr(92), '/')}"
@@ -181,6 +195,7 @@ def build_raw_file_eval_record(
         "raw_pdf_path": rel_repo_path,
         "subfolder": subfolder,
         "pdf_filename": filename,
+        "file_extension": pdf_path.suffix.lower(),
         "document_code": doc_prefix,
         "category": f"raw_{subfolder}",
         "user_prompt": user_prompt,
@@ -209,31 +224,50 @@ def build_raw_file_eval_record(
     }
 
 
+def _raw_file_sort_key(path: Path, raw_dir: Path) -> tuple[int, tuple[str, ...]]:
+    """Sort raw files deterministically by SUBFOLDER_PRIORITY (with 'moc' last = 5), then relative path parts."""
+    rel_parts = path.relative_to(raw_dir).parts
+    subfolder = rel_parts[0] if len(rel_parts) > 1 else "root"
+    return (SUBFOLDER_PRIORITY.get(subfolder, 99), rel_parts)
+
+
 def generate_raw_file_by_file_eval_dataset(
     raw_dir: Path,
     wiki_dir: Path,
     output_jsonl: Path,
 ) -> dict[str, Any]:
-    """Scan all raw PDFs in reference/raw/ and generate the file-by-file JSONL evaluation dataset."""
+    """Scan all supported raw engineering files in reference/raw/ and generate the file-by-file JSONL dataset."""
     if not raw_dir.exists():
         raise FileNotFoundError(f"Raw directory does not exist: {raw_dir}")
     if not wiki_dir.exists():
         raise FileNotFoundError(f"Wiki directory does not exist: {wiki_dir}")
 
     wiki_entries = _index_wiki_ground_truth(wiki_dir)
-    pdf_files = sorted(raw_dir.rglob("*.pdf"))
+    raw_files = sorted(
+        (
+            p
+            for p in raw_dir.rglob("*")
+            if p.is_file()
+            and is_supported_raw_file(p)
+            and p.suffix.lower() in SUPPORTED_RAW_EXTENSIONS
+        ),
+        key=lambda p: _raw_file_sort_key(p, raw_dir),
+    )
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
 
     records: list[dict[str, Any]] = []
     subfolder_counts: dict[str, int] = {}
+    extension_counts: dict[str, int] = {}
     unmapped_files: list[str] = []
     total_concept_links = 0
 
-    for pdf_file in pdf_files:
-        rec = build_raw_file_eval_record(pdf_file, raw_dir, wiki_entries)
+    for raw_file in raw_files:
+        rec = build_raw_file_eval_record(raw_file, raw_dir, wiki_entries)
         records.append(rec)
         sf = rec["subfolder"]
+        ext = rec["file_extension"]
         subfolder_counts[sf] = subfolder_counts.get(sf, 0) + 1
+        extension_counts[ext] = extension_counts.get(ext, 0) + 1
         n_concepts = len(rec["expected_affected_concepts"])
         total_concept_links += n_concepts
         if n_concepts == 0:
@@ -247,6 +281,7 @@ def generate_raw_file_by_file_eval_dataset(
     return {
         "total_raw_files": len(records),
         "subfolder_distribution": subfolder_counts,
+        "extension_distribution": extension_counts,
         "total_concept_links": total_concept_links,
         "unmapped_files_count": len(unmapped_files),
         "unmapped_files": unmapped_files,

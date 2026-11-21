@@ -80,3 +80,46 @@ def query_agent_before_callback(callback_context: Any) -> Any:
     if isinstance(callback_context, str):
         return callback_context
     return None
+
+
+def query_agent_before_model_callback(callback_context: Any, llm_request: Any = None) -> Any:
+    """SAIF 2.0 Pre-Model Hook for Query Agent: DLP redaction & per-session DMS budget."""
+    from extracter_agent.agent.guardrails import (
+        SecurityGuardrailError,
+        before_model_callback,
+    )
+
+    try:
+        return before_model_callback(callback_context, llm_request)
+    except SecurityGuardrailError as exc:
+        raise QuerySecurityGuardrailError(str(exc)) from exc
+
+
+def query_agent_after_tool_callback(
+    tool: Any = None,
+    args: dict[str, Any] | None = None,
+    tool_context: Any = None,
+    tool_response: Any = None,
+) -> Any:
+    """SAIF 2.0 Post-Tool Hook for Query Agent: Indirect PIJ quarantine & tool budget enforcement."""
+    from extracter_agent.agent.guardrails import (
+        SecurityGuardrailError,
+        after_tool_callback,
+    )
+
+    try:
+        return after_tool_callback(
+            tool=tool,
+            args=args,
+            tool_context=tool_context,
+            tool_response=tool_response,
+        )
+    except SecurityGuardrailError as exc:
+        raise QuerySecurityGuardrailError(str(exc)) from exc
+
+
+def query_agent_after_model_callback(callback_context: Any, llm_response: Any = None) -> Any:
+    """SAIF 2.0 Post-Model Hook for Query Agent: outbound DLP scrubbing & URL allowlist."""
+    from extracter_agent.agent.guardrails import after_model_callback
+
+    return after_model_callback(callback_context, llm_response)

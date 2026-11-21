@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
     GOOGLE_GENAI_USE_VERTEXAI=true \
     GEMINI_LOCATION=global \
-    GEMINI_MODEL=gemini-3.8-flash \
+    GEMINI_MODEL=gemini-4-argon \
     APP_MODULE=query_agent.web_server:app
 
 WORKDIR /app

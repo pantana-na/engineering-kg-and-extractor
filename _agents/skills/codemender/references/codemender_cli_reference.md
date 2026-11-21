@@ -23,7 +23,7 @@ flowchart TD
     subgraph Google Cloud (Vertex AI)
         API["https://aiplatform.googleapis.com"]
         RE["Cloud Reasoning Engine / Agents"]
-        Models["Gemini 3.7 Flash / Gemini 3.1 Pro"]
+        Models["Fine-Tuned Gemini Security Models"]
         API <--> RE
         RE <--> Models
     end
@@ -52,7 +52,7 @@ flowchart TD
 | Lifecycle Stage | Command | Description | Key Flags |
 | :--- | :--- | :--- | :--- |
 | **1. Discovery** | `cm find <path>` | Scans directory or file for software weaknesses | `-y`, `--model`, `-c <context>`, `--bypass-warning` |
-| **2. Verification** | `cm verify <finding-id>` | Synthesizes and runs isolated PoC exploit to triage issue | `-y`, `-c <context>`, `--skip-exploit-verification`, `--sandbox` |
+| **2. Verification** | `cm verify <finding-id>` | Synthesizes and runs isolated PoC exploit to triage issue | `-y`, `--bypass-warning`, `-c <context>`, `--skip-exploit-verification`, `--sandbox` |
 | **3. Remediation** | `cm fix <finding-id>` | Refactors code, generates patch, and runs tests | `-y`, `--bypass-warning`, `--model`, `-c <context>` |
 | **Reporting** | `cm report` | Lists active, open, and fixed security findings | `-y` |
 | **Session Control**| `cm session [list\|resume\|cancel]` | Manages active or interrupted scan/fix sessions | |
