@@ -669,6 +669,7 @@ def _invoke_multimodal_streaming_with_fallback(
                 client = genai.Client(http_options=http_opts)
 
             chunks: list[str] = []
+            finish_reasons: list[str] = []
             stream_fn = getattr(client.models, "generate_content_stream", None)
             if callable(stream_fn):
                 for chunk in stream_fn(
@@ -679,6 +680,12 @@ def _invoke_multimodal_streaming_with_fallback(
                     txt = getattr(chunk, "text", None)
                     if txt:
                         chunks.append(txt)
+                    for cand in getattr(chunk, "candidates", None) or ():
+                        fr = getattr(cand, "finish_reason", None)
+                        if fr is not None:
+                            fr_str = str(fr)
+                            if fr_str and fr_str not in finish_reasons:
+                                finish_reasons.append(fr_str)
                 text_out = "".join(chunks)
             else:
                 resp = client.models.generate_content(
@@ -686,7 +693,18 @@ def _invoke_multimodal_streaming_with_fallback(
                     contents=contents,
                     config=effective_cfg,
                 )
+                for cand in getattr(resp, "candidates", None) or ():
+                    fr = getattr(cand, "finish_reason", None)
+                    if fr is not None:
+                        fr_str = str(fr)
+                        if fr_str and fr_str not in finish_reasons:
+                            finish_reasons.append(fr_str)
                 text_out = resp.text or ""
+            if len(text_out.strip()) < 25:
+                raise RuntimeError(
+                    f"Empty/truncated vision response from {model_name} "
+                    f"({len(text_out.strip())} chars, finish_reasons={finish_reasons or ['UNKNOWN']})"
+                )
             return text_out, model_name, used_fallback
         except Exception as exc:
             last_err = exc

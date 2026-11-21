@@ -601,6 +601,34 @@ def test_multimodal_streaming_with_hydrogen_fallback_and_1page_pid_window(
     assert "V-101" in text_out
     assert any(ev.get("phase") == "VISION // FALLBACK" for ev in progress_events)
 
+    # 1B. Empty 200 OK stream on primary gemini-4-carbon (e.g. MAX_TOKENS thinking exhaustion) must NOT succeed silently; must fail over to gemini-4-hydrogen [LOW]
+    called_empty: list[str] = []
+
+    class _EmptyPrimaryModels:
+        def generate_content_stream(self, *, model: str, contents: Any, config: Any) -> Any:
+            called_empty.append(model)
+            if model == "gemini-4-carbon":
+                return iter([SimpleNamespace(text="", candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")])])
+            return iter([SimpleNamespace(text="# Sheet 2\nRecovered Equipment P-102 via Hydrogen LOW fallback")])
+
+    class _EmptyPrimaryClient:
+        def __init__(self, **kwargs: Any) -> None:
+            self.models = _EmptyPrimaryModels()
+
+    monkeypatch.setattr(genai_mod, "Client", _EmptyPrimaryClient)
+    text_out_2, model_used_2, used_fb_2 = proc._invoke_multimodal_streaming_with_fallback(
+        primary_model="gemini-4-carbon",
+        contents=["dummy-part", "prompt"],
+        gen_cfg=primary_cfg,
+        cfg=fake_cfg,
+        label="ML101620329-part-7_p4-4",
+        step_id="vision-p4",
+    )
+    assert called_empty == ["gemini-4-carbon", "gemini-4-hydrogen"]
+    assert model_used_2 == "gemini-4-hydrogen"
+    assert used_fb_2 is True
+    assert "P-102" in text_out_2
+
     # 2. Landscape vector CAD P&ID uses 1-page windows (7 PNGs/call instead of 14)
     import pypdf
 

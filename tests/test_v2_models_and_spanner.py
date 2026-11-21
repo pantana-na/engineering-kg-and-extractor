@@ -342,6 +342,62 @@ def test_hybrid_rrf_search_uses_json_options_and_isolated_snapshots_on_ann_fallb
     assert "FORCE_INDEX=idx_okf_chunks_vec" in executed_sqls[0]
 
 
+def test_populate_chunk_embeddings_native_uses_select_ml_predict_and_batch_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify native Spanner ML.PREDICT uses SELECT + batch.update instead of unsupported UPDATE ... FROM join DML."""
+    repo = SpannerGraphRepository(
+        project_id="engineering-kg-demo",
+        instance_id="okf-knowledge-spanner",
+        database_id="okf_knowledge_graph",
+        use_in_memory=False,
+    )
+    executed_sqls: list[str] = []
+    updated_batches: list[tuple[str, list[str], list[Any]]] = []
+
+    class _FakeSnap:
+        def __enter__(self) -> "_FakeSnap":
+            return self
+
+        def __exit__(self, *args: Any) -> bool:
+            return False
+
+        def execute_sql(self, sql: str, params: Any = None, param_types: Any = None) -> list[tuple[Any, ...]]:
+            executed_sqls.append(sql)
+            return [(cid, [0.25] * 768) for cid in params["batch_ids"]]
+
+    class _FakeBatch:
+        def __enter__(self) -> "_FakeBatch":
+            return self
+
+        def __exit__(self, *args: Any) -> bool:
+            return False
+
+        def update(self, *, table: str, columns: list[str], values: list[Any]) -> None:
+            updated_batches.append((table, columns, values))
+
+    class _FakeDb:
+        def snapshot(self) -> _FakeSnap:
+            return _FakeSnap()
+
+        def batch(self) -> _FakeBatch:
+            return _FakeBatch()
+
+    monkeypatch.setattr(repo, "_get_database", lambda: _FakeDb())
+
+    count = repo.populate_chunk_embeddings_native(["CHK:1", "CHK:2"], batch_size=50)
+    assert count == 2
+    assert repo.last_embedding_mode == "NATIVE_ML_PREDICT"
+    assert len(executed_sqls) == 1
+    assert "SELECT chunk_id, embeddings.values" in executed_sqls[0]
+    assert "FROM ML.PREDICT(" in executed_sqls[0]
+    assert "UPDATE OkfSectionChunks" not in executed_sqls[0]
+    assert len(updated_batches) == 1
+    assert updated_batches[0][0] == "OkfSectionChunks"
+    assert updated_batches[0][1] == ["chunk_id", "embedding"]
+    assert len(updated_batches[0][2]) == 2
+
+
 def test_catalog_dossier_deduplicates_identical_pdf_across_multiple_fact_citations() -> None:
     """Verify build_catalog_dossier collapses multiple fact citations for the same PDF+Rev into 1 entry with fact_count & highest-priority role."""
     doc = {

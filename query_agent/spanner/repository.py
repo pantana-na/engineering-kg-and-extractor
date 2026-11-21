@@ -245,7 +245,7 @@ class SpannerGraphRepository:
         self,
         chunk_ids: list[str],
         *,
-        batch_size: int = 100,
+        batch_size: int = 50,
     ) -> int:
         """Compute and populate OkfSectionChunks.embedding inside Spanner via native ML.PREDICT."""
         if not chunk_ids or self.use_in_memory:
@@ -254,39 +254,43 @@ class SpannerGraphRepository:
         from google.cloud.spanner_v1 import param_types
 
         updated_total = 0
-        dml = (
-            "UPDATE OkfSectionChunks AS target "
-            "SET embedding = ARRAY("
-            "  SELECT CAST(v AS FLOAT32) "
-            "  FROM UNNEST(pred.embeddings.values) AS v WITH OFFSET pos "
-            "  ORDER BY pos"
-            ") "
-            "FROM ("
-            f"  SELECT chunk_id, embeddings FROM ML.PREDICT("
-            f"    MODEL {self.embedding_model_name}, "
-            "    ("
-            "      SELECT chunk_id, "
-            "             SUBSTR(CONCAT(concept_id, ' | ', section_heading, '\\n', header_preserved_markdown), 1, 3500) AS content "
-            "      FROM OkfSectionChunks "
-            "      WHERE chunk_id IN UNNEST(@batch_ids)"
-            "    )"
+        # Spanner GoogleSQL does not support `UPDATE ... FROM` joins; run native
+        # `SELECT ... FROM ML.PREDICT(...)` in a snapshot and apply batch update mutations.
+        predict_sql = (
+            "SELECT chunk_id, embeddings.values AS emb_values "
+            f"FROM ML.PREDICT("
+            f"  MODEL {self.embedding_model_name}, "
+            "  ("
+            "    SELECT chunk_id, "
+            "           SUBSTR(CONCAT(concept_id, ' | ', section_heading, '\\n', header_preserved_markdown), 1, 3500) AS content "
+            "    FROM OkfSectionChunks "
+            "    WHERE chunk_id IN UNNEST(@batch_ids)"
             "  )"
-            ") AS pred "
-            "WHERE target.chunk_id = pred.chunk_id"
+            ")"
         )
         for start in range(0, len(chunk_ids), batch_size):
             batch = chunk_ids[start : start + batch_size]
-
-            def _run_update(txn: Any, b: list[str] = batch) -> int:
-                return int(
-                    txn.execute_update(
-                        dml,
-                        params={"batch_ids": b},
+            with db.snapshot() as snap:
+                pred_rows = list(
+                    snap.execute_sql(
+                        predict_sql,
+                        params={"batch_ids": batch},
                         param_types={"batch_ids": param_types.Array(param_types.STRING)},
                     )
                 )
-
-            updated_total += int(db.run_in_transaction(_run_update))
+            update_values = [
+                (str(cid), [float(v) for v in emb_vals])
+                for cid, emb_vals in pred_rows
+                if emb_vals
+            ]
+            if update_values:
+                with db.batch() as mut_batch:
+                    mut_batch.update(
+                        table="OkfSectionChunks",
+                        columns=["chunk_id", "embedding"],
+                        values=update_values,
+                    )
+                updated_total += len(update_values)
         self.last_embedding_mode = "NATIVE_ML_PREDICT"
         return updated_total
 
