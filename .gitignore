@@ -42,3 +42,8 @@ query_agent_tmp*/
 backups/
 cache/
 evals/reports/
+
+# Internal Agent Governance, Skills & SDD Specifications (kept local only)
+_agents/
+specs/
+AGENTS.md
