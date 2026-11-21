@@ -542,7 +542,14 @@ deploy_unified_workbench_cloud_run() {
   RESOLVED_MIN_INSTANCES=""
   RESOLVED_MAX_INSTANCES=""
   RESOLVED_GCLOUD_FLAGS=()
-  resolve_webapp_flags "EXTRACTER_WEB"
+  local unified_sec_override
+  if [[ "${DEPLOY_ENV}" == "PROD" ]]; then
+    unified_sec_override="${PROD_UNIFIED_WEB_SECURITY_MODE:-${UNIFIED_WEB_SECURITY_MODE:-unauthenticated}}"
+    PROD_EXTRACTER_WEB_SECURITY_MODE="${unified_sec_override}" resolve_webapp_flags "EXTRACTER_WEB"
+  else
+    unified_sec_override="${NONPROD_UNIFIED_WEB_SECURITY_MODE:-${UNIFIED_WEB_SECURITY_MODE:-unauthenticated}}"
+    NONPROD_EXTRACTER_WEB_SECURITY_MODE="${unified_sec_override}" resolve_webapp_flags "EXTRACTER_WEB"
+  fi
 
   local unified_svc
   if [[ "${DEPLOY_ENV}" == "PROD" ]]; then
@@ -564,9 +571,14 @@ deploy_unified_workbench_cloud_run() {
       proj_num="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)' 2>/dev/null || true)"
     fi
   fi
-  local iap_audience="${IAP_JWT_AUDIENCE:-}"
-  if [[ -z "${iap_audience}" && "${RESOLVED_SECURITY_MODE}" == "iap" && -n "${proj_num}" && "${proj_num}" != "000000000000" ]]; then
-    iap_audience="/projects/${proj_num}/locations/${REGION}/services/${unified_svc}"
+  local iap_audience=""
+  local iap_enforcement="false"
+  if [[ "${RESOLVED_SECURITY_MODE}" == "iap" ]]; then
+    iap_enforcement="true"
+    iap_audience="${IAP_JWT_AUDIENCE:-}"
+    if [[ -z "${iap_audience}" && -n "${proj_num}" && "${proj_num}" != "000000000000" ]]; then
+      iap_audience="/projects/${proj_num}/locations/${REGION}/services/${unified_svc}"
+    fi
   fi
 
   echo "=============================================================================="
@@ -585,7 +597,7 @@ deploy_unified_workbench_cloud_run() {
   echo "=============================================================================="
 
   # Use ^|^ custom delimiter so commas inside ALLOWED_GEMINI_MODELS are preserved verbatim by gcloud
-  local env_str="^|^DEPLOYMENT_ENV=${DEPLOY_ENV}|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|GOOGLE_CLOUD_PROJECT_NUMBER=${proj_num}|GOOGLE_CLOUD_LOCATION=${REGION}|NONPROD_REGION=${REGION}|GOOGLE_GENAI_USE_VERTEXAI=true|GEMINI_LOCATION=${MODEL_LOCATION}|GEMINI_MODEL=${RESOLVED_GEMINI_MODEL}|EXTRACTER_DEFAULT_MODEL=${ext_model}|QUERY_DEFAULT_MODEL=${qry_model}|ALLOWED_GEMINI_MODELS=${allowed_models}|CLOUD_RUN_INGRESS=${RESOLVED_INGRESS}|CLOUD_RUN_SECURITY_MODE=${RESOLVED_SECURITY_MODE}|CLOUD_RUN_VPC_MODE=${RESOLVED_VPC_MODE}|IAP_JWT_AUDIENCE=${iap_audience}|EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-005}|SPANNER_NATIVE_EMBEDDING_MODE=${embed_mode}|SPANNER_EMBEDDING_LOCATION=${embed_loc}|USE_GCS_STORAGE=true|SOURCE_GCS_RAW_PREFIX=${RAW_PREFIX}|DESTINATION_GCS_BUCKET=${GCS_BUCKET}|DESTINATION_GCS_PREFIX=${GCS_PREFIX}|SPANNER_INSTANCE_ID=${SPANNER_INST}|SPANNER_DATABASE_ID=${SPANNER_DB}|DATAPLEX_ENTRY_GROUP_ID=${DATAPLEX_ENTRY_GROUP_ID:-okf-knowledge-assets}|DATAPLEX_TAG_TEMPLATE_ID=${DATAPLEX_TAG_TEMPLATE_ID:-okf-governance-template}|UNIFIED_WEB_SERVICE_NAME=${unified_svc}|PIPELINE_JOB_NAME=${pipe_job}|CLOUD_RUN_JOBS_EXECUTION_MODE=cloud_run_job|OUTPUT_BUNDLE_DIR=/tmp/okf_bundle|JOB_STATUS_DIR=/tmp/okf_job_status|APP_MODULE=unified_web.server:app"
+  local env_str="^|^DEPLOYMENT_ENV=${DEPLOY_ENV}|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|GOOGLE_CLOUD_PROJECT_NUMBER=${proj_num}|GOOGLE_CLOUD_LOCATION=${REGION}|NONPROD_REGION=${REGION}|GOOGLE_GENAI_USE_VERTEXAI=true|GEMINI_LOCATION=${MODEL_LOCATION}|GEMINI_MODEL=${RESOLVED_GEMINI_MODEL}|EXTRACTER_DEFAULT_MODEL=${ext_model}|QUERY_DEFAULT_MODEL=${qry_model}|ALLOWED_GEMINI_MODELS=${allowed_models}|CLOUD_RUN_INGRESS=${RESOLVED_INGRESS}|CLOUD_RUN_SECURITY_MODE=${RESOLVED_SECURITY_MODE}|CLOUD_RUN_VPC_MODE=${RESOLVED_VPC_MODE}|IAP_JWT_ENFORCEMENT=${iap_enforcement}|IAP_JWT_AUDIENCE=${iap_audience}|EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-005}|SPANNER_NATIVE_EMBEDDING_MODE=${embed_mode}|SPANNER_EMBEDDING_LOCATION=${embed_loc}|USE_GCS_STORAGE=true|SOURCE_GCS_RAW_PREFIX=${RAW_PREFIX}|DESTINATION_GCS_BUCKET=${GCS_BUCKET}|DESTINATION_GCS_PREFIX=${GCS_PREFIX}|SPANNER_INSTANCE_ID=${SPANNER_INST}|SPANNER_DATABASE_ID=${SPANNER_DB}|DATAPLEX_ENTRY_GROUP_ID=${DATAPLEX_ENTRY_GROUP_ID:-okf-knowledge-assets}|DATAPLEX_TAG_TEMPLATE_ID=${DATAPLEX_TAG_TEMPLATE_ID:-okf-governance-template}|UNIFIED_WEB_SERVICE_NAME=${unified_svc}|PIPELINE_JOB_NAME=${pipe_job}|CLOUD_RUN_JOBS_EXECUTION_MODE=cloud_run_job|OUTPUT_BUNDLE_DIR=/tmp/okf_bundle|JOB_STATUS_DIR=/tmp/okf_job_status|APP_MODULE=unified_web.server:app"
 
   local cmd=(
     gcloud run deploy "${unified_svc}"
