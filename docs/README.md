@@ -10,7 +10,8 @@ This directory contains standardized operational architecture documentation, sec
 
 ## Document & Visual Asset Catalog
 
-### 1. Architecture, Data Ingestion & Demo Guide
+### 1. Demo Guide, Architecture & Data Ingestion
+- **[Complete Demo Guide (`demo-guide.md`)](./demo-guide.md):** Audience-friendly `go/demos` walkthrough covering setup, **Extractor Studio** (6 extraction mechanisms, upload, interactive & 24h batch jobs), **Query Agent** (graph, dossier, Dataplex, 5-stage HAZOP), **15+ copy-paste sample queries**, a **10–15 minute presenter Talk Track**, Org Policies, and Costs.
 - **[Unified Architecture, Ingestion & Demo Guide (`engineering-kg-workbench-architecture.md`)](./engineering-kg-workbench-architecture.md):** End-to-end Dual-Runtime topology, Zero-Trust Pattern 1B IAP, 6-folder multi-format & MOC ingestion pipeline, Cloud Spanner Enterprise Graph + native `ML.PREDICT` + ANN Vector Index, and 5-minute executive walkthrough.
 - **Interactive Standalone HTML/SVG Assets:**
   - [`high-level-system-architecture.html`](./high-level-system-architecture.html) — High-level system architecture topology.
